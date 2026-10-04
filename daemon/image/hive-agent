@@ -1,0 +1,70 @@
+#!/bin/bash
+# Runs one job and powers the VM off.
+#
+# The host shares exactly one directory with this VM, holding exactly one
+# thing: the job's one-time runner configuration. This script reads it,
+# deletes it, runs GitHub's runner as an unprivileged user, writes the exit
+# code back, and shuts down. The disk is discarded by the host afterwards.
+set -u
+
+share=/run/hive
+finish() {
+  # Written under another name first, so the host never reads half a file.
+  echo "$1" > "$share/exit.tmp" 2>/dev/null && mv "$share/exit.tmp" "$share/exit"
+  sync
+  umount "$share" 2>/dev/null
+  systemctl poweroff --no-block
+  exit 0
+}
+
+mkdir -p "$share"
+if ! mount -t virtiofs hive "$share"; then
+  echo "hive-agent: no job share; shutting down"
+  systemctl poweroff --no-block
+  exit 1
+fi
+
+# The job's disk is a clone the host has grown; take the room.
+resize2fs /dev/vda >/dev/null 2>&1 || true
+
+# A warm VM waits here, booted, for its job to arrive.
+waited=0
+until [ -e "$share/jitconfig" ] || [ -e "$share/selftest" ]; do
+  sleep 0.2
+  waited=$((waited + 1))
+  # Half an hour without a job: the host has forgotten this VM.
+  [ "$waited" -gt 9000 ] && finish 125
+done
+
+# The guest has no clock of its own worth trusting, and TLS needs one. The
+# host writes the time beside the job; a wrong clock can only break the job.
+if [ -r "$share/clock" ]; then
+  date -u -s "@$(tr -cd '0-9' < "$share/clock")" >/dev/null 2>&1 || true
+fi
+
+if [ -e "$share/selftest" ]; then
+  # No credential involved: proves boot, the share, the network and the
+  # runner binary, and nothing more.
+  {
+    cat /etc/hive-release
+    echo "KERNEL=$(uname -r)"
+    echo "CPUS=$(nproc)"
+    echo "USER=$(sudo -u runner id -un)"
+    echo "RUNNER=$(sudo -u runner /opt/runner/bin/Runner.Listener --version)"
+    curl -fsS -o /dev/null -m 20 https://api.github.com/zen && echo "NETWORK=ok" || echo "NETWORK=failed"
+  } > "$share/selftest.out" 2>&1
+  finish 0
+fi
+
+jit=$(cat "$share/jitconfig")
+rm -f "$share/jitconfig"
+
+cd /opt/runner
+# A clean environment: nothing of the agent's leaks into the job.
+sudo -u runner -H env -i \
+  HOME=/home/runner USER=runner LANG=en_US.UTF-8 \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  /opt/runner/run.sh --jitconfig "$jit"
+code=$?
+unset jit
+finish "$code"

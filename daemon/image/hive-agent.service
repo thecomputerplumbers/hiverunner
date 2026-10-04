@@ -1,0 +1,14 @@
+[Unit]
+Description=HiveWorker job agent
+After=network-online.target systemd-resolved.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hive-agent
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -22,7 +23,9 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/bench"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/host"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/pools"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/vm"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -36,6 +39,7 @@ const usage = `hived, the HiveWorker daemon
   hived run         Connect to the pool and wait for jobs
   hived status      Show what this machine is enrolled as
   hived logout      Forget this machine's token
+  hived selftest    Boot a throwaway VM and report what it finds
   hived benchmark   Measure this machine's speed score
   hived version
 
@@ -60,6 +64,10 @@ func main() {
 		err = status()
 	case "logout":
 		err = config.Remove()
+	case "selftest":
+		err = selftest(ctx)
+	case "dev-job":
+		err = devJob(ctx, os.Args[2:])
 	case "benchmark":
 		err = benchmark(os.Args[2:])
 	case "version", "--version":
@@ -196,14 +204,97 @@ func run(ctx context.Context) error {
 	if seconds, err := strconv.Atoi(os.Getenv("HIVE_REFRESH_SECONDS")); err == nil && seconds > 0 {
 		refresh = time.Duration(seconds) * time.Second
 	}
+	// Without a guest image the machine still connects and reports presence;
+	// it declines jobs and says why.
+	var runner jobs.Runner
+	if vmRunner, err := newRunner(log); err != nil {
+		log.Warn("this machine cannot run jobs yet", "reason", err)
+	} else {
+		runner = vmRunner
+		log.Info("ready to run jobs", "runner", vmRunner.Image.RunnerVersion, "image", vmRunner.Image.ImageVersion)
+	}
 	return pools.Run(ctx, pools.Options{
 		Client:        api.New(machine.Server),
 		Token:         machine.Token,
 		DaemonVersion: version,
 		RefreshEvery:  refresh,
+		Runner:        runner,
 		Log:           log,
 		Available:     func() bool { return host.ReadPower().Available() },
 	})
+}
+
+// newRunner prepares the VM runner from the installed guest image.
+func newRunner(log *slog.Logger) (*vm.Runner, error) {
+	dir, err := vm.DefaultImageDir()
+	if err != nil {
+		return nil, err
+	}
+	image, err := vm.LoadImage(dir)
+	if err != nil {
+		return nil, err
+	}
+	// Beside the image, so a job's disk is a clone and not a copy.
+	return &vm.Runner{Image: image, WorkDir: filepath.Join(filepath.Dir(dir), "jobs"), Log: log}, nil
+}
+
+func selftest(ctx context.Context) error {
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	runner, err := newRunner(log)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	started := time.Now()
+	report, err := runner.SelfTest(ctx, 2)
+	fmt.Print(report)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(report, "NETWORK=ok") {
+		return errors.New("the VM booted but could not reach GitHub")
+	}
+	fmt.Printf("A VM booted, ran and was destroyed in %.1fs.\n", time.Since(started).Seconds())
+	return nil
+}
+
+// devJob runs one job from a JIT config in a file, with no coordinator
+// involved. It is how the VM runner is exercised against GitHub on its own.
+// The file is a credential; it is read and never echoed.
+func devJob(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("dev-job", flag.ExitOnError)
+	file := flags.String("jitconfig-file", "", "path to a file holding an encoded JIT runner config")
+	vcpus := flags.Int("vcpus", 2, "vCPUs for the VM")
+	minutes := flags.Int("timeout-minutes", 30, "destroy the VM after this long")
+	_ = flags.Parse(args)
+	if *file == "" {
+		return errors.New("--jitconfig-file is required")
+	}
+	raw, err := os.ReadFile(*file)
+	if err != nil {
+		return err
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	runner, err := newRunner(log)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(*minutes)*time.Minute)
+	defer cancel()
+	code, err := runner.Run(ctx, jobs.Job{
+		AssignmentID: "dev",
+		JITConfig:    strings.TrimSpace(string(raw)),
+		RunnerName:   "dev",
+		VCPUs:        *vcpus,
+	})
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("the runner exited %d", code)
+	}
+	return nil
 }
 
 func status() error {
