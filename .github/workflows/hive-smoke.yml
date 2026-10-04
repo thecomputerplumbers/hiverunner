@@ -1,4 +1,5 @@
 name: Hive integrated smoke
+# Exercise direct assignment and aggregate demand recovery.
 on:
   push:
     branches: [feat-scale-set-listener]

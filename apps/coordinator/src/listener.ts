@@ -25,7 +25,7 @@ type Slot = {
   assignmentId: string
   machineId: string
   speedScore: number
-  requestId: number
+  requestId: number | string
   phase: "offered" | "acquiring" | "acquired" | "starting" | "running"
   createdAt: number
   runnerName: string
@@ -224,6 +224,8 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           if (runnerId) await client.removeRunner(runnerId)
         }
         delete state.slots[slot.assignmentId]
+        if (String(slot.requestId).startsWith("demand:"))
+          delete state.claims[String(slot.requestId)]
         await this.save(state)
         continue
       }
@@ -247,9 +249,9 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           const acquired = await client.acquire(
             state.scaleSetId,
             state.session,
-            [slot.requestId]
+            [Number(slot.requestId)]
           )
-          if (!acquired.includes(slot.requestId) && !retry) {
+          if (!acquired.includes(Number(slot.requestId)) && !retry) {
             await pool.release(slot.assignmentId)
             delete state.slots[slot.assignmentId]
             delete state.available[String(slot.requestId)]
@@ -293,8 +295,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
     if (mayAcquire || Object.keys(state.claims).length) {
       this.stage = "offer"
       for (const available of Object.values(state.available)) {
-        if (!mayAcquire && !state.claims[String(available.runnerRequestId)])
-          continue
+        if (!mayAcquire && !state.claims[String(jobKey(available))]) continue
         // GitHub supplies aggregate demand even when a message only carries
         // fifty jobs. Message count is never the desired runner count.
         const desired = state.statistics
@@ -302,13 +303,13 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
             (state.statistics.totalAvailableJobs ?? 0)
           : Object.keys(state.available).length
         if (
-          !state.claims[String(available.runnerRequestId)] &&
+          !state.claims[String(jobKey(available))] &&
           Object.keys(state.slots).length >= desired
         )
           break
         if (
           Object.values(state.slots).some(
-            (slot) => slot.requestId === available.runnerRequestId
+            (slot) => String(slot.requestId) === String(jobKey(available))
           )
         )
           continue
@@ -323,13 +324,38 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
         state.slots[assignmentId] = {
           assignmentId,
           ...chosen,
-          requestId: available.runnerRequestId,
+          requestId: jobKey(available)!,
           phase: "offered",
           createdAt: Date.now(),
           runnerName: `hw-${assignmentId}`,
         }
         await this.save(state)
       }
+    }
+    // Initial session statistics and direct JobAssigned messages can arrive
+    // without JobAvailable. Scale from aggregate already-assigned demand;
+    // these requests need a runner, not a second acquisition.
+    const desired = Math.min(capacity, state.statistics?.totalAssignedJobs ?? 0)
+    while (mayAcquire && Object.keys(state.slots).length < desired) {
+      const assignmentId = crypto.randomUUID()
+      const chosen = await pool.offer({
+        assignmentId,
+        label: settings.label,
+        vcpus: settings.vcpus,
+        timeoutMinutes: 360,
+      })
+      if (!chosen) break
+      const requestId = `demand:${assignmentId}`
+      state.claims[requestId] = "owned"
+      state.slots[assignmentId] = {
+        assignmentId,
+        ...chosen,
+        requestId,
+        phase: "offered",
+        createdAt: Date.now(),
+        runnerName: `hw-${assignmentId}`,
+      }
+      await this.save(state)
     }
     if (Object.values(state.slots).some((slot) => slot.phase !== "running")) {
       await this.ctx.storage.setAlarm(Date.now() + 1000)
@@ -347,16 +373,35 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       )
       if (message) {
         state.statistics = message.statistics
+        console.info("Scale demand", {
+          label: settings.label,
+          capacity,
+          assigned: message.statistics.totalAssignedJobs,
+          available: message.statistics.totalAvailableJobs ?? 0,
+          messages: message.jobs.length,
+        })
         for (const event of message.jobs) {
-          if (event.messageType === "JobAvailable") {
-            state.available[String(event.runnerRequestId)] = event
+          const key = jobKey(event)
+          if (key === null) continue
+          if (
+            event.messageType === "JobAvailable" ||
+            event.messageType === "JobAssigned"
+          ) {
+            if (
+              event.messageType === "JobAvailable" &&
+              event.runnerRequestId === 0
+            )
+              continue
+            if (event.messageType === "JobAssigned")
+              state.claims[String(key)] = "owned"
+            state.available[String(key)] = event
           } else if (
             event.messageType === "JobStarted" ||
             event.messageType === "JobCompleted"
           ) {
             if (event.messageType === "JobCompleted") {
-              delete state.available[String(event.runnerRequestId)]
-              delete state.claims[String(event.runnerRequestId)]
+              delete state.available[String(key)]
+              delete state.claims[String(key)]
             }
             const slot = Object.values(state.slots).find(
               (slot) => slot.runnerName === event.runnerName
@@ -374,11 +419,11 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
             ) {
               // Preserve attribution for repair without wedging the queue or
               // substituting the payee's own timestamps for GitHub's.
-              await this.ctx.storage.put(`unsettled:${event.runnerRequestId}`, {
+              await this.ctx.storage.put(`unsettled:${key}`, {
                 assignmentId: slot.assignmentId,
                 machineId: slot.machineId,
                 runnerName: slot.runnerName,
-                requestId: event.runnerRequestId,
+                requestId: key,
                 reason: "invalid-github-lifecycle",
                 receivedAt: Date.now(),
               })
@@ -390,10 +435,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
               continue
             }
             slot.githubStarted = true
-            delete state.available[String(event.runnerRequestId)]
+            delete state.available[String(key)]
             const id = await startJob(db, {
               organizationId: settings.organizationId,
-              runnerRequestId: event.runnerRequestId,
+              runnerRequestId: key,
               machineId: slot.machineId,
               speedScore: slot.speedScore,
               label: settings.label,
@@ -404,10 +449,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
               startedAt,
             })
             if (!id) {
-              await this.ctx.storage.put(`unsettled:${event.runnerRequestId}`, {
+              await this.ctx.storage.put(`unsettled:${key}`, {
                 assignmentId: slot.assignmentId,
                 machineId: slot.machineId,
-                requestId: event.runnerRequestId,
+                requestId: key,
                 reason: "missing-machine",
                 receivedAt: Date.now(),
               })
@@ -423,13 +468,14 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
                 this.env.RECEIPT_SIGNING_KEY
               )
               await settleJob(db, signer, {
-                jobId: jobIdFor(settings.organizationId, event.runnerRequestId),
+                jobId: jobIdFor(settings.organizationId, key),
                 completedAt: completedAt!,
                 result: event.result!,
               })
               await pool.release(slot.assignmentId)
               delete state.slots[slot.assignmentId]
-              delete state.available[String(event.runnerRequestId)]
+              delete state.claims[String(slot.requestId)]
+              delete state.available[String(key)]
             }
           }
           await this.save(state)
@@ -473,4 +519,12 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
 function githubDate(raw: string | undefined) {
   const date = new Date(raw ?? "")
   return Number.isFinite(date.getTime()) ? date : null
+}
+
+function jobKey(event: ScaleJob): number | string | null {
+  if (event.runnerRequestId > 0) return event.runnerRequestId
+  if (event.jobId && /^[a-zA-Z0-9-]{1,128}$/.test(event.jobId))
+    return event.jobId
+  // A request id of zero alone must never collapse unrelated receipts.
+  return null
 }

@@ -18,6 +18,8 @@ export type ScaleStatistics = {
 export type ScaleJob = {
   messageType: "JobAvailable" | "JobAssigned" | "JobStarted" | "JobCompleted"
   runnerRequestId: number
+  /** Direct-assignment messages can use request id 0; jobId stays unique. */
+  jobId?: string
   repositoryName: string
   ownerName: string
   jobDisplayName?: string
@@ -334,7 +336,7 @@ export function createScaleSetClient(config: Config) {
     },
     async runnerByName(name: string): Promise<{ id: number } | null> {
       const result = await service<{ value: Array<{ id: number }> }>(
-        `_apis/runtime/runners?${new URLSearchParams({ agentName: name })}`
+        `_apis/distributedtask/pools/0/agents?${new URLSearchParams({ agentName: name })}`
       )
       if ((result?.value.length ?? 0) > 1)
         throw new Error("Ambiguous runner name")
@@ -342,7 +344,7 @@ export function createScaleSetClient(config: Config) {
     },
     async removeRunner(id: number) {
       try {
-        await service(`_apis/runtime/runners/${id}`, "DELETE")
+        await service(`_apis/distributedtask/pools/0/agents/${id}`, "DELETE")
       } catch (error) {
         if (!(error instanceof ScaleSetError) || error.status !== 404)
           throw error

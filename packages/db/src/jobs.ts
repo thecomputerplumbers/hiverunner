@@ -17,8 +17,10 @@ import {
   poolSettings,
 } from "@workspace/db/schema"
 
-export const jobIdFor = (organizationId: string, runnerRequestId: number) =>
-  `${organizationId}:${runnerRequestId}`
+export const jobIdFor = (
+  organizationId: string,
+  runnerRequestId: number | string
+) => `${organizationId}:${runnerRequestId}`
 
 /**
  * Whether the pool may take another job. An organization that has spent its
@@ -36,7 +38,7 @@ export async function canAcquireJobs(db: AuthDb, organizationId: string) {
 
 export type JobStart = {
   organizationId: string
-  runnerRequestId: number
+  runnerRequestId: number | string
   machineId: string
   label: string
   vcpus: number

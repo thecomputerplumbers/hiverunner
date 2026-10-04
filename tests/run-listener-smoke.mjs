@@ -21,19 +21,24 @@ const storage = mkdtempSync("/tmp/hiveworker-listener.")
 const log = openSync(`${storage}/worker.log`, "w")
 const signer = generateKeyPairSync("ed25519")
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 })
+const scenario = process.env.HIVE_LISTENER_CASE ?? "offer"
+const direct = scenario !== "offer"
+const jobIdentity = direct ? "9b60c775-161b-430b-a441-c34e54ae3f55" : 100
 const queue = [
   {
     messageId: 1,
     jobs: [
       {
-        messageType: "JobAvailable",
-        runnerRequestId: 100,
+        messageType: direct ? "JobAssigned" : "JobAvailable",
+        runnerRequestId: direct ? 0 : 100,
+        jobId: direct ? jobIdentity : undefined,
         ownerName: "acme",
         repositoryName: "app",
       },
     ],
   },
 ]
+if (scenario === "initial") queue.length = 0
 let acquisitionCount = 0,
   jitCount = 0,
   ackCount = 0
@@ -67,7 +72,7 @@ const fake = createServer(async (req, res) => {
       sessionId: "session",
       messageQueueUrl: `${api}/queue`,
       messageQueueAccessToken: "session",
-      statistics: { totalAssignedJobs: 0, totalRunningJobs: 0 },
+      statistics: { totalAssignedJobs: direct ? 1 : 0, totalRunningJobs: 0 },
     })
   if (url.pathname.endsWith("sessions/session")) {
     res.statusCode = 204
@@ -90,8 +95,8 @@ const fake = createServer(async (req, res) => {
       encodedJITConfig: "one-time-jit",
     })
   }
-  if (url.pathname.endsWith("/runners")) return json({ value: [] })
-  if (url.pathname.endsWith("/runners/77")) {
+  if (url.pathname.endsWith("/agents")) return json({ value: [] })
+  if (url.pathname.endsWith("/agents/77")) {
     res.statusCode = 204
     return res.end()
   }
@@ -100,7 +105,14 @@ const fake = createServer(async (req, res) => {
     if (next)
       return json({
         messageId: next.messageId,
-        statistics: { totalAssignedJobs: 1, totalRunningJobs: 0 },
+        statistics: {
+          totalAssignedJobs: next.jobs.every(
+            (job) => job.messageType === "JobCompleted"
+          )
+            ? 0
+            : 1,
+          totalRunningJobs: 0,
+        },
         body: JSON.stringify(next.jobs),
       })
     res.statusCode = 202
@@ -297,13 +309,13 @@ try {
   assert.notEqual(offer.assignmentId, rejected.assignmentId)
   assert.equal(acquisitionCount, 0, "Rejection must not acquire a job")
   // An API retry occurs while the daemon holds its slot.
-  acquireFailure = true
+  acquireFailure = !direct
   send({ type: "job.accepted", assignmentId: offer.assignmentId })
   const start = await next("job.start")
   assert.equal(start.assignmentId, offer.assignmentId)
   assert.equal(start.jitConfig, "one-time-jit")
   assert.equal(jitCount, 1)
-  assert.equal(acquisitionCount, 2)
+  assert.equal(acquisitionCount, direct ? 0 : 2)
   assert.equal(runnerName, start.runnerName)
   // Reconnect carries the held assignment instead of advertising a free slot.
   socket = await connect(offer.assignmentId)
@@ -311,7 +323,8 @@ try {
   await delay(200)
   assert.equal(sql("SELECT presence FROM machine_pool")[0].presence, "busy")
   const event = {
-    runnerRequestId: 100,
+    runnerRequestId: direct ? 0 : 100,
+    jobId: direct ? jobIdentity : undefined,
     ownerName: "acme",
     repositoryName: "app",
     runnerName,
@@ -344,6 +357,7 @@ try {
     "GitHub completion settled"
   )
   const row = sql("SELECT * FROM job")[0]
+  assert.equal(row.id, `gh-501:${jobIdentity}`)
   assert.equal(row.amount, 1500)
   assert.equal(row.speed_score, 1.5)
   const publicKey = await (await fetch(`${origin}/v1/receipt-key`)).json()
@@ -363,7 +377,10 @@ try {
     0
   )
   queue.push({ messageId: 4, jobs: [completed] })
-  await eventually(() => ackCount >= 4, "Duplicate completion acknowledged")
+  await eventually(
+    () => ackCount >= (scenario === "initial" ? 3 : 4),
+    "Duplicate completion acknowledged"
+  )
   assert.equal(
     sql("SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL")[0].n,
     3
@@ -373,7 +390,7 @@ try {
     6
   )
   console.log(
-    "Offer/rejection, API retry, JIT, reconnect, verified job times and signed idempotent settlement passed."
+    `Listener ${scenario}: rejection, JIT, reconnect, stable identity and signed idempotent settlement passed.`
   )
   passed = true
 } finally {
@@ -392,5 +409,15 @@ try {
     console.error("Fake API paths", apiPaths)
     console.error(readFileSync(`${storage}/worker.log`, "utf8").slice(-6000))
     console.error(`Diagnostics retained: ${storage}`)
+  }
+}
+
+if (!process.env.HIVE_LISTENER_CASE) {
+  for (const scenario of ["direct", "initial"]) {
+    const child = spawnSync(process.execPath, [import.meta.filename], {
+      env: { ...process.env, HIVE_LISTENER_CASE: scenario },
+      stdio: "inherit",
+    })
+    assert.equal(child.status, 0, `Listener ${scenario} scenario failed`)
   }
 }
