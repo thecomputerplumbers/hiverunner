@@ -78,6 +78,10 @@ and three idempotent ledger entries. Empty balances stop new acquisition;
 running jobs finish. Malformed lifecycle facts are held for repair in listener
 storage and do not block later queue messages.
 
+`GET /v1/receipt-key` on the coordinator publishes the current Ed25519 public
+key and key id. Verify the stored receipt's exact bytes against that key;
+older receipts require the archived public key matching their key id.
+
 ## Checks
 
 `mise run check` covers contracts, scheduling, pricing, receipts, types and

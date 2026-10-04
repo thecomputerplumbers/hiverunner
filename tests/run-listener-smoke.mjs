@@ -346,9 +346,11 @@ try {
   const row = sql("SELECT * FROM job")[0]
   assert.equal(row.amount, 1500)
   assert.equal(row.speed_score, 1.5)
+  const publicKey = await (await fetch(`${origin}/v1/receipt-key`)).json()
+  assert.equal(publicKey.keyId, row.receipt_key_id)
   assert.equal(
     await verifyReceipt(
-      signer.publicKey.export({ format: "jwk" }).x,
+      publicKey.publicKey,
       row.receipt,
       row.receipt_signature
     ),

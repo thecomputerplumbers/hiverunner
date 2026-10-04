@@ -1,5 +1,7 @@
 import { drizzle } from "drizzle-orm/d1"
 import { authenticateMachineForPool } from "@workspace/db/machines"
+import { createReceiptSigner } from "@workspace/db/receipts"
+import { PROTOCOL_VERSION } from "@workspace/protocol"
 
 export { Pool } from "./pool"
 export { ScaleListener } from "./listener"
@@ -16,7 +18,34 @@ export { ScaleListener } from "./listener"
 export default {
   async fetch(request: Request, env: CoordinatorEnv) {
     const url = new URL(request.url)
-    if (url.pathname === "/health") return Response.json({ ok: true })
+    if (url.pathname === "/health")
+      return Response.json({
+        ok: true,
+        protocol: PROTOCOL_VERSION,
+        executionConfigured: Boolean(
+          env.GITHUB_APP_ID &&
+          env.GITHUB_APP_PRIVATE_KEY &&
+          env.RECEIPT_SIGNING_KEY
+        ),
+      })
+    if (url.pathname === "/v1/receipt-key" && request.method === "GET") {
+      if (!env.RECEIPT_SIGNING_KEY)
+        return new Response("Receipts are not configured", { status: 503 })
+      const signer = await createReceiptSigner(env.RECEIPT_SIGNING_KEY)
+      return Response.json(
+        {
+          algorithm: "Ed25519",
+          keyId: signer.keyId,
+          publicKey: signer.publicKey,
+        },
+        {
+          headers: {
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      )
+    }
     if (url.pathname !== "/v1/tunnel")
       return new Response("Not found", { status: 404 })
     if (request.headers.get("upgrade") !== "websocket")
