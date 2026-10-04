@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { root, targetConfig, wranglerArgs } from "./project-lib.mjs"
+import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts"
 const environment = process.argv[2]
 if (!["staging", "production"].includes(environment))
   throw new Error("Usage: pnpm release production")
@@ -93,8 +94,15 @@ for (let attempt = 0; attempt < 36 && !verified; attempt++) {
       new URL("/health", config.vars.COORDINATOR_URL.replace(/^ws/, "http")),
       { signal: AbortSignal.timeout(10000), cache: "no-store" }
     )
+    const coordinatorHealth = await coordinator.json()
     verified =
-      response.ok && health.ok && health.buildId === buildId && coordinator.ok
+      response.ok &&
+      health.ok &&
+      health.buildId === buildId &&
+      coordinator.ok &&
+      coordinatorHealth.ok &&
+      coordinatorHealth.protocol === PROTOCOL_VERSION &&
+      coordinatorHealth.executionConfigured === true
   } catch {
     /* Wait for propagation. */
   }

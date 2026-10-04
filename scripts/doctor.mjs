@@ -141,5 +141,34 @@ if (environment === "local") {
   ])
     if (!secrets.some((secret) => secret.name === name))
       console.log(`NOT SET ${name} (GitHub sign-in and install stay closed)`)
+  const coordinator = spawnSync(
+    "pnpm",
+    [
+      "--filter",
+      "coordinator",
+      "exec",
+      "wrangler",
+      "secret",
+      "list",
+      ...wranglerArgs(environment),
+    ],
+    { cwd: root, encoding: "utf8", env: { ...process.env, CLOUDFLARE_ENV: "" } }
+  )
+  let coordinatorSecrets = []
+  try {
+    coordinatorSecrets = JSON.parse(coordinator.stdout)
+  } catch {
+    /* Inventory unavailable. */
+  }
+  check(coordinator.status === 0, "Coordinator secret inventory")
+  for (const name of [
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+    "RECEIPT_SIGNING_KEY",
+  ])
+    check(
+      coordinatorSecrets.some((secret) => secret.name === name),
+      `Coordinator ${name}`
+    )
 }
 process.exitCode = failures ? 1 : 0
