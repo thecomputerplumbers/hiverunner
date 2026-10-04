@@ -331,7 +331,17 @@ try {
     runnerAssignTime: "2026-10-03T12:00:00Z",
     jobDisplayName: "test",
   }
-  queue.push({ messageId: 2, jobs: [{ ...event, messageType: "JobStarted" }] })
+  queue.push({
+    messageId: 2,
+    jobs: [
+      {
+        ...event,
+        messageType: "JobStarted",
+        runnerAssignTime: "0001-01-01T00:00:00Z",
+      },
+      { ...event, messageType: "JobStarted" },
+    ],
+  })
   await eventually(
     () => sql("SELECT count(*) n FROM job")[0].n === 1,
     "GitHub start recorded"

@@ -357,10 +357,12 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       }
       await this.save(state)
     }
-    if (Object.values(state.slots).some((slot) => slot.phase !== "running")) {
-      await this.ctx.storage.setAlarm(Date.now() + 1000)
-      return
-    }
+    const handshaking = Object.values(state.slots).some(
+      (slot) => slot.phase !== "running"
+    )
+    // Poll briefly during an offer, so repeated refusals cannot hide job
+    // cancellations or fresh demand behind an endlessly renewed offer.
+    const pollSignal = AbortSignal.timeout(handshaking ? 1000 : 55000)
     // Capacity includes runners already assigned to this set. Exhausted
     // balances prevent new assignments without cancelling active jobs.
     try {
@@ -369,7 +371,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
         state.session,
         state.cursor,
         mayAcquire ? capacity : Object.keys(state.slots).length,
-        AbortSignal.timeout(55000)
+        pollSignal
       )
       if (message) {
         state.statistics = message.statistics
@@ -472,6 +474,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
                 completedAt: completedAt!,
                 result: event.result!,
               })
+              await this.ctx.storage.delete(`unsettled:${key}`)
               await pool.release(slot.assignmentId)
               delete state.slots[slot.assignmentId]
               delete state.claims[String(slot.requestId)]
@@ -480,11 +483,29 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           }
           await this.save(state)
         }
+        if (
+          message.statistics.totalAssignedJobs === 0 &&
+          (message.statistics.totalAvailableJobs ?? 0) === 0
+        ) {
+          for (const slot of Object.values(state.slots)) {
+            if (slot.phase === "running" || slot.githubStarted) continue
+            await pool.release(slot.assignmentId)
+            if (slot.runnerId) await client.removeRunner(slot.runnerId)
+            slot.jitConfig = undefined
+            delete state.slots[slot.assignmentId]
+            delete state.claims[String(slot.requestId)]
+          }
+          await this.save(state)
+        }
         await client.acknowledge(state.session, message.messageId)
         state.cursor = message.messageId
         await this.save(state)
       }
     } catch (error) {
+      if (pollSignal.aborted) {
+        await this.ctx.storage.setAlarm(Date.now() + 1000)
+        return
+      }
       if (error instanceof ScaleSetError && error.status === 401) {
         state.session = await client.refreshSession(
           state.scaleSetId,
@@ -518,7 +539,8 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
 
 function githubDate(raw: string | undefined) {
   const date = new Date(raw ?? "")
-  return Number.isFinite(date.getTime()) ? date : null
+  // The API's year-0001 zero timestamp is not a verified Actions job time.
+  return Number.isFinite(date.getTime()) && date.getTime() > 0 ? date : null
 }
 
 function jobKey(event: ScaleJob): number | string | null {
