@@ -47,3 +47,6 @@ next-env.d.ts
 # Wrangler local secrets
 .dev.vars*
 !.dev.vars.example
+
+# Coordinator and other Workers' local runtime state
+.wrangler/
