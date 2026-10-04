@@ -35,8 +35,7 @@ func ReadFacts() (Facts, error) {
 	}, nil
 }
 
-// ReadPower asks macOS about power and the lid. If either tool fails, the
-// answer errs toward not running jobs.
+// ReadPower asks macOS about power and the lid. An unreadable lid pauses jobs.
 func ReadPower() Power {
 	battery, err := exec.Command("/usr/bin/pmset", "-g", "batt").Output()
 	onBattery := err != nil || !strings.Contains(string(battery), "AC Power")

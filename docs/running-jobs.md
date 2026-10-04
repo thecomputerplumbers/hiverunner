@@ -7,8 +7,9 @@ with the guest; the Mac's files and server credentials stay on the host.
 
 While available, the daemon keeps one clean 2-vCPU VM booted. A `hive` job
 uses it once, then it is destroyed and replaced. Larger jobs boot their own
-VM. Set `HIVE_WARM=0` to disable the idle VM; battery or lid closure also drops
-it. Warmth removes guest boot time, not GitHub's runner startup time.
+VM. Set `HIVE_WARM=0` to disable the idle VM; lid closure also drops it.
+Jobs and the idle VM remain available on battery. Warmth removes guest boot
+time, not GitHub's runner startup time.
 
 ## Server setup
 
@@ -46,8 +47,8 @@ Build the image once with Docker, then build the daemon with Go:
 
 `login` opens the browser to approve machine enrollment. The GitHub App must
 be installed on the organization and its repository must be accessible to the
-runner group. The daemon pauses availability on battery or when the lid is
-closed. One machine runs one job across all its pools and leaves two cores
+runner group. The daemon pauses availability when the lid is closed and
+keeps running on battery. One machine runs one job across all its pools and leaves two cores
 for its owner.
 
 Use these labels in a repository's workflow:

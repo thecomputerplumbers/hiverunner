@@ -15,6 +15,6 @@
   { "type": "presence", "presence": "paused" },
   { "type": "presence", "presence": "draining" },
   { "type": "job.accepted", "assignmentId": "a-1" },
-  { "type": "job.rejected", "assignmentId": "a-1", "reason": "on battery" },
+  { "type": "job.rejected", "assignmentId": "a-1", "reason": "lid closed" },
   { "type": "job.exited", "assignmentId": "a-1", "exitCode": 0 }
 ]

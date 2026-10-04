@@ -188,7 +188,7 @@ func TestAWarmVMTakesTheJob(t *testing.T) {
 	close(done)
 }
 
-// On battery or with the lid closed, no VM is kept waiting.
+// When unavailable, such as with the lid closed, no VM is kept waiting.
 func TestNoWarmVMWhenUnavailable(t *testing.T) {
 	r := realRunner(t)
 	r.WarmVCPUs = 2

@@ -306,7 +306,7 @@ try {
   // With a guest image installed the daemon keeps a VM warm. Stopping it
   // must take that VM, and its files, with it before the process exits.
   const jobs = process.env.HIVE_IMAGE ? `${process.env.HIVE_IMAGE}-jobs` : null
-  // On battery or with the lid closed the daemon reports paused and, rightly,
+  // With the lid closed the daemon reports paused and, rightly,
   // keeps no VM waiting; there is nothing to check then.
   const image = jobs && existsSync(`${process.env.HIVE_IMAGE}/manifest.json`)
   const warm = image && state === "online"

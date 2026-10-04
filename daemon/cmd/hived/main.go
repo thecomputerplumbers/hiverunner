@@ -377,8 +377,6 @@ func status() error {
 		fmt.Printf("Pools:    %s\n", strings.Join(names, ", "))
 	}
 	switch {
-	case power.OnBattery:
-		fmt.Println("Jobs:     paused (on battery)")
 	case power.LidClosed:
 		fmt.Println("Jobs:     paused (lid closed)")
 	default:

@@ -336,8 +336,7 @@ func (r *Runner) takeWarmLocked(vcpus int) *instance {
 }
 
 // Tend keeps one VM booted and waiting while the machine is available and
-// idle, and none when it is not: on battery or with the lid closed, a VM
-// waiting for a job is the owner's battery spent on nothing.
+// idle, and none when it is not, such as when the lid is closed.
 //
 // It returns when ctx is cancelled, and not before every warm VM it started
 // has been destroyed and its files removed. The daemon waits for it on the

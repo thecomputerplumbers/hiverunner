@@ -49,7 +49,7 @@ func TestDaemonMessagesMatchFixtures(t *testing.T) {
 		NewPresence(Paused),
 		NewPresence(Draining),
 		NewJobAccepted("a-1"),
-		NewJobRejected("a-1", "on battery"),
+		NewJobRejected("a-1", "lid closed"),
 		NewJobExited("a-1", 0),
 	}
 	want := fixtures(t, "daemon.json")

@@ -74,8 +74,8 @@ export function Daemon() {
           and lets the job finish.
         </li>
         <li>
-          On battery power or when the lid closes, the job is stopped. It shows
-          as failed in GitHub and can be re-run there.
+          Jobs and the idle VM stay available on battery. Closing the lid pauses
+          new jobs and discards the idle VM.
         </li>
         <li>Pausing from the menu bar stops new jobs from arriving.</li>
       </ul>

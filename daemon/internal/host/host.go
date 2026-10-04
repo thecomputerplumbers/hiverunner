@@ -20,9 +20,8 @@ type Power struct {
 	LidClosed bool
 }
 
-// Available reports whether the machine may accept a job. A job never starts
-// on battery or with the lid closed: the first drains the owner's battery and
-// the second is about to sleep under it.
+// Available reports whether the machine may accept a job. Battery power is
+// allowed; a closed lid pauses availability because the machine may sleep.
 func (p Power) Available() bool {
-	return !p.OnBattery && !p.LidClosed
+	return !p.LidClosed
 }

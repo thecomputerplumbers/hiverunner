@@ -59,7 +59,7 @@ Not in v1: replacing GitHub's orchestration, secret-bearing jobs on strangers' m
 | Warm VM          | Keeps one VM booted and ready so jobs start in seconds                                    |
 | Keys             | The daemon should not hold a private key. It verifies vouchers and names a pay-to address |
 | Privileges       | Runs as a per-user agent, not root                                                        |
-| Owner returns    | Throttle the VM and finish the job. Kill only on battery or lid close                     |
+| Owner returns    | Continue on battery. Pause new jobs and discard the idle VM when the lid closes           |
 | Wallet ownership | Configurable per org. Earnings go to an org wallet or to the developer as a perk          |
 
 ### Payments

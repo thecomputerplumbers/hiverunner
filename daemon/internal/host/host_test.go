@@ -2,13 +2,13 @@ package host
 
 import "testing"
 
-func TestJobsNeedExternalPowerAndAnOpenLid(t *testing.T) {
+func TestJobsAllowBatteryAndNeedAnOpenLid(t *testing.T) {
 	cases := []struct {
 		power Power
 		want  bool
 	}{
 		{Power{}, true},
-		{Power{OnBattery: true}, false},
+		{Power{OnBattery: true}, true},
 		{Power{LidClosed: true}, false},
 		{Power{OnBattery: true, LidClosed: true}, false},
 	}
