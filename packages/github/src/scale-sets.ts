@@ -281,11 +281,13 @@ export function createScaleSetClient(config: Config) {
         raw.statistics.totalRunningJobs < 0
       )
         throw new Error("Invalid Actions message")
+      const knownJobs: ScaleJob[] = []
       for (const job of jobs) {
+        if (!job || typeof job.messageType !== "string")
+          throw new Error("Invalid Actions job message")
+        // Future event kinds must be acknowledged with the rest of the batch,
+        // rather than preventing known lifecycle messages from ever arriving.
         if (
-          !job ||
-          !Number.isSafeInteger(job.runnerRequestId) ||
-          job.runnerRequestId < 0 ||
           ![
             "JobAvailable",
             "JobAssigned",
@@ -293,9 +295,19 @@ export function createScaleSetClient(config: Config) {
             "JobCompleted",
           ].includes(job.messageType)
         )
+          continue
+        if (
+          !Number.isSafeInteger(job.runnerRequestId) ||
+          job.runnerRequestId < 0
+        )
           throw new Error("Invalid Actions job message")
+        knownJobs.push(job)
       }
-      return { messageId: raw.messageId, statistics: raw.statistics, jobs }
+      return {
+        messageId: raw.messageId,
+        statistics: raw.statistics,
+        jobs: knownJobs,
+      }
     },
     async acknowledge(session: ScaleSession, messageId: number) {
       const url = serviceURL(session.messageQueueUrl)
@@ -341,6 +353,35 @@ export function createScaleSetClient(config: Config) {
       if ((result?.value.length ?? 0) > 1)
         throw new Error("Ambiguous runner name")
       return result?.value[0] ?? null
+    },
+    async runnerStatus(
+      id: number
+    ): Promise<{ busy: boolean; status: string } | null> {
+      try {
+        const runner = await request<{ busy: boolean; status: string }>(
+          new URL(
+            `/orgs/${encodeURIComponent(config.organization)}/actions/runners/${id}`,
+            api
+          ),
+          `Bearer ${await config.installationToken()}`,
+          "GET",
+          undefined,
+          {
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          }
+        )
+        if (
+          !runner ||
+          typeof runner.busy !== "boolean" ||
+          !["online", "offline"].includes(runner.status)
+        )
+          throw new Error("Invalid GitHub runner status")
+        return { busy: runner.busy, status: runner.status }
+      } catch (error) {
+        if (error instanceof ScaleSetError && error.status === 404) return null
+        throw error
+      }
     },
     async removeRunner(id: number) {
       try {

@@ -43,7 +43,13 @@ let acquisitionCount = 0,
   jitCount = 0,
   ackCount = 0
 let runnerName,
-  acquireFailure = false
+  acquireFailure = false,
+  pollFailure = false,
+  failedPolls = 0,
+  successfulPolls = 0,
+  runnerPresent = false,
+  runnerBusy = false,
+  runnerStatusQueries = 0
 const apiPaths = []
 const fake = createServer(async (req, res) => {
   let body = ""
@@ -61,6 +67,14 @@ const fake = createServer(async (req, res) => {
     })
   if (url.pathname.endsWith("registration-token"))
     return json({ token: "registration" })
+  if (url.pathname === "/orgs/acme/actions/runners/77") {
+    runnerStatusQueries++
+    if (!runnerPresent) {
+      res.statusCode = 404
+      return res.end()
+    }
+    return json({ busy: runnerBusy, status: runnerBusy ? "online" : "offline" })
+  }
   if (url.pathname === "/actions/runner-registration")
     return json({ url: `${api}/tenant`, token: "admin" })
   if (url.pathname.endsWith("runnergroups/"))
@@ -90,17 +104,31 @@ const fake = createServer(async (req, res) => {
   if (url.pathname.endsWith("generatejitconfig")) {
     jitCount++
     runnerName = JSON.parse(body).name
+    runnerPresent = true
     return json({
       runner: { id: 77, name: runnerName },
       encodedJITConfig: "one-time-jit",
     })
   }
-  if (url.pathname.endsWith("/agents")) return json({ value: [] })
+  if (url.pathname.endsWith("/agents"))
+    return json({
+      value:
+        runnerPresent && url.searchParams.get("agentName") === runnerName
+          ? [{ id: 77 }]
+          : [],
+    })
   if (url.pathname.endsWith("/agents/77")) {
+    runnerPresent = false
     res.statusCode = 204
     return res.end()
   }
   if (url.pathname === "/queue") {
+    if (pollFailure) {
+      failedPolls++
+      res.statusCode = 503
+      return res.end()
+    }
+    successfulPolls++
     const next = queue[0]
     if (next)
       return json({
@@ -151,7 +179,15 @@ function wrangler(args, options = {}) {
     throw new Error(`Wrangler failed (${args[0]}): see ${storage}/worker.log`)
   return result
 }
-function sql(command) {
+async function sql(command) {
+  if (worker) {
+    const response = await fetch(`${origin}/__test/sql`, {
+      method: "POST",
+      body: JSON.stringify({ sql: command }),
+    })
+    assert.equal(response.status, 200)
+    return response.json()
+  }
   return JSON.parse(
     wrangler(
       [
@@ -189,7 +225,7 @@ try {
     "--persist-to",
     storage,
   ])
-  sql(`INSERT INTO organization (id,name,slug,created_at) VALUES ('gh-501','acme','gh-501',0);
+  await sql(`INSERT INTO organization (id,name,slug,created_at) VALUES ('gh-501','acme','gh-501',0);
     INSERT INTO github_installation (account_id,installation_id,organization_id,account_login,account_type,repository_selection,created_at,updated_at) VALUES (501,9001,'gh-501','acme','Organization','all',0,0);
     INSERT INTO user (id,name,email,email_verified,created_at,updated_at) VALUES ('ada','Ada','ada@example.test',1,0,0);
     INSERT INTO machine (id,user_id,name,model,os,arch,cores,memory_bytes,speed_score,daemon_version,token_hash,created_at) VALUES ('mac','ada','Mac','Mac15,9','darwin','arm64',4,1,1.5,'0.1.0','${createHash("sha256").update("hwm_test").digest("hex")}',0);
@@ -200,7 +236,7 @@ try {
     config,
     JSON.stringify({
       name: "hiveworker-coordinator",
-      main: resolve("apps/coordinator/src/index.ts"),
+      main: resolve("tests/coordinator-harness.mjs"),
       compatibility_date: "2026-09-17",
       compatibility_flags: ["nodejs_compat"],
       d1_databases: [
@@ -222,6 +258,7 @@ try {
       },
       vars: {
         SWEEP_SECONDS: "1",
+        LOCAL_DEVELOPMENT: "1",
         GITHUB_API_URL: api,
         GITHUB_APP_ID: "1",
         GITHUB_APP_PRIVATE_KEY: rsa.privateKey.export({
@@ -284,15 +321,12 @@ try {
     )
     return ws
   }
-  async function next(type) {
-    await eventually(
-      () => frames.some((frame) => frame.type === type),
-      `Expected ${type}`
-    )
-    return frames.splice(
-      frames.findIndex((frame) => frame.type === type),
-      1
-    )[0]
+  async function next(type, assignmentId) {
+    const matches = (frame) =>
+      frame.type === type &&
+      (!assignmentId || frame.assignmentId === assignmentId)
+    await eventually(() => frames.some(matches), `Expected ${type}`)
+    return frames.splice(frames.findIndex(matches), 1)[0]
   }
   const send = (message) => socket.send(JSON.stringify(message))
   socket = await connect()
@@ -321,7 +355,42 @@ try {
   socket = await connect(offer.assignmentId)
   send({ type: "presence", presence: "online" })
   await delay(200)
-  assert.equal(sql("SELECT presence FROM machine_pool")[0].presence, "busy")
+  assert.equal(
+    (await sql("SELECT presence FROM machine_pool"))[0].presence,
+    "busy"
+  )
+  if (scenario === "offer") {
+    runnerBusy = true
+    pollFailure = true
+    const aged = await fetch(`${origin}/__test/age-unstarted`, {
+      method: "POST",
+    })
+    assert.equal(aged.status, 204)
+    await eventually(() => failedPolls >= 1, "GitHub poll outage")
+    await delay(6500)
+    assert.equal(
+      frames.some((frame) => frame.type === "job.release"),
+      false,
+      "A poll outage must not cancel a VM that could already be running a job"
+    )
+    assert.equal(
+      (await sql("SELECT presence FROM machine_pool"))[0].presence,
+      "busy"
+    )
+    pollFailure = false
+    const previous = successfulPolls
+    await eventually(() => successfulPolls > previous, "Polling recovered")
+    await eventually(
+      () => runnerStatusQueries > 0,
+      "Busy runner checked through public REST"
+    )
+    await delay(1500)
+    assert.equal(
+      frames.some((frame) => frame.type === "job.release"),
+      false,
+      "A busy runner survives recovery even if its start event has not arrived"
+    )
+  }
   const event = {
     runnerRequestId: direct ? 0 : 100,
     jobId: direct ? jobIdentity : undefined,
@@ -334,6 +403,7 @@ try {
   queue.push({
     messageId: 2,
     jobs: [
+      { messageType: "FutureNotification" },
       {
         ...event,
         messageType: "JobStarted",
@@ -343,14 +413,16 @@ try {
     ],
   })
   await eventually(
-    () => sql("SELECT count(*) n FROM job")[0].n === 1,
+    async () => (await sql("SELECT count(*) n FROM job"))[0].n === 1,
     "GitHub start recorded"
   )
   // Machine exit alone cannot charge anything.
   send({ type: "job.exited", assignmentId: offer.assignmentId, exitCode: 0 })
   send({ type: "presence", presence: "online" })
   assert.equal(
-    sql("SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL")[0].n,
+    (
+      await sql("SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL")
+    )[0].n,
     0
   )
   const completed = {
@@ -361,12 +433,15 @@ try {
   }
   queue.push({ messageId: 3, jobs: [completed] })
   await eventually(
-    () =>
-      sql("SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL")[0]
-        .n === 3,
+    async () =>
+      (
+        await sql(
+          "SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL"
+        )
+      )[0].n === 3,
     "GitHub completion settled"
   )
-  const row = sql("SELECT * FROM job")[0]
+  const row = (await sql("SELECT * FROM job"))[0]
   assert.equal(row.id, `gh-501:${jobIdentity}`)
   assert.equal(row.amount, 1500)
   assert.equal(row.speed_score, 1.5)
@@ -381,8 +456,10 @@ try {
     true
   )
   assert.equal(
-    sql(
-      "SELECT sum(amount) total FROM ledger_entry WHERE job_id IS NOT NULL"
+    (
+      await sql(
+        "SELECT sum(amount) total FROM ledger_entry WHERE job_id IS NOT NULL"
+      )
     )[0].total,
     0
   )
@@ -392,13 +469,43 @@ try {
     "Duplicate completion acknowledged"
   )
   assert.equal(
-    sql("SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL")[0].n,
+    (
+      await sql("SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL")
+    )[0].n,
     3
   )
   assert.equal(
-    sql("SELECT scale_set_id FROM runner_scale_set")[0].scale_set_id,
+    (await sql("SELECT scale_set_id FROM runner_scale_set"))[0].scale_set_id,
     6
   )
+  if (scenario === "offer") {
+    runnerBusy = false
+    queue.push({
+      messageId: 5,
+      jobs: [{ ...event, messageType: "JobAvailable", runnerRequestId: 200 }],
+    })
+    const idle = await next("job.assign")
+    send({ type: "job.accepted", assignmentId: idle.assignmentId })
+    await next("job.start", idle.assignmentId)
+    assert.equal(
+      (await fetch(`${origin}/__test/age-unstarted`, { method: "POST" }))
+        .status,
+      204
+    )
+    await next("job.release", idle.assignmentId)
+    await eventually(
+      () => !runnerPresent,
+      "Confirmed unused runner was removed"
+    )
+    assert.equal(
+      (
+        await sql(
+          "SELECT count(*) n FROM ledger_entry WHERE job_id IS NOT NULL"
+        )
+      )[0].n,
+      3
+    )
+  }
   console.log(
     `Listener ${scenario}: rejection, JIT, reconnect, stable identity and signed idempotent settlement passed.`
   )

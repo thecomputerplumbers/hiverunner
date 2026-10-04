@@ -28,6 +28,11 @@ function fake() {
         token: "admin-secret",
       })
     }
+    if (url.pathname === "/orgs/acme/actions/runners/9") {
+      assert.equal(init.headers.Authorization, "Bearer installation-secret")
+      assert.equal(init.headers.Accept, "application/vnd.github+json")
+      return Response.json({ busy: true, status: "online" })
+    }
     if (url.pathname.endsWith("runnergroups/"))
       return Response.json({ value: [{ id: 1 }] })
     if (url.pathname.endsWith("runnerscalesets")) {
@@ -121,6 +126,10 @@ test("scale sets reuse registration and send the correct credential to each serv
     session.sessionId
   )
   assert.deepEqual(await client.runnerByName("hw-m-a"), { id: 9 })
+  assert.deepEqual(await client.runnerStatus(9), {
+    busy: true,
+    status: "online",
+  })
   await client.removeRunner(9)
   await client.closeSession(6, session)
 })
@@ -181,4 +190,57 @@ test("idle long polls are empty; errors never include echoed credentials", async
       error.status === 401 &&
       !error.message.includes("secret")
   )
+})
+
+test("unknown event types do not hide known jobs; known IDs remain validated", async () => {
+  const job = { messageType: "JobStarted", runnerRequestId: 100 }
+  let jobs = [{ messageType: "FutureNotification" }, job]
+  const session = {
+    sessionId: "x",
+    messageQueueUrl: "https://jobs.actions.githubusercontent.com/queue",
+    messageQueueAccessToken: "secret",
+  }
+  const client = createScaleSetClient({
+    organization: "acme",
+    installationToken: async () => "x",
+    fetch: async () =>
+      Response.json({
+        messageId: 1,
+        statistics: { totalAssignedJobs: 1, totalRunningJobs: 0 },
+        body: JSON.stringify(jobs),
+      }),
+  })
+  assert.deepEqual((await client.poll(session, 0, 1)).jobs, [job])
+  jobs = [{ messageType: "FutureNotification" }]
+  assert.deepEqual((await client.poll(session, 0, 1)).jobs, [])
+  jobs = [{ ...job, runnerRequestId: -1 }]
+  await assert.rejects(
+    client.poll(session, 0, 1),
+    /Invalid Actions job message/
+  )
+})
+
+test("runner status fails closed on outages or malformed responses", async () => {
+  let response = () => Response.json({ busy: false, status: "offline" })
+  const client = createScaleSetClient({
+    organization: "acme",
+    installationToken: async () => "installation-secret",
+    fetch: async () => response(),
+  })
+  assert.deepEqual(await client.runnerStatus(77), {
+    busy: false,
+    status: "offline",
+  })
+  response = () => new Response(null, { status: 404 })
+  assert.equal(await client.runnerStatus(77), null)
+  response = () => new Response("echoed secret", { status: 503 })
+  await assert.rejects(
+    client.runnerStatus(77),
+    (error) =>
+      error instanceof ScaleSetError &&
+      error.status === 503 &&
+      !error.message.includes("secret")
+  )
+  response = () => Response.json({ status: "online" })
+  await assert.rejects(client.runnerStatus(77), /Invalid GitHub runner status/)
 })

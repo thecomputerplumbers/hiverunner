@@ -19,6 +19,7 @@ import {
   type ScaleStatistics,
 } from "@workspace/github/scale-sets"
 import { RUNNER_SIZES } from "@workspace/pricing"
+import { githubTestAPI } from "./config"
 
 type Settings = { organizationId: string; label: string; vcpus: number }
 type Slot = {
@@ -108,11 +109,12 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       .limit(1)
     let state = await this.ctx.storage.get<State>("state")
     const pool = this.env.POOL.getByName(settings.organizationId)
+    const apiUrl = githubTestAPI(this.env)
     const app = createGitHubApp({
       appId: this.env.GITHUB_APP_ID,
       privateKey: this.env.GITHUB_APP_PRIVATE_KEY,
       webhookSecret: "",
-      apiUrl: this.env.GITHUB_API_URL,
+      apiUrl,
     })
     if (!installation) return
     const identity = `${installation.installationId}:${installation.accountLogin}`
@@ -123,7 +125,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           organization: installation.accountLogin,
           installationToken: () =>
             app.installationToken(installation.installationId),
-          apiUrl: this.env.GITHUB_API_URL,
+          apiUrl,
           requestTimeoutMs: 10000,
         }),
       }
@@ -203,17 +205,11 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
     // Finish handshakes before a long poll can consume the offer's deadline.
     for (const slot of Object.values(state.slots)) {
       const status = await pool.offerStatus(slot.assignmentId)
-      if (slot.phase === "running") {
-        // Give GitHub's start/completion messages time to catch up. A brief
-        // tunnel loss does not stop the runner, which talks to GitHub directly.
-        if (slot.githubStarted || Date.now() - slot.createdAt < 180000) continue
-        if (status === "accepted") {
-          // No GitHub start after three minutes: the listener/runner failed
-          // to bind the acquired job. Replace the unused runner below.
-        }
-      }
+      // A VM can be working while lifecycle polling is unavailable. Only
+      // consider no-start cleanup after a healthy, caught-up poll below.
+      if (slot.phase === "running") continue
       if (status === "pending") continue
-      if (status !== "accepted" || slot.phase === "running") {
+      if (status !== "accepted") {
         await pool.release(slot.assignmentId)
         slot.jitConfig = undefined
         // A lost JIT response can have created the runner, too. Look up the
@@ -501,12 +497,39 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
         state.cursor = message.messageId
         await this.save(state)
       }
+      // Process queued lifecycle facts first, then use a fresh runner-specific
+      // status. A failed poll never reaches this path, even during an outage.
+      for (const slot of Object.values(state.slots)) {
+        if (
+          slot.phase !== "running" ||
+          slot.githubStarted ||
+          Date.now() - slot.createdAt < 180000 ||
+          (await pool.offerStatus(slot.assignmentId)) === "pending"
+        )
+          continue
+        // Confirm that the runner is idle (or already gone). Unknown or
+        // busy runners are preserved; an API error retries without a kill.
+        this.stage = "runner-status"
+        const runner = await client.runnerByName(slot.runnerName)
+        const status = runner ? await client.runnerStatus(runner.id) : null
+        if (status?.busy) continue
+        await pool.release(slot.assignmentId)
+        if (runner) await client.removeRunner(runner.id)
+        delete state.slots[slot.assignmentId]
+        if (String(slot.requestId).startsWith("demand:"))
+          delete state.claims[String(slot.requestId)]
+        await this.save(state)
+      }
     } catch (error) {
       if (pollSignal.aborted) {
         await this.ctx.storage.setAlarm(Date.now() + 1000)
         return
       }
-      if (error instanceof ScaleSetError && error.status === 401) {
+      if (
+        this.stage === "poll" &&
+        error instanceof ScaleSetError &&
+        error.status === 401
+      ) {
         state.session = await client.refreshSession(
           state.scaleSetId,
           state.session

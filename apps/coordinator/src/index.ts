@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/d1"
 import { authenticateMachineForPool } from "@workspace/db/machines"
 import { createReceiptSigner } from "@workspace/db/receipts"
 import { PROTOCOL_VERSION } from "@workspace/protocol"
+import { githubTestAPI } from "./config"
 
 export { Pool } from "./pool"
 export { ScaleListener } from "./listener"
@@ -17,6 +18,14 @@ export { ScaleListener } from "./listener"
  */
 export default {
   async fetch(request: Request, env: CoordinatorEnv) {
+    try {
+      githubTestAPI(env)
+    } catch {
+      return Response.json(
+        { ok: false, error: "Invalid coordinator configuration" },
+        { status: 503 }
+      )
+    }
     const url = new URL(request.url)
     if (url.pathname === "/health")
       return Response.json({

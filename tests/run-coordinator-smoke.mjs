@@ -7,13 +7,16 @@ import {
   closeSync,
   rmSync,
   writeFileSync,
+  readFileSync,
 } from "node:fs"
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { createServer } from "node:net"
 import { once } from "node:events"
 import { request as httpRequest } from "node:http"
 import assert from "node:assert/strict"
 import { setTimeout as delay } from "node:timers/promises"
+import { resolve } from "node:path"
+import { parse } from "jsonc-parser"
 
 const storage = mkdtempSync("/tmp/hiveworker-coordinator.")
 const reservation = createServer()
@@ -31,7 +34,16 @@ function wrangler(app, args, options = {}) {
   })
 }
 /** Runs SQL against the same local D1 the Worker is using. */
-function sql(command) {
+async function sql(command) {
+  if (worker) {
+    const path = /^SELECT\b/i.test(command) ? "sql" : "mutate"
+    const response = await fetch(`${origin}/__test/${path}`, {
+      method: "POST",
+      body: JSON.stringify({ sql: command }),
+    })
+    assert.equal(response.status, 200)
+    return response.json()
+  }
   const result = wrangler(
     "web",
     [
@@ -99,6 +111,13 @@ try {
   )
     throw new Error("Seeding failed")
 
+  const config = `${storage}/wrangler.json`
+  const local = parse(readFileSync("apps/coordinator/wrangler.jsonc", "utf8"))
+  local.main = resolve("tests/coordinator-harness.mjs")
+  delete local.routes
+  delete local.account_id
+  delete local.workers_dev
+  writeFileSync(config, JSON.stringify(local))
   worker = spawn(
     "pnpm",
     [
@@ -107,6 +126,8 @@ try {
       "exec",
       "wrangler",
       "dev",
+      "--config",
+      config,
       "--port",
       String(port),
       "--var",
@@ -175,9 +196,11 @@ try {
       close: () => socket.close(),
     }
   }
-  const presence = (id, pool = "gh-501") =>
-    sql(
-      `select presence from machine_pool where machine_id='${id}' and organization_id='${pool}'`
+  const presence = async (id, pool = "gh-501") =>
+    (
+      await sql(
+        `select presence from machine_pool where machine_id='${id}' and organization_id='${pool}'`
+      )
     )[0].presence
   async function eventually(check, message) {
     for (let i = 0; i < 60; i++) {
@@ -204,9 +227,7 @@ try {
           Connection: "Upgrade",
           Upgrade: "websocket",
           "Sec-WebSocket-Version": "13",
-          "Sec-WebSocket-Key": Buffer.from(crypto.randomUUID()).toString(
-            "base64"
-          ),
+          "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
           ...headers,
         },
       })
@@ -240,16 +261,19 @@ try {
   assert.equal((await a.next()).type, "error")
   a.send("not json")
   assert.equal((await a.next()).type, "error")
-  assert.equal(presence("a"), "offline")
+  assert.equal(await presence("a"), "offline")
   a.send(hello())
-  await eventually(() => presence("a") === "online", "hello sets presence")
+  await eventually(
+    async () => (await presence("a")) === "online",
+    "hello sets presence"
+  )
   assert.equal(
-    sql("select daemon_version v from machine where id='a'")[0].v,
+    (await sql("select daemon_version v from machine where id='a'"))[0].v,
     "0.1.0"
   )
   a.send({ type: "presence", presence: "paused" })
   await eventually(
-    () => presence("a") === "paused",
+    async () => (await presence("a")) === "paused",
     "presence is written through"
   )
   a.send("ping")
@@ -262,12 +286,12 @@ try {
   assert.equal(await a.closedWith(), 4000)
   a2.send(hello())
   await eventually(
-    () => presence("a") === "online",
+    async () => (await presence("a")) === "online",
     "the new socket is the machine"
   )
   await delay(300)
   assert.equal(
-    presence("a"),
+    await presence("a"),
     "online",
     "the old socket closing changed nothing"
   )
@@ -282,14 +306,17 @@ try {
   const b2 = await connect(tokens.b)
   await b2.next()
   b2.send(hello())
-  await eventually(() => presence("b") === "online", "b is online")
-  sql("update machine_pool set status='revoked' where machine_id='b'")
+  await eventually(
+    async () => (await presence("b")) === "online",
+    "b is online"
+  )
+  await sql("update machine_pool set status='revoked' where machine_id='b'")
   assert.equal(await b2.closedWith(), 4001)
   await eventually(
-    () => presence("b") === "offline",
+    async () => (await presence("b")) === "offline",
     "revoked machines go offline"
   )
-  assert.equal(presence("a"), "online")
+  assert.equal(await presence("a"), "online")
   assert.equal(await tunnelStatus({ Authorization: `Bearer ${tokens.b}` }), 401)
   console.log("Reconnect, version refusal and revocation passed.")
 
@@ -298,23 +325,28 @@ try {
   assert.equal((await g.next()).type, "welcome")
   g.send(hello("busy"))
   await eventually(
-    () => presence("a", "gh-502") === "busy",
+    async () => (await presence("a", "gh-502")) === "busy",
     "globex sees it busy"
   )
-  assert.equal(presence("a"), "online", "acme's view is its own")
+  assert.equal(await presence("a"), "online", "acme's view is its own")
   // Removed from one pool: that tunnel closes, the other is untouched.
-  sql(
+  await sql(
     "update machine_pool set status='revoked' where machine_id='a' and organization_id='gh-502'"
   )
   assert.equal(await g.closedWith(), 4001)
   await delay(1500)
-  assert.equal(presence("a"), "online")
+  assert.equal(await presence("a"), "online")
   console.log("One machine serving two pools passed.")
 
   // Uninstalling the App silences the whole pool.
-  sql("update github_installation set status='removed' where account_id=501")
+  await sql(
+    "update github_installation set status='removed' where account_id=501"
+  )
   assert.equal(await a2.closedWith(), 4001)
-  await eventually(() => presence("a") === "offline", "the pool empties")
+  await eventually(
+    async () => (await presence("a")) === "offline",
+    "the pool empties"
+  )
   console.log("Installation removal passed.")
   passed = true
 } finally {

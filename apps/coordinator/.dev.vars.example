@@ -4,3 +4,4 @@
 # GITHUB_APP_PRIVATE_KEY=
 # RECEIPT_SIGNING_KEY=
 # GITHUB_API_URL is for local fake services only; never set it in production.
+# It also requires LOCAL_DEVELOPMENT=1 and a loopback http:// API origin.

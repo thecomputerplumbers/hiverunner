@@ -24,10 +24,13 @@ Set these **coordinator** secrets, separately from the web Worker's secrets:
   kept in your secret manager. Preserve old public keys when rotating it.
 
 Never configure `GITHUB_API_URL` in production; it exists only for local fake
-services. The coordinator creates/reuses a scale set per organization and
+services and requires `LOCAL_DEVELOPMENT=1` with a loopback HTTP origin. Invalid
+overrides fail before the coordinator sends credentials. The coordinator creates/reuses a scale set per organization and
 supported label when eligible machines connect. It listens while machines are
 available, so a queued job does not depend on webhook timing. The web Worker
 continues to change D1 only; pool sweeps notice revocation and uninstall.
+Listeners poll continuously while eligible machines are online. This incurs
+Durable Object runtime cost; webhook-driven idle wakeup is a later optimization.
 
 ## Machine setup
 
@@ -70,6 +73,12 @@ do not survive. x86-only binaries need an arm64 alternative. There is no menu
 bar app or Keychain token storage yet. The server imposes a 360-minute VM
 limit; GitHub may impose a shorter workflow timeout.
 
+The image pins a runner version and checksum; automatic runner updates remain
+enabled. Keep the image current to avoid repeated updates in disposable guests
+or stale-runner failures. GitHub requires runners to update within 30 days of a
+new release ([runner update policy](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)).
+There is no automatic image updater yet.
+
 ## Dispatch and receipts
 
 The listener advertises capacity to GitHub and provisions runners from
@@ -86,6 +95,10 @@ The accepted speed quote is locked, and settlement writes a signed receipt
 and three idempotent ledger entries. Empty balances stop new acquisition;
 running jobs finish. Malformed lifecycle facts are held for repair in listener
 storage and do not block later queue messages.
+Unknown event kinds are ignored and acknowledged alongside known events.
+No-start cleanup waits for a successful lifecycle poll and checks the runner's
+public GitHub busy status. API failures and busy runners preserve the VM;
+confirmed idle or missing runners can be replaced without charging a job.
 
 `GET /v1/receipt-key` on the coordinator publishes the current Ed25519 public
 key and key id. Verify the stored receipt's exact bytes against that key;
