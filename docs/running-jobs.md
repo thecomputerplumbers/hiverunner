@@ -5,6 +5,11 @@ job on Apple Silicon. Each job gets its own kernel, memory and APFS disk clone.
 Only a fresh directory containing the one-time runner configuration is shared
 with the guest; the Mac's files and server credentials stay on the host.
 
+While available, the daemon keeps one clean 2-vCPU VM booted. A `hive` job
+uses it once, then it is destroyed and replaced. Larger jobs boot their own
+VM. Set `HIVE_WARM=0` to disable the idle VM; battery or lid closure also drops
+it. Warmth removes guest boot time, not GitHub's runner startup time.
+
 ## Server setup
 
 The installed GitHub App needs organization self-hosted runners write access.
