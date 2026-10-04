@@ -1,0 +1,6 @@
+# Optional. Without these, tunnels work but execution is disabled.
+# Copy GitHub credentials from your secret manager; never commit .dev.vars.
+# GITHUB_APP_ID=
+# GITHUB_APP_PRIVATE_KEY=
+# RECEIPT_SIGNING_KEY=
+# GITHUB_API_URL is for local fake services only; never set it in production.
