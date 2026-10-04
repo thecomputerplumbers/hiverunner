@@ -72,10 +72,14 @@ limit; GitHub may impose a shorter workflow timeout.
 
 ## Dispatch and receipts
 
-The server offers a slot before acquiring a job. After the daemon accepts,
-the listener acquires it and sends a JIT runner configuration. Registration
+The listener advertises capacity to GitHub and provisions runners from
+`totalAssignedJobs`, including initial session demand with no job messages.
+GitHub may assign work directly. For explicit `JobAvailable` offers, the server
+waits for a machine's acceptance before calling acquire. Both paths reserve
+the machine before minting and sending its JIT configuration. Registration
 and session credentials remain on the coordinator. Explicit runner names map
-GitHub lifecycle messages to machines, including across reconnects.
+GitHub lifecycle messages to machines, including across reconnects. Direct
+messages with request id zero use GitHub's stable job UUID for receipt identity.
 
 GitHub's start/finish messages determine charges; `job.exited` never does.
 The accepted speed quote is locked, and settlement writes a signed receipt
@@ -98,3 +102,9 @@ for enrollment, revocation, dispatch, API retries, reconnects and settlement.
 Tests use fresh local data and generated fixture keys. They never deploy,
 read production job data, or send real email. Real GitHub smoke jobs are a
 separate coordinated experiment so two listeners do not compete for a session.
+
+The [integrated smoke run](https://github.com/thecomputerplumbers/hiveworker/actions/runs/37178137715)
+passed on this Mac using a warm `hive` VM: checkout, arm64/CPU/user checks,
+setup-go and Linux daemon tests. The local coordinator verified GitHub's
+timestamps, signed the receipt and produced three ledger entries summing to
+zero. This experiment used isolated local accounting data, with no deployment.

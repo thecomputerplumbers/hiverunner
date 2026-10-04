@@ -42,6 +42,17 @@ function fake() {
     }
     if (url.pathname.endsWith("sessions")) return Response.json(session)
     if (url.pathname.endsWith("sessions/session-1"))
+      if (init.method === "PATCH") return Response.json(session)
+    if (url.pathname.endsWith("sessions/session-1"))
+      return new Response(null, { status: 204 })
+    if (url.pathname === "/tenant/_apis/distributedtask/pools/0/agents") {
+      assert.equal(url.searchParams.get("agentName"), "hw-m-a")
+      return Response.json({ value: [{ id: 9 }] })
+    }
+    if (
+      url.pathname === "/tenant/_apis/distributedtask/pools/0/agents/9" &&
+      init.method === "DELETE"
+    )
       return new Response(null, { status: 204 })
     if (url.pathname.endsWith("acquirejobs")) {
       assert.equal(init.headers.Authorization, "Bearer session-secret")
@@ -105,6 +116,12 @@ test("scale sets reuse registration and send the correct credential to each serv
     "one-time-secret"
   )
   await client.acknowledge(session, 12)
+  assert.equal(
+    (await client.refreshSession(6, session)).sessionId,
+    session.sessionId
+  )
+  assert.deepEqual(await client.runnerByName("hw-m-a"), { id: 9 })
+  await client.removeRunner(9)
   await client.closeSession(6, session)
 })
 
