@@ -48,6 +48,12 @@ Never construct Better Auth at module scope — it starts plugin setup, includin
 GitHub is the only way in. Email and password sign-in is enabled on localhost
 only, for seeded users and the smoke test; never enable it for a deployment.
 
+Wrangler 4.147.0's local proxy can lose POST responses when a body is unread.
+An API route that rejects before reading must await
+`discardUnreadBody(request)` on the actual routed Request; Vinext transfers
+the entry's body. The helper is gated by the configured localhost `APP_URL`
+and does nothing in production. Remove this workaround when the proxy is fixed.
+
 Pools and members come from GitHub, not from Better Auth. An organization row
 exists because the GitHub App was installed (`packages/db/src/installations.ts`)
 and a member row because GitHub says the person is a member

@@ -2,6 +2,7 @@
 // D1 and a fake GitHub. Nothing here reaches the network.
 import assert from "node:assert/strict"
 import { createHmac } from "node:crypto"
+import product from "../apps/web/config/product.json" with { type: "json" }
 const [origin, storage] = process.argv.slice(2)
 const {
   SMOKE_GITHUB_URL: githubUrl,
@@ -117,6 +118,40 @@ await redirectsTo(
 )
 for (const path of ["/billing", "/projects", "/mcp", "/connections"])
   assert.equal((await fetch(`${origin}${path}`)).status, 404, path)
+// Returning before consuming a POST body made the local Workers proxy drop
+// about 5% of these requests. Exercise the actual HTTP boundary repeatedly;
+// a single request rarely catches it. None of these routes may mutate D1.
+for (const path of [
+  "/api/auth/organization/create",
+  ...(!product.features.mcp ? ["/mcp"] : []),
+  ...(!product.features.billing ? ["/api/stripe/checkout"] : []),
+]) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const response = await fetch(`${origin}${path}`, {
+      method: "POST",
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Rogue", slug: "rogue" }),
+    })
+    assert.equal(response.status, 404, `${path}, request ${attempt + 1}`)
+  }
+  // Also drain a chunked upload larger than a single network buffer.
+  let remaining = 16
+  const chunk = new TextEncoder().encode("x".repeat(64 * 1024))
+  const response = await fetch(`${origin}${path}`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/octet-stream" },
+    duplex: "half",
+    body: new ReadableStream({
+      pull(controller) {
+        controller.enqueue(chunk)
+        if (--remaining === 0) controller.close()
+      },
+    }),
+  })
+  assert.equal(response.status, 404, `${path}, chunked upload`)
+  assert.equal(await response.text(), "Not found")
+}
+console.log("Repeated early POST rejections preserved their responses.")
 console.log("Public pages, install link and disabled features passed.")
 
 // Webhooks: only GitHub's signature gets in, and a redelivery changes nothing.
@@ -221,19 +256,24 @@ assert.equal(
 await json(await settings(owner))
 assert.equal((await settings(owner)).status, 409, "a stale version is refused")
 assert.ok((await page(owner, "/settings")).includes('value="ci"'))
-assert.equal(
-  (
-    await fetch(`${origin}/api/pool/settings`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: "https://evil.example",
-      },
-      body: "{}",
-    })
-  ).status,
-  403
-)
+// Vinext transfers the body into a routed Request, so the entry's original
+// Request can no longer drain it when the origin guard rejects it.
+for (let attempt = 0; attempt < 100; attempt++) {
+  assert.equal(
+    (
+      await fetch(`${origin}/api/pool/settings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://evil.example",
+        },
+        body: "{}",
+      })
+    ).status,
+    403,
+    `wrong-origin request ${attempt + 1}`
+  )
+}
 // Better Auth's own organization endpoints would bypass GitHub.
 for (const [path, body] of [
   ["create", { name: "Rogue", slug: "rogue" }],

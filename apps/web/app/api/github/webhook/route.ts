@@ -1,7 +1,7 @@
 import { applyGitHubEvent, type GitHubEvent } from "@workspace/db/installations"
 
 import { getDb } from "@/db"
-import { logError, logEvent } from "@/lib/diagnostics"
+import { discardUnreadBody, logError, logEvent } from "@/lib/diagnostics"
 import { getGitHubApp } from "@/lib/github"
 
 /**
@@ -11,7 +11,10 @@ import { getGitHubApp } from "@/lib/github"
  */
 export async function POST(request: Request) {
   const app = getGitHubApp()
-  if (!app) return Response.json({ error: "Not configured" }, { status: 503 })
+  if (!app) {
+    await discardUnreadBody(request)
+    return Response.json({ error: "Not configured" }, { status: 503 })
+  }
 
   // Verify the exact bytes GitHub signed, before parsing any of it.
   const body = await request.text()
