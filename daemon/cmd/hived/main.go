@@ -209,9 +209,13 @@ func run(ctx context.Context) error {
 	ctx, stop := context.WithCancel(ctx)
 	tended := make(chan struct{})
 	close(tended)
+	unlock := func() {}
 	defer func() {
 		stop()
 		<-tended
+		// Last: the work directory stays ours until every VM is gone, so a
+		// daemon started as this one exits cannot sweep one mid-teardown.
+		unlock()
 	}()
 
 	// Without a guest image the machine still connects and reports presence;
@@ -221,6 +225,14 @@ func run(ctx context.Context) error {
 		log.Warn("this machine cannot run jobs yet", "reason", err)
 	} else {
 		runner = vmRunner
+		// One hived per work directory. Holding it is also what makes the
+		// sweep below safe: with the lock held, nothing else can be
+		// using what is in there.
+		release, err := vm.LockWorkDir(vmRunner.WorkDir)
+		if err != nil {
+			return err
+		}
+		unlock = release
 		// A daemon that was killed leaves its VMs' disks, and possibly a
 		// job's runner configuration, on disk. Remove them before anything
 		// else runs.
@@ -281,6 +293,13 @@ func selftest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Held while the VM exists, so a daemon starting meanwhile cannot sweep
+	// it away as a leftover.
+	release, err := vm.LockWorkDir(runner.WorkDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	started := time.Now()
@@ -317,6 +336,11 @@ func devJob(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	release, err := vm.LockWorkDir(runner.WorkDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(*minutes)*time.Minute)
 	defer cancel()
 	code, err := runner.Run(ctx, jobs.Job{

@@ -66,3 +66,32 @@ func TestSweepRemovesOnlyLeftoverJobDirectories(t *testing.T) {
 		t.Fatalf("left behind %v; want only what is not a job directory", names)
 	}
 }
+
+func TestOneDaemonPerWorkDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "jobs")
+	release, err := LockWorkDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second daemon is refused, and so never reaches the sweep that would
+	// delete the first one's running jobs.
+	if _, err := LockWorkDir(dir); !errors.Is(err, ErrWorkDirInUse) {
+		t.Fatalf("second lock: %v, want ErrWorkDirInUse", err)
+	}
+	// The lock file is not a job directory; sweeping leaves it alone.
+	if err := os.Mkdir(filepath.Join(dir, "job-live"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := SweepWorkDir(dir); n != 1 || err != nil {
+		t.Fatalf("SweepWorkDir() = %d, %v", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".lock")); err != nil {
+		t.Fatalf("the lock file was swept: %v", err)
+	}
+	release()
+	again, err := LockWorkDir(dir)
+	if err != nil {
+		t.Fatalf("lock after release: %v", err)
+	}
+	again()
+}

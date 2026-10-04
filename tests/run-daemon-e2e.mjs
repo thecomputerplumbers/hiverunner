@@ -308,22 +308,40 @@ try {
   const jobs = process.env.HIVE_IMAGE ? `${process.env.HIVE_IMAGE}-jobs` : null
   // On battery or with the lid closed the daemon reports paused and, rightly,
   // keeps no VM waiting; there is nothing to check then.
-  const warm =
-    jobs &&
-    state === "online" &&
-    existsSync(`${process.env.HIVE_IMAGE}/manifest.json`)
+  const image = jobs && existsSync(`${process.env.HIVE_IMAGE}/manifest.json`)
+  const warm = image && state === "online"
   if (warm) {
     await eventually(
       () => /a VM is booted and waiting/.test(run.output),
       `no warm VM\n${run.output}`
     )
-    assert.ok(readdirSync(jobs).length > 0, "the warm VM has no directory")
+    assert.ok(
+      readdirSync(jobs).some((name) => name.startsWith("job-")),
+      "the warm VM has no directory"
+    )
+  }
+  // One hived per work directory: a second daemon, or a self-test, is
+  // refused while the first runs, and so can never sweep its live VM.
+  if (image) {
+    for (const command of ["run", "selftest"]) {
+      const second = hived([command])
+      const [secondCode] = await once(second, "exit")
+      assert.equal(secondCode, 1, second.output)
+      assert.match(second.output, /using this work directory/)
+    }
+    if (warm)
+      assert.ok(readdirSync(jobs).some((name) => name.startsWith("job-")))
+    console.log("A second hived on the same work directory was refused.")
   }
   run.kill("SIGTERM")
   const [stopCode] = await once(run, "exit")
   assert.equal(stopCode, 0, run.output)
   if (warm) {
-    assert.deepEqual(readdirSync(jobs), [], "stopping left VM files on disk")
+    assert.deepEqual(
+      readdirSync(jobs).filter((name) => name.startsWith("job-")),
+      [],
+      "stopping left VM files on disk"
+    )
     console.log("Stopping the daemon destroyed its warm VM and left nothing.")
   }
   await eventually(

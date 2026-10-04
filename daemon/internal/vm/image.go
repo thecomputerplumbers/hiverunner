@@ -81,9 +81,11 @@ const ReasonStaleImage = "this machine's guest image has a runner GitHub no long
 //
 // A daemon that was killed, or a Mac that lost power, cannot clean up after
 // itself: a job's disk stays on the machine, and so can the directory that
-// held its runner configuration. The next start removes them before doing
-// anything else. Only the daemon calls this, once, before it starts any VM;
-// one work directory belongs to one daemon.
+// held its runner configuration.
+//
+// Call it only while holding LockWorkDir, and before starting any VM. The
+// lock, not the directory names, is what proves these are abandoned: without
+// it this would delete a live daemon's running jobs.
 func SweepWorkDir(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {

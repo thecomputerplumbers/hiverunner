@@ -90,6 +90,11 @@ refusal.
 
 If the daemon is killed, or the Mac loses power, a job's disk and directory
 are left behind. The next `hived run` removes them before it starts anything.
+It can do that safely because every command that boots a VM (`run`,
+`selftest`, `dev-job`) first takes an exclusive lock on the work directory,
+which sits beside the guest image and is named after it. A second command on
+the same directory exits, saying it is in use; stop the daemon to run a
+self-test against its image.
 
 ## What it does not do yet
 
