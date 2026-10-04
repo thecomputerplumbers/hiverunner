@@ -8,8 +8,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Pinned. The hash is the one GitHub publishes in the runner's release notes.
-RUNNER_VERSION=2.337.0
-RUNNER_SHA256=9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393
+# Image maintenance can override both the version and its published digest.
+RUNNER_VERSION="${RUNNER_VERSION:-2.337.0}"
+RUNNER_SHA256="${RUNNER_SHA256:-9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393}"
 # Bump when anything in this directory changes what ends up in the guest.
 IMAGE_VERSION=5
 
