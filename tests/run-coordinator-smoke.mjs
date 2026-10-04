@@ -188,7 +188,7 @@ try {
   }
   const hello = (state = "online") => ({
     type: "hello",
-    protocol: 1,
+    protocol: 2,
     daemonVersion: "0.1.0",
     presence: state,
   })
@@ -233,7 +233,7 @@ try {
   assert.deepEqual(await a.next(), {
     type: "welcome",
     machineId: "a",
-    protocol: 1,
+    protocol: 2,
   })
   // Nothing is believed before hello, and junk does not kill the tunnel.
   a.send({ type: "presence", presence: "online" })
@@ -275,7 +275,7 @@ try {
   // An old daemon is told to update rather than half-working.
   const b = await connect(tokens.b)
   await b.next()
-  b.send({ ...hello(), protocol: 0 })
+  b.send({ ...hello(), protocol: 1 })
   assert.equal(await b.closedWith(), 4002)
 
   // Revocation is a row in D1; the pool notices on its own.

@@ -33,7 +33,7 @@ func TestEveryCoordinatorFixtureDecodes(t *testing.T) {
 		}
 		seen[reflect.TypeOf(message).Elem().Name()] = true
 	}
-	for _, want := range []string{"Welcome", "JobAssign", "Drain", "Error"} {
+	for _, want := range []string{"Welcome", "JobAssign", "JobStart", "JobRelease", "Drain", "Error"} {
 		if !seen[want] {
 			t.Errorf("no fixture exercised %s", want)
 		}
@@ -44,7 +44,8 @@ func TestEveryCoordinatorFixtureDecodes(t *testing.T) {
 // fixtures say a daemon sends.
 func TestDaemonMessagesMatchFixtures(t *testing.T) {
 	sent := []any{
-		NewHello("0.1.0", Online),
+		NewHello("0.1.0", Online, ""),
+		NewHello("0.1.0", Busy, "a-1"),
 		NewPresence(Paused),
 		NewPresence(Draining),
 		NewJobAccepted("a-1"),
@@ -73,8 +74,11 @@ func TestUnknownAndIncompleteFramesAreErrors(t *testing.T) {
 	for _, raw := range []string{
 		`not json`,
 		`{"type":"reboot"}`,
-		`{"type":"job.assign","assignmentId":"a","vcpus":2}`,
-		`{"type":"job.assign","assignmentId":"","jitConfig":"x","vcpus":2}`,
+		`{"type":"job.assign","assignmentId":"a"}`,
+		`{"type":"job.assign","assignmentId":"","vcpus":2}`,
+		`{"type":"job.start","assignmentId":"a","runnerName":"r"}`,
+		`{"type":"job.start","assignmentId":"a","jitConfig":"x"}`,
+		`{"type":"job.release"}`,
 	} {
 		if _, err := DecodeCoordinator([]byte(raw)); err == nil {
 			t.Errorf("%s decoded without error", raw)

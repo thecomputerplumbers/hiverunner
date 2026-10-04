@@ -1,13 +1,19 @@
 [
-  { "type": "welcome", "machineId": "m-1", "protocol": 1 },
+  { "type": "welcome", "machineId": "m-1", "protocol": 2 },
   {
     "type": "job.assign",
     "assignmentId": "a-1",
     "label": "hive",
     "vcpus": 2,
-    "jitConfig": "ZXhhbXBsZQ==",
     "timeoutMinutes": 360
   },
+  {
+    "type": "job.start",
+    "assignmentId": "a-1",
+    "jitConfig": "ZXhhbXBsZQ==",
+    "runnerName": "hw-m-1-a-1"
+  },
+  { "type": "job.release", "assignmentId": "a-1" },
   { "type": "drain" },
   { "type": "error", "message": "unrecognized message" }
 ]

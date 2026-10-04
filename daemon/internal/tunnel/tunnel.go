@@ -10,11 +10,11 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/protocol"
 )
 
@@ -28,45 +28,11 @@ var (
 	ErrUnsupported = errors.New("this daemon is too old for the coordinator; update HiveWorker")
 )
 
-// Jobs is the machine's single job slot, shared by every pool's tunnel. A
-// machine serving three organizations still runs one job at a time, and
-// whichever pool's offer arrives first gets it.
-type Jobs struct {
-	mu      sync.Mutex
-	current string
-}
-
-// Claim takes the slot for an assignment, or reports that it is taken.
-func (j *Jobs) Claim(assignmentID string) bool {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if j.current != "" {
-		return false
-	}
-	j.current = assignmentID
-	return true
-}
-
-// Release frees the slot if this assignment holds it.
-func (j *Jobs) Release(assignmentID string) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if j.current == assignmentID {
-		j.current = ""
-	}
-}
-
-// Busy reports whether a job holds the slot.
-func (j *Jobs) Busy() bool {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.current != ""
-}
-
 type Options struct {
 	// URL is this pool's tunnel, including its `pool` query parameter.
 	URL string
-	// Pool names the pool in log lines.
+	// PoolID identifies the pool to the job slot; Pool names it in log lines.
+	PoolID        string
 	Pool          string
 	Token         string
 	DaemonVersion string
@@ -77,9 +43,13 @@ type Options struct {
 	PresenceEvery time.Duration
 	// PingEvery is the keepalive period. Defaults to 30s.
 	PingEvery time.Duration
-	// Jobs is shared between tunnels. Nil means this tunnel has its own.
-	Jobs *Jobs
-	Log  *slog.Logger
+	// Jobs is the machine's one job slot, shared by every pool's tunnel. Nil
+	// means this tunnel declines every offer.
+	Jobs *jobs.Manager
+	// JobContext bounds a job's life. It must outlive the tunnel: a dropped
+	// connection does not stop a running job. Defaults to Run's context.
+	JobContext context.Context
+	Log        *slog.Logger
 }
 
 // Run holds the tunnel open until ctx is cancelled or the coordinator says
@@ -93,7 +63,10 @@ func Run(ctx context.Context, options Options) error {
 		options.PingEvery = 30 * time.Second
 	}
 	if options.Jobs == nil {
-		options.Jobs = &Jobs{}
+		options.Jobs = jobs.New(nil, options.Log)
+	}
+	if options.JobContext == nil {
+		options.JobContext = ctx
 	}
 	options.Log = options.Log.With("pool", options.Pool)
 	backoff := time.Second
@@ -175,6 +148,9 @@ func session(ctx context.Context, options Options) (bool, error) {
 	}
 
 	presence := options.Presence()
+	// Results wait until after hello: nil blocks this case until then.
+	pending := options.Jobs.Exits(options.PoolID)
+	var exits chan protocol.JobExited
 	welcomed := false
 	lastPong := time.Now()
 	presenceTick := time.NewTicker(options.PresenceEvery)
@@ -213,27 +189,46 @@ func session(ctx context.Context, options Options) (bool, error) {
 			}
 			switch message := message.(type) {
 			case *protocol.Welcome:
-				if err := send(protocol.NewHello(options.DaemonVersion, presence)); err != nil {
+				// Saying which job is in hand lets the pool pick up where a
+				// dropped connection left off.
+				holding := options.Jobs.Current(options.PoolID)
+				if err := send(protocol.NewHello(options.DaemonVersion, presence, holding)); err != nil {
 					return welcomed, err
 				}
 				welcomed = true
+				exits = pending
 				options.Log.Info("connected", "machine", message.MachineID, "presence", presence)
 			case *protocol.JobAssign:
-				reason := "this machine is running a job for another pool"
-				if options.Jobs.Claim(message.AssignmentID) {
-					// The VM runner is not in this build. Say so at once, so
-					// the coordinator offers the job elsewhere.
-					options.Jobs.Release(message.AssignmentID)
-					reason = "this daemon build cannot run jobs yet"
+				var answer any = protocol.NewJobAccepted(message.AssignmentID)
+				if reason := options.Jobs.Offer(options.PoolID, message); reason != "" {
+					options.Log.Info("declining a job", "label", message.Label, "reason", reason)
+					answer = protocol.NewJobRejected(message.AssignmentID, reason)
 				}
-				options.Log.Info("declining a job", "label", message.Label, "reason", reason)
-				if err := send(protocol.NewJobRejected(message.AssignmentID, reason)); err != nil {
+				if err := send(answer); err != nil {
 					return welcomed, err
 				}
+			case *protocol.JobStart:
+				if err := options.Jobs.Start(options.JobContext, options.PoolID, message); err != nil {
+					// The coordinator believes this machine has the job. Tell
+					// it otherwise, so the job is not left waiting on us.
+					options.Log.Warn("cannot start a job", "assignment", message.AssignmentID, "error", err)
+					if err := send(protocol.NewJobExited(message.AssignmentID, -1)); err != nil {
+						return welcomed, err
+					}
+				}
+			case *protocol.JobRelease:
+				options.Jobs.Release(options.PoolID, message.AssignmentID)
 			case *protocol.Drain:
 				options.Log.Info("the coordinator asked this machine to drain")
 			case *protocol.Error:
 				options.Log.Warn("the coordinator rejected a message", "message", message.Message)
+			}
+
+		case exit := <-exits:
+			if err := send(exit); err != nil {
+				// Keep the result for the next connection.
+				pending <- exit
+				return welcomed, err
 			}
 
 		case <-presenceTick.C:

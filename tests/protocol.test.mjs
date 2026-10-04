@@ -31,6 +31,19 @@ test("frames that are not daemon messages are refused", () => {
     }),
     JSON.stringify({ type: "job.exited", assignmentId: "a", exitCode: "0" }),
     JSON.stringify({
+      type: "hello",
+      protocol: 2,
+      daemonVersion: "0",
+      presence: "busy",
+      assignmentId: 7,
+    }),
+    JSON.stringify({
+      type: "job.start",
+      assignmentId: "a",
+      jitConfig: "x",
+      runnerName: "r",
+    }),
+    JSON.stringify({
       type: "job.rejected",
       assignmentId: "a",
       reason: "x".repeat(501),

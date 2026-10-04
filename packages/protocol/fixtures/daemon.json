@@ -1,9 +1,16 @@
 [
   {
     "type": "hello",
-    "protocol": 1,
+    "protocol": 2,
     "daemonVersion": "0.1.0",
     "presence": "online"
+  },
+  {
+    "type": "hello",
+    "protocol": 2,
+    "daemonVersion": "0.1.0",
+    "presence": "busy",
+    "assignmentId": "a-1"
   },
   { "type": "presence", "presence": "paused" },
   { "type": "presence", "presence": "draining" },

@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/protocol"
 )
 
@@ -70,13 +71,13 @@ func options(url, token string, presence *atomic.Value) Options {
 	}
 }
 
-func TestHelloPresenceAndDecliningJobs(t *testing.T) {
+func TestHelloPresenceAndDecliningWithoutARunner(t *testing.T) {
 	var presence atomic.Value
 	presence.Store(protocol.Online)
 	done := make(chan struct{})
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, _ int) {
 		defer close(done)
-		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":1}`)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
 		if hello := read(ctx, t, c); hello["type"] != "hello" || hello["presence"] != "online" {
 			t.Errorf("first frame = %v", hello)
 		}
@@ -84,7 +85,7 @@ func TestHelloPresenceAndDecliningJobs(t *testing.T) {
 		if update := read(ctx, t, c); update["type"] != "presence" || update["presence"] != "paused" {
 			t.Errorf("presence frame = %v", update)
 		}
-		write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"jitConfig":"x","timeoutMinutes":60}`)
+		write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"timeoutMinutes":60}`)
 		if answer := read(ctx, t, c); answer["type"] != "job.rejected" || answer["assignmentId"] != "a-1" {
 			t.Errorf("answer to job.assign = %v", answer)
 		}
@@ -131,7 +132,7 @@ func TestADroppedConnectionIsRetried(t *testing.T) {
 	presence.Store(protocol.Online)
 	second := make(chan struct{})
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, attempt int) {
-		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":1}`)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
 		read(ctx, t, c)
 		if attempt == 1 {
 			return // Drop it, as a deploy would.
@@ -149,23 +150,96 @@ func TestADroppedConnectionIsRetried(t *testing.T) {
 	}
 }
 
-func TestOneJobSlotIsSharedBetweenPools(t *testing.T) {
-	var jobs Jobs
-	if !jobs.Claim("acme-1") {
-		t.Fatal("an idle machine refused a job")
+// instant is a runner that finishes at once with a fixed code.
+type instant struct{ code int }
+
+func (r instant) Run(context.Context, jobs.Job) (int, error) { return r.code, nil }
+
+// held is a runner that runs until told to finish.
+type held struct{ finish chan int }
+
+func (r held) Run(ctx context.Context, _ jobs.Job) (int, error) {
+	select {
+	case code := <-r.finish:
+		return code, nil
+	case <-ctx.Done():
+		return -1, ctx.Err()
 	}
-	if jobs.Claim("globex-1") {
-		t.Fatal("a busy machine took a second pool's job")
+}
+
+func TestOfferAcceptStartExit(t *testing.T) {
+	var presence atomic.Value
+	presence.Store(protocol.Online)
+	done := make(chan struct{})
+	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, _ int) {
+		defer close(done)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		if hello := read(ctx, t, c); hello["assignmentId"] != nil {
+			t.Errorf("an idle machine claimed a job in hello: %v", hello)
+		}
+		write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"timeoutMinutes":60}`)
+		if answer := read(ctx, t, c); answer["type"] != "job.accepted" {
+			t.Errorf("answer to the offer = %v", answer)
+		}
+		// A start for a job that was never offered is refused, not run.
+		write(ctx, c, `{"type":"job.start","assignmentId":"zz","jitConfig":"x","runnerName":"r"}`)
+		if answer := read(ctx, t, c); answer["type"] != "job.exited" || answer["assignmentId"] != "zz" || answer["exitCode"] != float64(-1) {
+			t.Errorf("answer to a stray start = %v", answer)
+		}
+		write(ctx, c, `{"type":"job.start","assignmentId":"a-1","jitConfig":"x","runnerName":"hw-m-a-1"}`)
+		if exit := read(ctx, t, c); exit["type"] != "job.exited" || exit["assignmentId"] != "a-1" || exit["exitCode"] != float64(7) {
+			t.Errorf("job result = %v", exit)
+		}
+	})
+	o := options(url, "hwm_good", &presence)
+	o.PoolID = "acme"
+	o.Jobs = jobs.New(instant{code: 7}, quiet)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = Run(ctx, o) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the exchange did not complete")
 	}
-	if !jobs.Busy() {
-		t.Fatal("Busy() = false while a job holds the slot")
-	}
-	jobs.Release("globex-1")
-	if !jobs.Busy() {
-		t.Fatal("another pool's release freed the slot")
-	}
-	jobs.Release("acme-1")
-	if jobs.Busy() || !jobs.Claim("globex-1") {
-		t.Fatal("the slot was not freed")
+}
+
+// The tunnel drops mid-job. The job carries on; the new connection says what
+// it is holding, and delivers the result when the job ends.
+func TestAJobSurvivesAReconnect(t *testing.T) {
+	var presence atomic.Value
+	presence.Store(protocol.Online)
+	runner := held{finish: make(chan int)}
+	done := make(chan struct{})
+	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, attempt int) {
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		hello := read(ctx, t, c)
+		if attempt == 1 {
+			write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"timeoutMinutes":60}`)
+			read(ctx, t, c)
+			write(ctx, c, `{"type":"job.start","assignmentId":"a-1","jitConfig":"x","runnerName":"hw-m-a-1"}`)
+			time.Sleep(100 * time.Millisecond)
+			return // Drop the connection with the job running.
+		}
+		defer close(done)
+		if hello["assignmentId"] != "a-1" {
+			t.Errorf("reconnect hello = %v, want it to name the running job", hello)
+		}
+		runner.finish <- 0
+		if exit := read(ctx, t, c); exit["type"] != "job.exited" || exit["assignmentId"] != "a-1" {
+			t.Errorf("after reconnect got %v", exit)
+		}
+	})
+	o := options(url, "hwm_good", &presence)
+	o.PoolID = "acme"
+	o.Jobs = jobs.New(runner, quiet)
+	o.JobContext = context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = Run(ctx, o) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the job's result never arrived after the reconnect")
 	}
 }

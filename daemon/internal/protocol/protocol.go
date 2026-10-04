@@ -6,10 +6,11 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Version is bumped on any change an older peer could not safely ignore.
-const Version = 1
+const Version = 2
 
 // Keepalive frames. The coordinator answers Ping at the edge without waking.
 const (
@@ -44,6 +45,10 @@ type Hello struct {
 	Protocol      int      `json:"protocol"`
 	DaemonVersion string   `json:"daemonVersion"`
 	Presence      Presence `json:"presence"`
+	// AssignmentID is the job this machine is holding or running, if any. A
+	// daemon that reconnects mid-job says so, so the pool restores busy
+	// instead of offering a machine that is already at work.
+	AssignmentID string `json:"assignmentId,omitempty"`
 }
 
 // PresenceUpdate reports a change of state.
@@ -76,16 +81,33 @@ type Welcome struct {
 	Protocol  int    `json:"protocol"`
 }
 
-// JobAssign offers this machine one job.
+// StartTimeout is how long a machine holds its slot for an accepted offer
+// before giving up on JobStart and freeing itself.
+const StartTimeout = 30 * time.Second
+
+// JobAssign offers this machine one job. It carries no credential: nothing
+// is acquired from GitHub until the machine has accepted.
 type JobAssign struct {
 	AssignmentID string `json:"assignmentId"`
 	// Label is the runs-on label, which is also the scale set.
-	Label string `json:"label"`
-	VCPUs int    `json:"vcpus"`
+	Label          string `json:"label"`
+	VCPUs          int    `json:"vcpus"`
+	TimeoutMinutes int    `json:"timeoutMinutes"`
+}
+
+// JobStart follows an accepted offer with what the runner needs.
+type JobStart struct {
+	AssignmentID string `json:"assignmentId"`
 	// JITConfig is GitHub's one-time runner configuration, passed to the
 	// runner unchanged. It is a credential: never log it.
-	JITConfig      string `json:"jitConfig"`
-	TimeoutMinutes int    `json:"timeoutMinutes"`
+	JITConfig string `json:"jitConfig"`
+	// RunnerName is the name the JIT config registers.
+	RunnerName string `json:"runnerName"`
+}
+
+// JobRelease backs out of an offer: free the slot and destroy the VM.
+type JobRelease struct {
+	AssignmentID string `json:"assignmentId"`
 }
 
 // Error is the coordinator rejecting a frame without closing the tunnel.
@@ -96,8 +118,8 @@ type Error struct {
 // Drain asks the daemon to finish its job and take no more.
 type Drain struct{}
 
-func NewHello(daemonVersion string, presence Presence) Hello {
-	return Hello{Type: "hello", Protocol: Version, DaemonVersion: daemonVersion, Presence: presence}
+func NewHello(daemonVersion string, presence Presence, assignmentID string) Hello {
+	return Hello{Type: "hello", Protocol: Version, DaemonVersion: daemonVersion, Presence: presence, AssignmentID: assignmentID}
 }
 
 func NewPresence(presence Presence) PresenceUpdate {
@@ -117,7 +139,7 @@ func NewJobExited(id string, exitCode int) JobExited {
 }
 
 // DecodeCoordinator turns a frame from the coordinator into one of Welcome,
-// JobAssign, Drain or Error. Unknown types are an error rather than ignored:
+// JobAssign, JobStart, JobRelease, Drain or Error. Unknown types are an error rather than ignored:
 // a frame this daemon does not understand may be one it must not skip.
 func DecodeCoordinator(raw []byte) (any, error) {
 	var envelope struct {
@@ -140,11 +162,28 @@ func DecodeCoordinator(raw []byte) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		assign := message.(*JobAssign)
-		if assign.AssignmentID == "" || assign.JITConfig == "" || assign.VCPUs < 1 {
+		if assign := message.(*JobAssign); assign.AssignmentID == "" || assign.VCPUs < 1 {
 			return nil, fmt.Errorf("incomplete job.assign")
 		}
-		return assign, nil
+		return message, nil
+	case "job.start":
+		message, err := decode(&JobStart{})
+		if err != nil {
+			return nil, err
+		}
+		if start := message.(*JobStart); start.AssignmentID == "" || start.JITConfig == "" || start.RunnerName == "" {
+			return nil, fmt.Errorf("incomplete job.start")
+		}
+		return message, nil
+	case "job.release":
+		message, err := decode(&JobRelease{})
+		if err != nil {
+			return nil, err
+		}
+		if message.(*JobRelease).AssignmentID == "" {
+			return nil, fmt.Errorf("incomplete job.release")
+		}
+		return message, nil
 	case "drain":
 		return &Drain{}, nil
 	case "error":

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/api"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/protocol"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/tunnel"
 )
@@ -21,6 +22,9 @@ type Options struct {
 	DaemonVersion string
 	// Available says whether the machine's owner would mind a job right now.
 	Available func() bool
+	// Runner runs jobs. Nil means the machine connects and reports presence
+	// but declines every job.
+	Runner jobs.Runner
 	// RefreshEvery is how often the server is asked which pools to serve.
 	// Defaults to a minute.
 	RefreshEvery time.Duration
@@ -44,10 +48,10 @@ func Run(ctx context.Context, options Options) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	jobs := &tunnel.Jobs{}
+	slot := jobs.New(options.Runner, options.Log)
 	presence := func() protocol.Presence {
 		switch {
-		case jobs.Busy():
+		case slot.Busy():
 			return protocol.Busy
 		case options.Available():
 			return protocol.Online
@@ -122,13 +126,15 @@ func Run(ctx context.Context, options Options) error {
 				go func() {
 					err := tunnel.Run(poolCtx, tunnel.Options{
 						URL:           address,
+						PoolID:        id,
 						Pool:          pool.Name,
 						Token:         options.Token,
 						DaemonVersion: options.DaemonVersion,
 						Presence:      presence,
 						PresenceEvery: options.PresenceEvery,
 						PingEvery:     options.PingEvery,
-						Jobs:          jobs,
+						Jobs:          slot,
+						JobContext:    ctx,
 						Log:           options.Log,
 					})
 					stop()
