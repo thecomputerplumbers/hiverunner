@@ -21,6 +21,8 @@ jobs:
         run: node tests/run-worker-smoke.mjs
       - name: Drive the coordinator as a daemon would
         run: node tests/run-coordinator-smoke.mjs
+      - name: Dispatch and settle a job against a local GitHub Actions service
+        run: node tests/run-listener-smoke.mjs
   daemon:
     runs-on: ubuntu-latest
     timeout-minutes: 10

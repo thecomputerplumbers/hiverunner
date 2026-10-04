@@ -32,7 +32,7 @@ localhost only; everywhere else GitHub is the only way in.
 mise run dev         # Start the development server
 mise run check       # Lint, format, licenses, types, tests, production build
 mise run format      # Format the workspace with oxfmt
-pnpm test:worker     # Install flow against a fake GitHub; tunnel as a fake daemon
+pnpm test:worker     # Install, tunnels, job dispatch and signed settlement on local Workers
 pnpm test:daemon     # The real daemon against both local Workers (macOS)
 pnpm run doctor      # Check local setup; also accepts staging or production
 pnpm db:seed         # Repeatable local pools and users
@@ -45,6 +45,8 @@ pnpm cf:typegen      # Regenerate Cloudflare binding and runtime types
 | Path                                                | What it holds                                                       |
 | --------------------------------------------------- | ------------------------------------------------------------------- |
 | `apps/web`                                          | Marketing site, dashboard, sign-in, GitHub App endpoints (vinext)   |
+| `apps/coordinator`                                  | Machine tunnels, scale-set listeners, dispatch and job metering     |
+| `daemon`                                            | macOS daemon and isolated Linux VM runner                           |
 | `packages/db`                                       | HiveWorker's D1 tables and the operations on them                   |
 | `packages/github`                                   | GitHub App over `fetch` and WebCrypto                               |
 | `packages/pricing`                                  | Compute-unit math, the floor, comparison rates. Every price is here |
@@ -58,9 +60,14 @@ Working end to end locally, with tests: GitHub App installation, GitHub
 sign-in and membership, pool settings, the ledger and trial grant, daemon
 sign-in and enrollment, the tunnel, presence, and revocation.
 
-Not built yet: the scale set listener (so no job reaches a machine), the VM
-runner in the daemon (it declines jobs), metering and receipts, the menu bar
-item, and anything on chain. Nothing is deployed.
+The scale-set listener, offer/accept/JIT dispatch, isolated VM runner and
+GitHub-timed metering with signed receipts are implemented. The VM runner has
+also run a real Actions job on Apple Silicon. See [running jobs](docs/running-jobs.md)
+for setup and current limits. The web app and tunnel coordinator are deployed;
+the new execution path still requires release and coordinator secrets.
+
+Still planned: warm VMs, caches, container jobs, the menu bar item, Keychain
+storage, and on-chain payments.
 
 `AGENTS.md` has the rules for working in this codebase: the two databases,
 package boundaries, auth, and the checks.
