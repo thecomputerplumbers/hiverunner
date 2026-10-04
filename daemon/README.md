@@ -65,6 +65,32 @@ A VM of the default size is kept booted while the machine is on power with the
 lid open, so a job of that size starts in under a second instead of about
 three. It is replaced after each job, and not kept on battery.
 
+## Keeping the guest image current
+
+The guest pins a version of GitHub's runner. GitHub stops accepting old
+versions, and a runner it refuses does not update itself: it exits without
+taking the job, which stays queued. Measured on 2026-10-04:
+
+| Guest runner | Released   | What happened                                          |
+| ------------ | ---------- | ------------------------------------------------------ |
+| 2.337.0      | 2026-08-26 | Current. Ran the job                                   |
+| 2.336.0      | 2026-07-20 | Ran the job, without updating itself                   |
+| 2.335.0      | 2026-06-08 | Refused. The runner exited in five seconds with no job |
+
+The daemon recognises the refusal (the runner exits 7). It logs that the image
+must be rebuilt, reports the machine as paused so the pool stops offering it
+jobs, and declines any offer with that reason. It stays that way until it is
+restarted on a new image: bump `RUNNER_VERSION` and its hash in
+`image/build.sh`, run it, and restart `hived`.
+
+There is no way to know in advance that a version has been retired, and its
+age is not a guide: the current release is over a month old and valid. So
+rebuild when GitHub publishes a runner release, rather than waiting for the
+refusal.
+
+If the daemon is killed, or the Mac loses power, a job's disk and directory
+are left behind. The next `hived run` removes them before it starts anything.
+
 ## What it does not do yet
 
 - **Container jobs.** `container:` and `services:` need Docker in the guest.

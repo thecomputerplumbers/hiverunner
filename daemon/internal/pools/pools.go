@@ -109,6 +109,10 @@ func Run(ctx context.Context, options Options) error {
 			}
 			for id, stop := range running {
 				if _, ok := wanted[id]; !ok {
+					// The server no longer lists it. Say so here too: this
+					// can win the race with the coordinator closing the
+					// tunnel, and the owner should see why either way.
+					options.Log.Info("no longer serving a pool", "pool", id)
 					stop()
 				}
 			}

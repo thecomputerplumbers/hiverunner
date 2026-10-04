@@ -62,10 +62,13 @@ jit=$(cat "$share/jitconfig")
 rm -f "$share/jitconfig"
 
 cd /opt/runner
-# A clean environment: nothing of the agent's leaks into the job.
+# A clean environment: nothing of the agent's leaks into the job. The one
+# setting asks the runner to say so (exit 7) when GitHub refuses its version
+# as too old; without it the runner exits 0 and the job just stays queued.
 sudo -u runner -H env -i \
   HOME=/home/runner USER=runner LANG=en_US.UTF-8 \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  ACTIONS_RUNNER_RETURN_VERSION_DEPRECATED_EXIT_CODE=1 \
   /opt/runner/run.sh --jitconfig "$jit"
 code=$?
 unset jit

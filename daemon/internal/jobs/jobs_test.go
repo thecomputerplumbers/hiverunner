@@ -263,3 +263,18 @@ func TestNoRunnerDeclinesEverything(t *testing.T) {
 		t.Fatal("a machine with no runner reserved its slot")
 	}
 }
+
+// broken is a runner that has learned it cannot run jobs.
+type broken struct{ *fake }
+
+func (broken) Unusable() string { return "the guest image is too old" }
+
+func TestAnUnusableRunnerDeclinesWithItsReason(t *testing.T) {
+	m := New(broken{newFake()}, quiet)
+	if reason := m.Offer("acme", offer("a-1")); reason != "the guest image is too old" {
+		t.Fatalf("reason = %q", reason)
+	}
+	if m.Busy() {
+		t.Fatal("an unusable runner reserved the slot")
+	}
+}

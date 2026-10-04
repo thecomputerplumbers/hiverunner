@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Image is a built guest image: see daemon/image/build.sh.
@@ -67,3 +68,40 @@ func LoadImage(dir string) (Image, error) {
 }
 
 func (i Image) path(name string) string { return filepath.Join(i.Dir, name) }
+
+// ExitRunnerDeprecated is the runner's exit code when GitHub refuses its
+// version as too old. It never takes a job in that state.
+const ExitRunnerDeprecated = 7
+
+// ReasonStaleImage is why a machine with an outdated guest declines jobs.
+const ReasonStaleImage = "this machine's guest image has a runner GitHub no longer accepts; rebuild the image"
+
+// SweepWorkDir removes what a previous daemon left behind in its work
+// directory and reports how many job directories it found.
+//
+// A daemon that was killed, or a Mac that lost power, cannot clean up after
+// itself: a job's disk stays on the machine, and so can the directory that
+// held its runner configuration. The next start removes them before doing
+// anything else. Only the daemon calls this, once, before it starts any VM;
+// one work directory belongs to one daemon.
+func SweepWorkDir(dir string) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, entry := range entries {
+		// Only what this package creates. Anything else is not ours to delete.
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "job-") {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}

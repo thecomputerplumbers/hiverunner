@@ -39,3 +39,30 @@ func TestAManifestCannotReachOutsideItsDirectory(t *testing.T) {
 		t.Fatal("a manifest naming a file outside its directory loaded")
 	}
 }
+
+func TestSweepRemovesOnlyLeftoverJobDirectories(t *testing.T) {
+	dir := t.TempDir()
+	if n, err := SweepWorkDir(filepath.Join(dir, "missing")); n != 0 || err != nil {
+		t.Fatalf("a work directory that does not exist yet: %d, %v", n, err)
+	}
+	for _, name := range []string{"job-1", "job-2/share", "keep-me"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, filepath.Join(dir, "job-2", "share"), "jitconfig", "a credential a crash left behind")
+	write(t, dir, "job-notes.txt", "a file, not a job directory")
+
+	n, err := SweepWorkDir(dir)
+	if err != nil || n != 2 {
+		t.Fatalf("SweepWorkDir() = %d, %v; want 2 removed", n, err)
+	}
+	left, _ := os.ReadDir(dir)
+	var names []string
+	for _, entry := range left {
+		names = append(names, entry.Name())
+	}
+	if len(names) != 2 || names[0] != "job-notes.txt" || names[1] != "keep-me" {
+		t.Fatalf("left behind %v; want only what is not a job directory", names)
+	}
+}

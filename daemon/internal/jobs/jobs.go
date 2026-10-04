@@ -35,6 +35,13 @@ type Runner interface {
 	Run(ctx context.Context, job Job) (exitCode int, err error)
 }
 
+// Unusable is implemented by a runner that can find out it will not be able
+// to run jobs, and why: a guest image GitHub no longer accepts, for one. A
+// non-empty reason declines every offer with it.
+type Unusable interface {
+	Unusable() string
+}
+
 // Reasons an offer is declined, in the machine's own words.
 const (
 	ReasonBusy     = "this machine is running a job for another pool"
@@ -112,6 +119,11 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	defer m.mu.Unlock()
 	if m.runner == nil {
 		return ReasonNoRunner
+	}
+	if checked, ok := m.runner.(Unusable); ok {
+		if reason := checked.Unusable(); reason != "" {
+			return reason
+		}
 	}
 	if m.current != nil {
 		// The coordinator repeating itself is not a second job.

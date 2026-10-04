@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Code-Hex/vz/v3"
@@ -52,6 +53,18 @@ type Runner struct {
 	macs [macSlots]bool
 	// teardowns counts warm VMs being destroyed in the background.
 	teardowns sync.WaitGroup
+	// stale is set once GitHub has refused this image's runner as too old.
+	// Nothing clears it: a new image means a new daemon start.
+	stale atomic.Bool
+}
+
+// Unusable reports why this runner cannot run jobs, or "" if it can. It
+// implements jobs.Unusable.
+func (r *Runner) Unusable() string {
+	if r.stale.Load() {
+		return ReasonStaleImage
+	}
+	return ""
 }
 
 // A machine runs one job at a time, with perhaps a warm VM beside it and one
@@ -149,6 +162,12 @@ func (r *Runner) run(ctx context.Context, id string, vcpus int, file, content st
 		}
 	} else if err == nil {
 		err = errors.New("the VM stopped without reporting a result")
+	}
+	if code == ExitRunnerDeprecated && file == "jitconfig" {
+		// Not a job that failed: a runner that will never take one. Every
+		// later VM from this image would do the same, so stop offering.
+		r.stale.Store(true)
+		r.Log.Error("GitHub refused the guest's runner as too old; this machine will decline jobs until the image is rebuilt", "runner", r.Image.RunnerVersion)
 	}
 	if err != nil {
 		// The guest's console is not logged. A job can write anything to it,
@@ -354,7 +373,8 @@ func (r *Runner) tend(available bool) {
 		}()
 	}
 	// Not during a job: booting would take cores from work that is paid for.
-	start := available && r.warm == nil && !r.warming && r.active == 0
+	// And not from an image that cannot run one.
+	start := available && r.warm == nil && !r.warming && r.active == 0 && !r.stale.Load()
 	if start {
 		r.warming = true
 	}

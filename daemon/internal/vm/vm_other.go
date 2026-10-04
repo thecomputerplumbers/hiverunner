@@ -26,3 +26,5 @@ func (r *Runner) Run(context.Context, jobs.Job) (int, error) { return -1, errUns
 func (r *Runner) SelfTest(context.Context, int) (string, error) { return "", errUnsupported }
 
 func (r *Runner) Tend(context.Context, func() bool) {}
+
+func (r *Runner) Unusable() string { return "" }

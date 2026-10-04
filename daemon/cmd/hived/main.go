@@ -221,6 +221,14 @@ func run(ctx context.Context) error {
 		log.Warn("this machine cannot run jobs yet", "reason", err)
 	} else {
 		runner = vmRunner
+		// A daemon that was killed leaves its VMs' disks, and possibly a
+		// job's runner configuration, on disk. Remove them before anything
+		// else runs.
+		if swept, err := vm.SweepWorkDir(vmRunner.WorkDir); err != nil {
+			log.Warn("could not clear what a previous run left behind", "error", err)
+		} else if swept > 0 {
+			log.Info("cleared what a previous run left behind", "directories", swept)
+		}
 		// One VM of the default size stays booted while the machine is
 		// available, so a job skips the boot. HIVE_WARM=0 turns it off.
 		if os.Getenv("HIVE_WARM") != "0" {
@@ -240,7 +248,14 @@ func run(ctx context.Context) error {
 		RefreshEvery:  refresh,
 		Runner:        runner,
 		Log:           log,
-		Available:     func() bool { return host.ReadPower().Available() },
+		// Paused, not online, when the machine cannot take a job: the pool
+		// then stops offering it any, instead of being declined each time.
+		Available: func() bool {
+			if unusable, ok := runner.(jobs.Unusable); ok && unusable.Unusable() != "" {
+				return false
+			}
+			return host.ReadPower().Available()
+		},
 	})
 }
 
