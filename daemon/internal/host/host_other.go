@@ -13,4 +13,5 @@ var ErrUnsupported = errors.New("HiveWorker runs on Apple Silicon Macs for now (
 
 func ReadFacts() (Facts, error) { return Facts{}, ErrUnsupported }
 
-func ReadPower() Power { return Power{OnBattery: true} }
+// Unsupported hosts remain unavailable.
+func ReadPower() Power { return Power{LidClosed: true} }

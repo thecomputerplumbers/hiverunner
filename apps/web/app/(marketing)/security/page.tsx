@@ -119,9 +119,9 @@ export default function SecurityPage() {
             Jobs keep running on battery. Closing the lid pauses new jobs and
             discards the idle VM. Each job leaves two CPU cores for the owner.
           </Fact>
-          <Fact title="It can be paused">
-            The menu bar item pauses the daemon. A paused machine takes no new
-            jobs.
+          <Fact title="Pause controls are planned">
+            A menu bar item with a pause control is planned. The current daemon
+            runs from the terminal.
           </Fact>
           <Fact title="Never root">
             The daemon runs as a per-user agent with the developer's own

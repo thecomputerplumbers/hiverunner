@@ -6,8 +6,8 @@ export function Daemon() {
     <>
       <p>
         The daemon is the program on a developer's Mac that takes jobs from the
-        pool and runs them. It is a single signed binary with a menu bar item,
-        and it runs as a per-user agent, not as root.
+        pool and runs them. It is a single signed binary, and it runs as a
+        per-user agent, not as root. A menu bar item is planned.
       </p>
 
       <h2 id="signing-in">Signing in</h2>
@@ -70,14 +70,15 @@ export function Daemon() {
       <h2 id="your-machine">When you need your machine</h2>
       <ul>
         <li>
-          When you start using the Mac during a job, the daemon throttles the VM
-          and lets the job finish.
+          Each job leaves two CPU cores for the owner. Automatic throttling when
+          you start using the Mac is planned.
         </li>
         <li>
           Jobs and the idle VM stay available on battery. Closing the lid pauses
-          new jobs and discards the idle VM.
+          new jobs and discards the idle VM. An active job can stall if the Mac
+          goes to sleep.
         </li>
-        <li>Pausing from the menu bar stops new jobs from arriving.</li>
+        <li>A menu bar control to pause new jobs is planned.</li>
       </ul>
 
       <h2 id="network">Network</h2>
