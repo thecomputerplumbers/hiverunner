@@ -44,11 +44,11 @@ Current exceptions:
 These are distributed, not just run by us, so their licenses bind us directly.
 Check each when it is added.
 
-| Component                     | License           | Obligation                                                                                    |
-| ----------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
-| GitHub Actions runner (in VM) | MIT               | Keep the notice in the image                                                                  |
-| Linux guest image             | Mixed             | Publish the package manifest and offer source for GPL parts                                   |
-| Go modules in the daemon      | ISC, BSD-3-Clause | `coder/websocket`, `golang.org/x/sys`. Ship a third-party notices file with the signed binary |
+| Component                     | License           | Obligation                                                                                                         |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| GitHub Actions runner (in VM) | MIT               | Keep the notice in the image                                                                                       |
+| Linux guest image             | Mixed             | Publish the package manifest and offer source for GPL parts                                                        |
+| Go modules in the daemon      | ISC, BSD-3-Clause | `coder/websocket`, `golang.org/x/sys`, `Code-Hex/vz` (MIT). Ship a third-party notices file with the signed binary |
 
 ## Before going public
 
