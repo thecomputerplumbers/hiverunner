@@ -180,6 +180,7 @@ var (
 func (c *Client) AwaitToken(ctx context.Context, code DeviceCode) (string, error) {
 	interval := time.Duration(code.Interval) * time.Second
 	deadline := time.Now().Add(time.Duration(code.ExpiresIn) * time.Second)
+	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -198,8 +199,17 @@ func (c *Client) AwaitToken(ctx context.Context, code DeviceCode) (string, error
 			"client_id":   ClientID,
 		}, &granted)
 		if err != nil {
-			return "", err
+			// A dropped connection while waiting is not a refusal. The
+			// person may be mid-approval; keep asking until the code expires.
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			if failures++; failures > 5 {
+				return "", err
+			}
+			continue
 		}
+		failures = 0
 		if status < 300 && granted.AccessToken != "" {
 			return granted.AccessToken, nil
 		}

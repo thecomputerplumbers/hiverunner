@@ -142,3 +142,20 @@ func TestMeListsPoolsAndRecognisesARetiredMachine(t *testing.T) {
 		t.Fatalf("Me() after retirement = %v", err)
 	}
 }
+
+func TestADroppedConnectionWhileWaitingIsRetried(t *testing.T) {
+	c := server(t, map[string][]func(http.ResponseWriter, *http.Request){
+		"/api/auth/device/token": {
+			func(w http.ResponseWriter, _ *http.Request) {
+				// Hang up without answering, as a restarting server does.
+				connection, _, _ := w.(http.Hijacker).Hijack()
+				connection.Close()
+			},
+			reply(200, map[string]string{"access_token": "session-token"}),
+		},
+	})
+	token, err := c.AwaitToken(context.Background(), DeviceCode{DeviceCode: "dc", ExpiresIn: 600})
+	if err != nil || token != "session-token" {
+		t.Fatalf("AwaitToken() = %q, %v", token, err)
+	}
+}

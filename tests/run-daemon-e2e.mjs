@@ -32,6 +32,7 @@ async function freePort() {
 }
 const webPort = await freePort()
 const coordinatorPort = await freePort()
+const inspectorPorts = [await freePort(), await freePort()]
 const origin = `http://localhost:${webPort}`
 const log = openSync(`${storage}/workers.log`, "w")
 const password = crypto.randomUUID()
@@ -73,6 +74,10 @@ function start(app, args) {
       "wrangler",
       "dev",
       ...args,
+      // Each Worker gets its own debugger port; the default collides when
+      // two run at once, here or in another checkout.
+      "--inspector-port",
+      String(inspectorPorts.pop()),
       "--persist-to",
       storage,
     ],
