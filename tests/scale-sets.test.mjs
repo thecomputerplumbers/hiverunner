@@ -15,7 +15,7 @@ function fake() {
   let created = false
   const send = async (raw, init) => {
     const url = new URL(raw)
-    assert.equal(init.redirect, "error")
+    assert.equal(init.redirect, "manual")
     calls.push({ url, init })
     if (url.pathname.endsWith("registration-token")) {
       assert.equal(init.headers.Authorization, "Bearer installation-secret")

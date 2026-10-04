@@ -67,6 +67,22 @@ export const poolSettings = sqliteTable("pool_settings", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 })
 
+/** GitHub's stable scale-set identity; leases and sessions live in the listener. */
+export const runnerScaleSet = sqliteTable(
+  "runner_scale_set",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    installationId: integer("installation_id").notNull(),
+    scaleSetId: integer("scale_set_id").notNull(),
+    runnerGroupId: integer("runner_group_id").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.organizationId, table.label] })]
+)
+
 /**
  * A developer's computer. It belongs to a person, not to a pool: which pools
  * it serves is `machinePool`. The daemon holds the machine token and nothing

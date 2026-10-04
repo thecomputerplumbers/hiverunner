@@ -13,6 +13,7 @@ export type ScaleSession = {
 export type ScaleStatistics = {
   totalAssignedJobs: number
   totalRunningJobs: number
+  totalAvailableJobs?: number
 }
 export type ScaleJob = {
   messageType: "JobAvailable" | "JobAssigned" | "JobStarted" | "JobCompleted"
@@ -47,6 +48,7 @@ type Config = {
   fetch?: typeof fetch
   /** Test servers only; never populated from user input or a webhook. */
   apiUrl?: string
+  requestTimeoutMs?: number
 }
 
 export function createScaleSetClient(config: Config) {
@@ -82,8 +84,10 @@ export function createScaleSetClient(config: Config) {
   ): Promise<T | null> {
     const response = await send(url.toString(), {
       method,
-      redirect: "error",
-      signal: signal ?? AbortSignal.timeout(60000),
+      // workerd supports manual/follow, not the browser's error mode.
+      // A redirect is a non-OK response below, so no credential follows it.
+      redirect: "manual",
+      signal: signal ?? AbortSignal.timeout(config.requestTimeoutMs ?? 60000),
       headers: {
         "User-Agent": "hiveworker",
         Accept: "application/json; api-version=6.0-preview",
@@ -225,6 +229,23 @@ export function createScaleSetClient(config: Config) {
         "DELETE"
       )
     },
+    async refreshSession(
+      scaleSetId: number,
+      session: ScaleSession
+    ): Promise<ScaleSession> {
+      const refreshed = await service<ScaleSession>(
+        `_apis/runtime/runnerscalesets/${scaleSetId}/sessions/${encodeURIComponent(session.sessionId)}`,
+        "PATCH"
+      )
+      if (
+        !refreshed?.sessionId ||
+        !refreshed.messageQueueAccessToken ||
+        !refreshed.messageQueueUrl
+      )
+        throw new Error("Missing refreshed Actions session")
+      serviceURL(refreshed.messageQueueUrl)
+      return refreshed
+    },
     async poll(
       session: ScaleSession,
       lastMessageId: number,
@@ -251,7 +272,11 @@ export function createScaleSetClient(config: Config) {
       if (
         !Number.isSafeInteger(raw.messageId) ||
         !Array.isArray(jobs) ||
-        !raw.statistics
+        !raw.statistics ||
+        !Number.isSafeInteger(raw.statistics.totalAssignedJobs) ||
+        raw.statistics.totalAssignedJobs < 0 ||
+        !Number.isSafeInteger(raw.statistics.totalRunningJobs) ||
+        raw.statistics.totalRunningJobs < 0
       )
         throw new Error("Invalid Actions message")
       for (const job of jobs) {
@@ -306,6 +331,22 @@ export function createScaleSetClient(config: Config) {
       if (!result?.encodedJITConfig || !result.runner?.id)
         throw new Error("Missing JIT runner configuration")
       return result
+    },
+    async runnerByName(name: string): Promise<{ id: number } | null> {
+      const result = await service<{ value: Array<{ id: number }> }>(
+        `_apis/runtime/runners?${new URLSearchParams({ agentName: name })}`
+      )
+      if ((result?.value.length ?? 0) > 1)
+        throw new Error("Ambiguous runner name")
+      return result?.value[0] ?? null
+    },
+    async removeRunner(id: number) {
+      try {
+        await service(`_apis/runtime/runners/${id}`, "DELETE")
+      } catch (error) {
+        if (!(error instanceof ScaleSetError) || error.status !== 404)
+          throw error
+      }
     },
   }
 }

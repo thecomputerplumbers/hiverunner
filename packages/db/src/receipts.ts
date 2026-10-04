@@ -92,7 +92,7 @@ export async function createReceiptSigner(
     true,
     ["sign"]
   )
-  const jwk = await crypto.subtle.exportKey("jwk", privateKey)
+  const jwk = (await crypto.subtle.exportKey("jwk", privateKey)) as JsonWebKey
   const publicKey = jwk.x!
   const digest = await crypto.subtle.digest("SHA-256", fromBase64url(publicKey))
   return {

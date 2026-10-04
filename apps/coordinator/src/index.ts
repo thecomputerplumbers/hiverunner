@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/d1"
 import { authenticateMachineForPool } from "@workspace/db/machines"
 
 export { Pool } from "./pool"
+export { ScaleListener } from "./listener"
 
 /**
  * The coordinator's front door. It authenticates a machine token for the

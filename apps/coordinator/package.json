@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
+    "@workspace/github": "workspace:*",
+    "@workspace/pricing": "workspace:*",
     "@workspace/protocol": "workspace:*",
     "drizzle-orm": "1.0.0-rc.5-5935859"
   },

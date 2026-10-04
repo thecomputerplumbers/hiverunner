@@ -22,10 +22,14 @@
     },
   ],
   "durable_objects": {
-    "bindings": [{ "name": "POOL", "class_name": "Pool" }],
+    "bindings": [
+      { "name": "POOL", "class_name": "Pool" },
+      { "name": "LISTENER", "class_name": "ScaleListener" },
+    ],
   },
   "exports": {
     "Pool": { "type": "durable-object", "storage": "sqlite" },
+    "ScaleListener": { "type": "durable-object", "storage": "sqlite" },
   },
   "vars": {
     // How often a pool re-checks its connected machines against D1.

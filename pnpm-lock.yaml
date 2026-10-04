@@ -253,6 +253,12 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@workspace/github':
+        specifier: workspace:*
+        version: link:../../packages/github
+      '@workspace/pricing':
+        specifier: workspace:*
+        version: link:../../packages/pricing
       '@workspace/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

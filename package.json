@@ -14,7 +14,7 @@
     "typecheck": "turbo typecheck",
     "format:check": "oxfmt --check",
     "test": "node --test tests/*.test.mjs",
-    "test:worker": "pnpm build && node tests/run-worker-smoke.mjs && node tests/run-coordinator-smoke.mjs",
+    "test:worker": "pnpm build && node tests/run-worker-smoke.mjs && node tests/run-coordinator-smoke.mjs && node tests/run-listener-smoke.mjs",
     "test:daemon": "pnpm build && node tests/run-daemon-e2e.mjs",
     "project:init": "node scripts/init-project.mjs",
     "doctor": "node scripts/doctor.mjs",

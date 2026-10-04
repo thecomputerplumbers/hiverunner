@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers"
 import { and, eq, inArray } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { githubInstallation, machine, machinePool } from "@workspace/db/schema"
+import { RUNNER_SIZES } from "@workspace/pricing"
 import {
   CLOSE,
   PING,
@@ -15,13 +16,20 @@ import {
 import { pickMachine, type Candidate } from "./schedule"
 
 /** Rides along with each socket, and survives the object hibernating. */
-type Attachment = Candidate & { organizationId: string; greeted: boolean }
+type Attachment = Candidate & {
+  organizationId: string
+  greeted: boolean
+  label?: string
+  accepted?: boolean
+  started?: boolean
+  offerExpires?: number
+  exited?: boolean
+}
 
 export type Assignment = {
   assignmentId: string
   label: string
   vcpus: number
-  jitConfig: string
   timeoutMinutes: number
 }
 
@@ -96,25 +104,59 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       if (message.protocol !== PROTOCOL_VERSION)
         return socket.close(CLOSE.UNSUPPORTED, "Update the HiveWorker daemon")
       state.greeted = true
+      if (message.assignmentId) {
+        const reservation = await this.ctx.storage.get<Attachment>(
+          `assignment:${message.assignmentId}`
+        )
+        if (reservation?.machineId === state.machineId) {
+          Object.assign(state, reservation, { greeted: true })
+        } else {
+          this.send(socket, {
+            type: "job.release",
+            assignmentId: message.assignmentId,
+          })
+        }
+      }
       await this.db
         .update(machine)
         .set({ daemonVersion: message.daemonVersion })
         .where(eq(machine.id, state.machineId))
-      return this.setPresence(socket, state, message.presence)
+      return this.setPresence(
+        socket,
+        state,
+        state.assignmentId ? "busy" : message.presence
+      )
     }
     if (!state.greeted)
       return this.send(socket, { type: "error", message: "Say hello first" })
 
     if (message.type === "presence")
-      return this.setPresence(socket, state, message.presence)
+      return this.setPresence(
+        socket,
+        state,
+        state.assignmentId ? "busy" : message.presence
+      )
     if (message.type === "job.accepted") {
       if (message.assignmentId !== state.assignmentId) return
+      state.accepted = true
+      state.offerExpires = Date.now() + 20000
+      await this.ctx.storage.put(`assignment:${state.assignmentId}`, state)
       return this.setPresence(socket, state, "busy")
     }
     // Rejected or exited: the machine is free again. What it is free *for*
     // is the daemon's to say, in its next presence message.
     if (message.assignmentId === state.assignmentId) {
+      if (message.type === "job.exited")
+        await this.ctx.storage.put(`assignment:${state.assignmentId}`, {
+          ...state,
+          exited: true,
+        })
+      else await this.ctx.storage.delete(`assignment:${state.assignmentId}`)
       state.assignmentId = undefined
+      state.accepted = undefined
+      state.started = undefined
+      state.label = undefined
+      state.offerExpires = undefined
       this.attach(socket, state)
     }
   }
@@ -132,7 +174,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
    * nothing in the pool can take it, in which case the caller leaves the job
    * queued at GitHub.
    */
-  async assign(assignment: Assignment) {
+  async offer(assignment: Assignment) {
     const sockets = this.ctx.getWebSockets()
     const chosen = pickMachine(
       sockets.map((socket) => this.attachment(socket)),
@@ -144,9 +186,100 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     )!
     const state = this.attachment(socket)
     state.assignmentId = assignment.assignmentId
+    state.label = assignment.label
+    state.accepted = false
+    state.offerExpires = Date.now() + 10000
     this.attach(socket, state)
+    await this.ctx.storage.put(`assignment:${assignment.assignmentId}`, state)
     this.send(socket, { type: "job.assign", ...assignment })
     return { machineId: chosen.machineId, speedScore: chosen.speedScore }
+  }
+
+  async offerStatus(assignmentId: string) {
+    const state = await this.ctx.storage.get<Attachment>(
+      `assignment:${assignmentId}`
+    )
+    if (!state) return "released" as const
+    if (state.exited) return "exited" as const
+    if (!state.started && (state.offerExpires ?? 0) < Date.now()) {
+      await this.release(assignmentId)
+      return "released" as const
+    }
+    if (
+      !this.ctx
+        .getWebSockets(state.machineId)
+        .some((socket) => this.attachment(socket).assignmentId === assignmentId)
+    )
+      return state.started ? ("disconnected" as const) : ("pending" as const)
+    return state.accepted ? ("accepted" as const) : ("pending" as const)
+  }
+
+  async start(input: {
+    assignmentId: string
+    jitConfig: string
+    runnerName: string
+  }) {
+    const reservation = await this.ctx.storage.get<Attachment>(
+      `assignment:${input.assignmentId}`
+    )
+    const socket = this.ctx
+      .getWebSockets()
+      .find(
+        (socket) => this.attachment(socket).assignmentId === input.assignmentId
+      )
+    if (!reservation?.accepted || !socket) return false
+    if (!reservation.started && (reservation.offerExpires ?? 0) < Date.now())
+      return false
+    reservation.started = true
+    await this.ctx.storage.put(`assignment:${input.assignmentId}`, reservation)
+    this.attach(socket, { ...this.attachment(socket), started: true })
+    this.send(socket, { type: "job.start", ...input })
+    return true
+  }
+
+  async release(assignmentId: string) {
+    await this.ctx.storage.delete(`assignment:${assignmentId}`)
+    for (const socket of this.ctx.getWebSockets()) {
+      const state = this.attachment(socket)
+      if (state.assignmentId !== assignmentId) continue
+      const accepted = state.accepted
+      this.send(socket, { type: "job.release", assignmentId })
+      state.assignmentId = undefined
+      state.accepted = undefined
+      state.started = undefined
+      state.offerExpires = undefined
+      state.label = undefined
+      // The daemon reports online after destroying its VM.
+      if (accepted) state.presence = "busy"
+      this.attach(socket, state)
+    }
+  }
+
+  async capacity(label: string, vcpus: number) {
+    return this.ctx.getWebSockets().filter((socket) => {
+      const state = this.attachment(socket)
+      return (
+        state.greeted &&
+        state.cores >= vcpus + 2 &&
+        ((state.presence === "online" && !state.assignmentId) ||
+          state.label === label)
+      )
+    }).length
+  }
+
+  private async wakeListeners(state: Attachment) {
+    if (
+      !this.env.GITHUB_APP_ID ||
+      !this.env.GITHUB_APP_PRIVATE_KEY ||
+      !this.env.RECEIPT_SIGNING_KEY
+    )
+      return
+    for (const size of RUNNER_SIZES) {
+      if (state.cores < size.vcpus + 2) continue
+      await this.env.LISTENER.getByName(
+        `${state.organizationId}:${size.label}`
+      ).activate(state.organizationId, size.label)
+    }
   }
 
   /**
@@ -192,8 +325,10 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     const seen: string[] = []
     for (const socket of sockets) {
       const state = this.attachment(socket)
-      if (active.has(state.machineId)) seen.push(state.machineId)
-      else
+      if (active.has(state.machineId)) {
+        seen.push(state.machineId)
+        if (state.presence === "online") await this.wakeListeners(state)
+      } else
         socket.close(CLOSE.REVOKED, "This machine no longer serves this pool")
     }
     for (let i = 0; i < seen.length; i += 50)
@@ -220,6 +355,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       .update(machinePool)
       .set({ presence, lastSeenAt: new Date() })
       .where(this.row(state))
+    if (presence === "online") await this.wakeListeners(state)
   }
 
   private async gone(socket: WebSocket) {

@@ -191,3 +191,43 @@ test("an empty balance stops new jobs", async (t) => {
     .run(orgId)
   assert.equal(await canAcquireJobs(db, orgId), false)
 })
+
+test("a retry repairs ledger entries after the receipt was committed", async (t) => {
+  const { db, sqlite } = await pool(t)
+  const jobId = await start(db)
+  await settleJob(db, signer, {
+    jobId,
+    completedAt: after(60),
+    result: "succeeded",
+  })
+  sqlite.prepare("delete from ledger_entry where job_id = ?").run(jobId)
+  assert.deepEqual(
+    await settleJob(db, signer, {
+      jobId,
+      completedAt: after(60),
+      result: "succeeded",
+    }),
+    { settled: false, reason: "already-settled" }
+  )
+  assert.equal(
+    sqlite
+      .prepare("select count(*) n from ledger_entry where job_id = ?")
+      .get(jobId).n,
+    3
+  )
+})
+
+test("the accepted quote survives a pool revocation and score change", async (t) => {
+  const { db, sqlite } = await pool(t)
+  sqlite.exec(
+    "update machine set speed_score=9; update machine_pool set status='revoked'"
+  )
+  assert.equal(await start(db), null)
+  const id = await start(db, 2, { speedScore: 1.5 })
+  assert.equal(id, jobIdFor(orgId, 2))
+  assert.equal(
+    sqlite.prepare("select speed_score from job where id = ?").get(id)
+      .speed_score,
+    1.5
+  )
+})
