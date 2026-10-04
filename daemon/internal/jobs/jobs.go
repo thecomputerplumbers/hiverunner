@@ -56,6 +56,9 @@ type slot struct {
 	phase        phase
 	// cancel stops the start timer (accepted) or the runner (running).
 	cancel func()
+	// released means the coordinator backed out of a running job: its VM is
+	// being destroyed, and its result is of no interest.
+	released bool
 }
 
 // Manager is the slot. It is safe for use by every pool's tunnel at once.
@@ -67,6 +70,9 @@ type Manager struct {
 	mu      sync.Mutex
 	current *slot
 	exits   map[string]chan protocol.JobExited
+	// running counts jobs whose runner has not returned, so shutdown can
+	// wait for their VMs to be destroyed.
+	running sync.WaitGroup
 }
 
 // New returns a manager. A nil runner declines every offer, which is what a
@@ -166,9 +172,12 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		VCPUs:        held.vcpus,
 		Timeout:      held.timeout,
 	}
+	m.running.Add(1)
 	go func() {
+		defer m.running.Done()
 		defer cancel()
 		m.log.Info("job started", "assignment", job.AssignmentID, "runner", job.RunnerName, "vcpus", job.VCPUs)
+		// Run returns only once the VM and its files are gone.
 		exitCode, err := m.runner.Run(runCtx, job)
 		if err != nil {
 			m.log.Error("job failed to run", "assignment", job.AssignmentID, "error", err)
@@ -176,9 +185,11 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 				exitCode = -1
 			}
 		}
+		// The slot is freed here and nowhere else for a running job: not
+		// before its VM is destroyed, even when the job was released.
 		m.mu.Lock()
-		released := m.current != held
-		if !released {
+		released := held.released
+		if m.current == held {
 			m.current = nil
 		}
 		m.mu.Unlock()
@@ -191,17 +202,30 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 	return nil
 }
 
-// Release backs out of a job this pool placed: an accepted offer is dropped,
-// a running job is stopped and its VM destroyed.
+// Release backs out of a job this pool placed. An accepted offer is dropped
+// at once. A running job is stopped, and the slot stays taken until its VM is
+// destroyed: a machine still tearing one job down is not free for another.
 func (m *Manager) Release(pool, assignmentID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.current == nil || m.current.pool != pool || m.current.assignmentID != assignmentID {
+	held := m.current
+	if held == nil || held.pool != pool || held.assignmentID != assignmentID {
 		return
 	}
 	m.log.Info("job released by the coordinator", "assignment", assignmentID)
-	m.current.cancel()
+	held.cancel()
+	if held.phase == running {
+		held.released = true
+		return
+	}
 	m.current = nil
+}
+
+// Wait returns when no job's runner is still running, which means every VM
+// a job started has been destroyed. Cancel the context given to Start first;
+// the daemon calls this before it exits so nothing is left on disk.
+func (m *Manager) Wait() {
+	m.running.Wait()
 }
 
 // Exits carries finished jobs' results for one pool. The tunnel sends each

@@ -123,8 +123,29 @@ func TestAnOfferThatIsNeverStartedExpires(t *testing.T) {
 	}
 }
 
-func TestReleaseStopsARunningJobQuietly(t *testing.T) {
-	runner := newFake()
+// slow is a runner whose teardown takes a while, as destroying a VM does.
+type slow struct {
+	started  chan struct{}
+	teardown chan struct{} // closed by the test to let teardown finish
+	tornDown chan struct{}
+}
+
+func newSlow() *slow {
+	return &slow{started: make(chan struct{}), teardown: make(chan struct{}), tornDown: make(chan struct{})}
+}
+
+func (r *slow) Run(ctx context.Context, _ Job) (int, error) {
+	close(r.started)
+	<-ctx.Done()
+	<-r.teardown
+	close(r.tornDown)
+	return -1, ctx.Err()
+}
+
+// The order that matters: a released job's VM is destroyed before the
+// machine takes anything else, and its result is never reported.
+func TestAReleasedJobHoldsTheSlotUntilItsVMIsGone(t *testing.T) {
+	runner := newSlow()
 	m := New(runner, quiet)
 	m.Offer("acme", offer("a-1"))
 	if err := m.Start(context.Background(), "acme", start("a-1")); err != nil {
@@ -132,19 +153,82 @@ func TestReleaseStopsARunningJobQuietly(t *testing.T) {
 	}
 	<-runner.started
 	m.Release("acme", "a-1")
-	select {
-	case <-runner.stopped:
-	case <-within(t, "stop"):
-		t.Fatal("the runner was not stopped")
+
+	// Teardown is under way. The machine is not free yet, for anyone.
+	if !m.Busy() {
+		t.Fatal("the slot was freed while the VM was still being destroyed")
 	}
-	if m.Busy() {
-		t.Fatal("the slot was not freed")
+	if reason := m.Offer("globex", offer("g-1")); reason != ReasonBusy {
+		t.Fatalf("another pool's offer during teardown: %q, want it declined as busy", reason)
+	}
+	if m.Current("acme") != "a-1" {
+		t.Fatal("a reconnect during teardown would not name the job still on the machine")
+	}
+	// Releasing twice changes nothing.
+	m.Release("acme", "a-1")
+
+	close(runner.teardown)
+	<-runner.tornDown
+	deadline := time.Now().Add(3 * time.Second)
+	for m.Busy() {
+		if time.Now().After(deadline) {
+			t.Fatal("the slot was never freed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if reason := m.Offer("globex", offer("g-1")); reason != "" {
+		t.Fatalf("offer after teardown: %q", reason)
 	}
 	select {
 	case exit := <-m.Exits("acme"):
 		t.Fatalf("a released job reported %+v", exit)
 	case <-time.After(100 * time.Millisecond):
 	}
+}
+
+// Shutting down: cancelling stops the job, and Wait does not return until
+// its VM has been destroyed.
+func TestWaitReturnsOnlyAfterTeardown(t *testing.T) {
+	runner := newSlow()
+	m := New(runner, quiet)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Offer("acme", offer("a-1"))
+	if err := m.Start(ctx, "acme", start("a-1")); err != nil {
+		t.Fatal(err)
+	}
+	<-runner.started
+	cancel()
+
+	waited := make(chan struct{})
+	go func() { m.Wait(); close(waited) }()
+	select {
+	case <-waited:
+		t.Fatal("Wait returned while the VM was still being destroyed")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(runner.teardown)
+	select {
+	case <-waited:
+	case <-within(t, "wait"):
+		t.Fatal("Wait never returned")
+	}
+	select {
+	case <-runner.tornDown:
+	default:
+		t.Fatal("Wait returned before teardown finished")
+	}
+}
+
+// An offer that was accepted but never started holds no VM: releasing it
+// frees the machine at once.
+func TestReleasingAnAcceptedOfferFreesTheSlotAtOnce(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Offer("acme", offer("a-1"))
+	m.Release("acme", "a-1")
+	if m.Busy() {
+		t.Fatal("the slot was not freed")
+	}
+	m.Wait() // Nothing is running; this must not block.
 }
 
 func TestTheJobTimeoutDestroysTheRunner(t *testing.T) {

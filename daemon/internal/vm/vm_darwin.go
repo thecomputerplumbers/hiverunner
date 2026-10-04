@@ -50,6 +50,8 @@ type Runner struct {
 	active  int
 	// macs in use, by slot: see mac.
 	macs [macSlots]bool
+	// teardowns counts warm VMs being destroyed in the background.
+	teardowns sync.WaitGroup
 }
 
 // A machine runs one job at a time, with perhaps a warm VM beside it and one
@@ -316,8 +318,11 @@ func (r *Runner) takeWarmLocked(vcpus int) *instance {
 
 // Tend keeps one VM booted and waiting while the machine is available and
 // idle, and none when it is not: on battery or with the lid closed, a VM
-// waiting for a job is the owner's battery spent on nothing. It returns when
-// ctx is cancelled, taking the warm VM with it.
+// waiting for a job is the owner's battery spent on nothing.
+//
+// It returns when ctx is cancelled, and not before every warm VM it started
+// has been destroyed and its files removed. The daemon waits for it on the
+// way out for that reason.
 func (r *Runner) Tend(ctx context.Context, available func() bool) {
 	if r.WarmVCPUs < 1 {
 		return
@@ -329,6 +334,7 @@ func (r *Runner) Tend(ctx context.Context, available func() bool) {
 		select {
 		case <-ctx.Done():
 			r.tend(false)
+			r.teardowns.Wait()
 			return
 		case <-tick.C:
 		}
@@ -339,8 +345,13 @@ func (r *Runner) tend(available bool) {
 	r.mu.Lock()
 	if vm := r.warm; vm != nil && (!available || !vm.alive() || time.Since(vm.booted) > warmMaxAge) {
 		r.warm = nil
-		// Destroying waits for the VM to stop; do not hold jobs up for it.
-		go vm.destroy()
+		// Destroying waits for the VM to stop; jobs are not held up for it,
+		// but shutdown is.
+		r.teardowns.Add(1)
+		go func() {
+			defer r.teardowns.Done()
+			vm.destroy()
+		}()
 	}
 	// Not during a job: booting would take cores from work that is paid for.
 	start := available && r.warm == nil && !r.warming && r.active == 0

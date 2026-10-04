@@ -204,6 +204,16 @@ func run(ctx context.Context) error {
 	if seconds, err := strconv.Atoi(os.Getenv("HIVE_REFRESH_SECONDS")); err == nil && seconds > 0 {
 		refresh = time.Duration(seconds) * time.Second
 	}
+	// Everything started here is stopped, and waited for, before run
+	// returns: a job's VM, the warm VM, and their files on disk.
+	ctx, stop := context.WithCancel(ctx)
+	tended := make(chan struct{})
+	close(tended)
+	defer func() {
+		stop()
+		<-tended
+	}()
+
 	// Without a guest image the machine still connects and reports presence;
 	// it declines jobs and says why.
 	var runner jobs.Runner
@@ -215,7 +225,11 @@ func run(ctx context.Context) error {
 		// available, so a job skips the boot. HIVE_WARM=0 turns it off.
 		if os.Getenv("HIVE_WARM") != "0" {
 			vmRunner.WarmVCPUs = 2
-			go vmRunner.Tend(ctx, func() bool { return host.ReadPower().Available() })
+			tended = make(chan struct{})
+			go func() {
+				defer close(tended)
+				vmRunner.Tend(ctx, func() bool { return host.ReadPower().Available() })
+			}()
 		}
 		log.Info("ready to run jobs", "runner", vmRunner.Image.RunnerVersion, "image", vmRunner.Image.ImageVersion, "warm", vmRunner.WarmVCPUs)
 	}
@@ -230,7 +244,6 @@ func run(ctx context.Context) error {
 	})
 }
 
-// newRunner prepares the VM runner from the installed guest image.
 func newRunner(log *slog.Logger) (*vm.Runner, error) {
 	dir, err := vm.DefaultImageDir()
 	if err != nil {
@@ -240,8 +253,11 @@ func newRunner(log *slog.Logger) (*vm.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Beside the image, so a job's disk is a clone and not a copy.
-	return &vm.Runner{Image: image, WorkDir: filepath.Join(filepath.Dir(dir), "jobs"), Log: log}, nil
+	// Beside the image, so a job's disk is a clone and not a copy, and named
+	// after it, so two daemons on different images (as in development) keep
+	// separate job directories and separate network identities.
+	work := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-jobs")
+	return &vm.Runner{Image: image, WorkDir: work, Log: log}, nil
 }
 
 func selftest(ctx context.Context) error {

@@ -4,6 +4,8 @@
 // macOS only, because that is the only host the daemon supports.
 import { spawn, spawnSync } from "node:child_process"
 import {
+  existsSync,
+  readdirSync,
   mkdtempSync,
   openSync,
   closeSync,
@@ -110,14 +112,10 @@ async function eventually(check, message) {
 }
 
 try {
-  const built = spawnSync(
-    "go",
-    ["build", "-o", `${storage}/hived`, "./cmd/hived"],
-    {
-      cwd: "daemon",
-      stdio: "inherit",
-    }
-  )
+  // Signed, so it may create virtual machines.
+  const built = spawnSync("daemon/build.sh", [`${storage}/hived`], {
+    stdio: ["ignore", log, log],
+  })
   if (built.status !== 0) throw new Error("The daemon did not build")
 
   if (
@@ -294,9 +292,24 @@ try {
   assert.equal(run.exitCode, null, "the daemon keeps serving acme")
   console.log("The same machine served a second organization, then left it.")
 
+  // With a guest image installed the daemon keeps a VM warm. Stopping it
+  // must take that VM, and its files, with it before the process exits.
+  const jobs = process.env.HIVE_IMAGE ? `${process.env.HIVE_IMAGE}-jobs` : null
+  const warm = jobs && existsSync(`${process.env.HIVE_IMAGE}/manifest.json`)
+  if (warm) {
+    await eventually(
+      () => /a VM is booted and waiting/.test(run.output),
+      `no warm VM\n${run.output}`
+    )
+    assert.ok(readdirSync(jobs).length > 0, "the warm VM has no directory")
+  }
   run.kill("SIGTERM")
   const [stopCode] = await once(run, "exit")
   assert.equal(stopCode, 0, run.output)
+  if (warm) {
+    assert.deepEqual(readdirSync(jobs), [], "stopping left VM files on disk")
+    console.log("Stopping the daemon destroyed its warm VM and left nothing.")
+  }
   await eventually(
     () => presence() === "offline",
     "stopping the daemon did not mark it offline"

@@ -68,6 +68,9 @@ func Run(ctx context.Context, options Options) error {
 		for range running {
 			<-finished
 		}
+		// And let a job that was running have its VM destroyed. Returning
+		// sooner would leave its disk, and its credential, on the machine.
+		slot.Wait()
 	}()
 
 	refresh := time.NewTimer(0)

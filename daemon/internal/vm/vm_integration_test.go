@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -172,10 +173,49 @@ func TestAWarmVMTakesTheJob(t *testing.T) {
 		t.Error("a job of another size took the warm VM")
 	}
 
-	// Unavailable (on battery, lid closed): no VM is kept.
+	// Shutdown: when Tend returns, the warm VM is already gone, files and
+	// all. No waiting: the daemon exits right after this.
 	stop()
 	<-done
+	if warm() != nil {
+		t.Error("Tend returned with a warm VM still held")
+	}
+	if n := leftovers(t, r); n != 0 {
+		t.Errorf("Tend returned with %d job directories still on disk", n)
+	}
+	// Let the deferred stop and wait be harmless.
 	done = make(chan struct{})
 	close(done)
-	waitFor("the warm VM to be destroyed", func() bool { return warm() == nil && leftovers(t, r) == 0 })
+}
+
+// On battery or with the lid closed, no VM is kept waiting.
+func TestNoWarmVMWhenUnavailable(t *testing.T) {
+	r := realRunner(t)
+	r.WarmVCPUs = 2
+	var available atomic.Bool
+	available.Store(true)
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { r.Tend(ctx, available.Load); close(done) }()
+	defer func() { stop(); <-done }()
+
+	held := func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.warm != nil
+	}
+	until := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(30 * time.Second); !ok(); {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	until("a warm VM", held)
+	available.Store(false)
+	until("the warm VM to be destroyed", func() bool { return !held() && leftovers(t, r) == 0 })
+	available.Store(true)
+	until("a warm VM again", held)
 }
