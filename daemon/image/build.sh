@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 RUNNER_VERSION=2.337.0
 RUNNER_SHA256=9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393
 # Bump when anything in this directory changes what ends up in the guest.
-IMAGE_VERSION=2
+IMAGE_VERSION=5
 
 out="${1:-$HOME/Library/Application Support/HiveWorker/image}"
 tag="hiveworker-guest:${IMAGE_VERSION}-${RUNNER_VERSION}"
@@ -44,6 +44,11 @@ docker export "$container" | docker run --rm -i --platform linux/arm64 \
     echo hive > etc/hostname
     printf "127.0.0.1 localhost\n127.0.1.1 hive\n" > etc/hosts
     echo "/dev/vda / ext4 defaults,noatime 0 1" > etc/fstab
+
+    # Clones must not share an identity: an empty machine-id is generated
+    # afresh on each boot.
+    : > etc/machine-id
+    rm -f var/lib/dbus/machine-id
 
     # Direct kernel boot wants the uncompressed arm64 Image.
     kernel=$(ls boot/vmlinuz-* | sort -V | tail -1)

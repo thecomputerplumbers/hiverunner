@@ -3,3 +3,9 @@ Name=en* eth*
 
 [Network]
 DHCP=yes
+
+[DHCPv4]
+# Every VM is a clone of one disk. Identify it by its network card, which the
+# host sets per VM, or every clone asks for the same address and two running
+# at once collide.
+ClientIdentifier=mac

@@ -211,7 +211,13 @@ func run(ctx context.Context) error {
 		log.Warn("this machine cannot run jobs yet", "reason", err)
 	} else {
 		runner = vmRunner
-		log.Info("ready to run jobs", "runner", vmRunner.Image.RunnerVersion, "image", vmRunner.Image.ImageVersion)
+		// One VM of the default size stays booted while the machine is
+		// available, so a job skips the boot. HIVE_WARM=0 turns it off.
+		if os.Getenv("HIVE_WARM") != "0" {
+			vmRunner.WarmVCPUs = 2
+			go vmRunner.Tend(ctx, func() bool { return host.ReadPower().Available() })
+		}
+		log.Info("ready to run jobs", "runner", vmRunner.Image.RunnerVersion, "image", vmRunner.Image.ImageVersion, "warm", vmRunner.WarmVCPUs)
 	}
 	return pools.Run(ctx, pools.Options{
 		Client:        api.New(machine.Server),

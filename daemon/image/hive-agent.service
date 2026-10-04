@@ -6,8 +6,9 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/hive-agent
-StandardOutput=journal+console
-StandardError=journal+console
+# The journal, not the console: what a job prints stays inside the guest.
+StandardOutput=journal
+StandardError=journal
 TimeoutStartSec=infinity
 
 [Install]

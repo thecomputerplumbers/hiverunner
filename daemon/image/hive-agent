@@ -28,6 +28,8 @@ fi
 resize2fs /dev/vda >/dev/null 2>&1 || true
 
 # A warm VM waits here, booted, for its job to arrive.
+# `ready` tells the host the boot is behind it.
+: > "$share/ready"
 waited=0
 until [ -e "$share/jitconfig" ] || [ -e "$share/selftest" ]; do
   sleep 0.2

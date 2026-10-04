@@ -13,9 +13,10 @@ import (
 // Runner is unavailable off macOS. The type exists so the rest of the daemon
 // builds and tests in CI on Linux.
 type Runner struct {
-	Image   Image
-	WorkDir string
-	Log     *slog.Logger
+	Image     Image
+	WorkDir   string
+	Log       *slog.Logger
+	WarmVCPUs int
 }
 
 var errUnsupported = errors.New("the VM runner needs Apple's Virtualization.framework")
@@ -23,3 +24,5 @@ var errUnsupported = errors.New("the VM runner needs Apple's Virtualization.fram
 func (r *Runner) Run(context.Context, jobs.Job) (int, error) { return -1, errUnsupported }
 
 func (r *Runner) SelfTest(context.Context, int) (string, error) { return "", errUnsupported }
+
+func (r *Runner) Tend(context.Context, func() bool) {}

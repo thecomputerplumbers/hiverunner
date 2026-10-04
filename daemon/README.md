@@ -61,11 +61,15 @@ The guest image is Ubuntu 24.04 arm64 with GitHub's runner, pinned by the hash
 GitHub publishes. It has git, curl, sudo and the usual archive tools; jobs
 install toolchains with `setup-*` actions, as they would anywhere.
 
+A VM of the default size is kept booted while the machine is on power with the
+lid open, so a job of that size starts in under a second instead of about
+three. It is replaced after each job, and not kept on battery.
+
 ## What it does not do yet
 
 - **Container jobs.** `container:` and `services:` need Docker in the guest.
-- **A warm VM.** Every job cold-boots. A VM kept booted, or restored from a
-  saved state, would cut the three seconds further.
+- **A pre-registered runner.** The runner still registers with GitHub when the
+  job arrives, which is most of what is left of the start-up time.
 - **Caches between jobs.** Each job starts from the same clean disk.
 - **Throttling for the owner.** It pauses on battery and with the lid closed,
   but does not yet slow a running job when the owner is busy.

@@ -74,7 +74,7 @@ func TestCancellationDestroysTheVM(t *testing.T) {
 	defer cancel()
 	started := time.Now()
 	// A file the guest agent does not act on: the VM boots and waits.
-	code, err := r.run(ctx, "held", 2, "nothing-to-do", "")
+	code, err := r.run(ctx, "held", 2, "nothing-to-do", "", nil)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("run() = %d, %v; want a deadline error", code, err)
 	}
@@ -95,7 +95,7 @@ func TestTheShareHoldsOnlyTheJob(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	var names []string
-	_, err := r.runWith(ctx, "share", 1, "selftest", "1", func(share string) {
+	_, err := r.run(ctx, "share", 1, "selftest", "1", func(share string) {
 		entries, _ := os.ReadDir(share)
 		for _, entry := range entries {
 			names = append(names, entry.Name())
@@ -104,10 +104,78 @@ func TestTheShareHoldsOnlyTheJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"clock": true, "selftest": true, "selftest.out": true, "exit": true}
+	allowed := map[string]bool{"clock": true, "ready": true, "selftest": true, "selftest.out": true, "exit": true}
 	for _, name := range names {
 		if !allowed[name] {
 			t.Errorf("unexpected file in the share: %s", name)
 		}
 	}
+}
+
+// A VM kept booted takes a job without the boot, and is replaced afterwards.
+func TestAWarmVMTakesTheJob(t *testing.T) {
+	r := realRunner(t)
+	r.WarmVCPUs = 2
+	tending, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { r.Tend(tending, func() bool { return true }); close(done) }()
+	defer func() { stop(); <-done }()
+
+	warm := func() *instance {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.warm
+	}
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(30 * time.Second); !ok(); {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	waitFor("a warm VM", func() bool { return warm() != nil })
+	first := warm()
+	// Let the guest reach the point where it is waiting for a job.
+	time.Sleep(4 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cold := time.Now()
+	if _, err := (&Runner{Image: r.Image, WorkDir: r.WorkDir, Log: r.Log}).SelfTest(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+	coldTook := time.Since(cold)
+
+	started := time.Now()
+	report, err := r.SelfTest(ctx, 2)
+	if err != nil {
+		t.Fatalf("self-test on the warm VM: %v\n%s", err, report)
+	}
+	warmTook := time.Since(started)
+	if !strings.Contains(report, "NETWORK=ok") {
+		t.Errorf("warm VM report:\n%s", report)
+	}
+	t.Logf("cold %s, warm %s", coldTook.Round(10*time.Millisecond), warmTook.Round(10*time.Millisecond))
+	if warmTook >= coldTook {
+		t.Errorf("the warm VM (%s) was no faster than a cold boot (%s)", warmTook, coldTook)
+	}
+
+	// A different size cannot use it; the warm VM is left alone.
+	waitFor("a replacement warm VM", func() bool { return warm() != nil && warm() != first })
+	second := warm()
+	if _, err := r.SelfTest(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if warm() != second {
+		t.Error("a job of another size took the warm VM")
+	}
+
+	// Unavailable (on battery, lid closed): no VM is kept.
+	stop()
+	<-done
+	done = make(chan struct{})
+	close(done)
+	waitFor("the warm VM to be destroyed", func() bool { return warm() == nil && leftovers(t, r) == 0 })
 }
