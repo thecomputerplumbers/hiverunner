@@ -190,6 +190,16 @@ func TestOfferAcceptStartExit(t *testing.T) {
 		if exit := read(ctx, t, c); exit["type"] != "job.exited" || exit["assignmentId"] != "a-1" || exit["exitCode"] != float64(7) {
 			t.Errorf("job result = %v", exit)
 		}
+		// A job shorter than a presence tick still ends with the machine
+		// saying it is free, or the pool would think it busy for ever.
+		if after := read(ctx, t, c); after["type"] != "presence" || after["presence"] != "online" {
+			t.Errorf("after the job the daemon sent %v, want presence online", after)
+		}
+		// The same after a release, including of an offer it never held.
+		write(ctx, c, `{"type":"job.release","assignmentId":"never-held"}`)
+		if after := read(ctx, t, c); after["type"] != "presence" || after["presence"] != "online" {
+			t.Errorf("after a release the daemon sent %v, want presence online", after)
+		}
 	})
 	o := options(url, "hwm_good", &presence)
 	o.PoolID = "acme"

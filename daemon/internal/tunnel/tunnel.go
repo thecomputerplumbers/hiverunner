@@ -218,6 +218,15 @@ func session(ctx context.Context, options Options) (bool, error) {
 				}
 			case *protocol.JobRelease:
 				options.Jobs.Release(options.PoolID, message.AssignmentID)
+				// The pool marks a machine busy while it holds a job. Say
+				// what it is now, even if that is what it was before: a job
+				// shorter than a presence tick never announced "busy", and
+				// without this the pool would wait for a change that is not
+				// coming.
+				presence = options.Presence()
+				if err := send(protocol.NewPresence(presence)); err != nil {
+					return welcomed, err
+				}
 			case *protocol.Drain:
 				options.Log.Info("the coordinator asked this machine to drain")
 			case *protocol.Error:
@@ -228,6 +237,11 @@ func session(ctx context.Context, options Options) (bool, error) {
 			if err := send(exit); err != nil {
 				// Keep the result for the next connection.
 				pending <- exit
+				return welcomed, err
+			}
+			// And what the machine is now, for the same reason as on release.
+			presence = options.Presence()
+			if err := send(protocol.NewPresence(presence)); err != nil {
 				return welcomed, err
 			}
 
