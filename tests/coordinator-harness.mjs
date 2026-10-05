@@ -5,6 +5,8 @@ import coordinator, {
   Pool,
   ScaleListener as Listener,
 } from "../apps/coordinator/src/index.ts"
+import { capacityResponse } from "../apps/coordinator/src/capacity.ts"
+import { verifyActionsIdentity } from "../apps/coordinator/src/oidc.ts"
 
 export { Pool }
 export class ScaleListener extends Listener {
@@ -33,6 +35,39 @@ export class ScaleListener extends Listener {
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname
+    if (path === "/v1/capacity" && env.FIXTURE_OIDC_PUBLIC_KEY) {
+      const key = await crypto.subtle.importKey(
+        "jwk",
+        JSON.parse(env.FIXTURE_OIDC_PUBLIC_KEY),
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["verify"]
+      )
+      return capacityResponse(
+        request,
+        {
+          ...env,
+          GITHUB_APP_ID: "fixture",
+          GITHUB_APP_PRIVATE_KEY: "fixture",
+          RECEIPT_SIGNING_KEY: "fixture",
+        },
+        (token, audience) =>
+          verifyActionsIdentity(token, audience, async () => key)
+      )
+    }
+    if (path === "/__test/offer" && request.method === "POST") {
+      const { release } = await request.json()
+      const pool = env.POOL.getByName("gh-501")
+      if (release) await pool.release("capacity-fixture")
+      else
+        await pool.offer({
+          assignmentId: "capacity-fixture",
+          label: "hive-4cpu",
+          vcpus: 4,
+          timeoutMinutes: 1,
+        })
+      return new Response(null, { status: 204 })
+    }
     if (
       (path === "/__test/sql" || path === "/__test/mutate") &&
       request.method === "POST"

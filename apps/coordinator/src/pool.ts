@@ -267,6 +267,67 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     }).length
   }
 
+  /** An idle, currently authorized machine. Assigned listener slots don't count. */
+  async availableCapacity(organizationId: string, vcpus: number) {
+    const sockets = this.ctx.getWebSockets()
+    const ids = sockets.map((socket) => this.attachment(socket).machineId)
+    for (let i = 0; i < ids.length; i += 50) {
+      const batch = ids.slice(i, i + 50)
+      const rows = await this.db
+        .select({ id: machine.id })
+        .from(machinePool)
+        .innerJoin(machine, eq(machine.id, machinePool.machineId))
+        .innerJoin(
+          githubInstallation,
+          eq(githubInstallation.organizationId, machinePool.organizationId)
+        )
+        .where(
+          and(
+            eq(machinePool.organizationId, organizationId),
+            inArray(machinePool.machineId, batch),
+            eq(machinePool.status, "active"),
+            eq(machine.status, "active"),
+            eq(githubInstallation.status, "active")
+          )
+        )
+      const otherPools = await this.db
+        .select({ id: machinePool.machineId, presence: machinePool.presence })
+        .from(machinePool)
+        .where(
+          and(
+            inArray(machinePool.machineId, batch),
+            eq(machinePool.status, "active")
+          )
+        )
+      const occupied = new Set(
+        otherPools
+          .filter(
+            (row) => row.presence === "busy" || row.presence === "draining"
+          )
+          .map((row) => row.id)
+      )
+      const active = new Set(rows.map((row) => row.id))
+      // Re-read attachments after D1 awaits: a concurrent offer may have reserved it.
+      if (
+        sockets.some((socket) => {
+          const state = this.attachment(socket)
+          return (
+            socket.readyState === WebSocket.OPEN &&
+            state.organizationId === organizationId &&
+            state.greeted &&
+            state.presence === "online" &&
+            !state.assignmentId &&
+            state.cores >= vcpus + 2 &&
+            active.has(state.machineId) &&
+            !occupied.has(state.machineId)
+          )
+        })
+      )
+        return true
+    }
+    return false
+  }
+
   private async wakeListeners(state: Attachment) {
     if (
       !this.env.GITHUB_APP_ID ||

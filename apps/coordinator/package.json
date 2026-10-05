@@ -15,7 +15,8 @@
     "@workspace/github": "workspace:*",
     "@workspace/pricing": "workspace:*",
     "@workspace/protocol": "workspace:*",
-    "drizzle-orm": "1.0.0-rc.5-5935859"
+    "drizzle-orm": "1.0.0-rc.5-5935859",
+    "jose": "6.2.12"
   },
   "devDependencies": {
     "@workspace/typescript-config": "workspace:*",

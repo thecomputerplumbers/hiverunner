@@ -122,3 +122,27 @@ passed on this Mac using a warm `hive` VM: checkout, arm64/CPU/user checks,
 setup-go and Linux daemon tests. The local coordinator verified GitHub's
 timestamps, signed the receipt and produced three ledger entries summing to
 zero. This experiment used isolated local accounting data, with no deployment.
+
+## Capacity routing with GitHub-hosted fallback
+
+GitHub Actions can run a preflight job on `ubuntu-latest` and pass its selected
+runner through a job output to `runs-on`. A workflow can poll
+`GET https://connect.hiveworkr.thecomputerplumbers.com/v1/capacity?label=hive-4cpu`
+for up to 15 seconds, then select `ubuntu-latest` if no machine is available.
+An available machine ends the probe immediately. The polling deadline begins
+after the preflight runner starts; it does not include GitHub runner startup.
+
+Authorize the request with a GitHub Actions OIDC bearer token, requested with
+audience `https://connect.hiveworkr.thecomputerplumbers.com`. The preflight job
+needs `permissions: { id-token: write }`. The coordinator verifies GitHub's
+signature, issuer, audience, expiry and immutable repository owner ID, then
+checks the owner's active App installation and positive credit. Selected-repo
+installations also require repository access through the installation token.
+
+The response is `{ "available": true, "label": "hive-4cpu" }` only when the live
+pool has an idle, greeted, sufficiently large, currently enrolled machine.
+Assigned, paused, busy (including in another pool), revoked and retired machines
+are excluded. Responses are not cached. No machine identities or credentials
+are returned. This endpoint reports availability; it does not reserve capacity.
+A machine can disconnect or take another job between probing and queuing. There
+is no automatic reroute after a job is queued on HiveWorker.

@@ -265,6 +265,9 @@ importers:
       drizzle-orm:
         specifier: 1.0.0-rc.5-5935859
         version: 1.0.0-rc.5-5935859(zod@4.6.5)
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
     devDependencies:
       '@workspace/typescript-config':
         specifier: workspace:*

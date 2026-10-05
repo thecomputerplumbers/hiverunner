@@ -12,6 +12,33 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 const sign = (secret, body) =>
   `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`
 
+test("selected repository checks bind immutable IDs and do not treat outages as denial", async () => {
+  const app = createGitHubApp({
+    appId: "1",
+    privateKey: privateKey.export({ type: "pkcs8", format: "pem" }),
+    webhookSecret: "",
+    fetch: async (url, init) => {
+      const path = new URL(url).pathname
+      if (path.endsWith("/access_tokens"))
+        return Response.json({
+          token: "installation-token",
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        })
+      assert.equal(init.headers.Authorization, "Bearer installation-token")
+      if (path === "/repos/acme/shop") return Response.json({ id: 123 })
+      return new Response(null, {
+        status: path.endsWith("/outage") ? 500 : 404,
+      })
+    },
+  })
+  assert.equal(await app.canAccessRepository(7, "acme/shop", 123), true)
+  assert.equal(await app.canAccessRepository(7, "acme/shop", 124), false)
+  assert.equal(await app.canAccessRepository(7, "acme/missing", 123), false)
+  await assert.rejects(app.canAccessRepository(7, "acme/outage", 123), {
+    status: 500,
+  })
+})
+
 test("webhook signatures are checked against the raw body", async () => {
   const body = JSON.stringify({ action: "created" })
   assert.equal(

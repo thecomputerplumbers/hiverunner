@@ -207,6 +207,21 @@ export function createGitHubApp(config: GitHubConfig) {
     verifyWebhook: (body: string, signature: string | null) =>
       verifyWebhookSignature(config.webhookSecret, body, signature),
 
+    /** Check selected-repository access with the installation's own token. */
+    async canAccessRepository(
+      installationId: number,
+      repository: string,
+      repositoryId: number
+    ) {
+      const path = repository.split("/").map(encodeURIComponent).join("/")
+      const result = await absent(
+        request<{ id: number }>(`/repos/${path}`, {
+          token: await installationToken(installationId),
+        })
+      )
+      return result?.id === repositoryId
+    },
+
     async getInstallation(
       installationId: number
     ): Promise<Installation | null> {

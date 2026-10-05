@@ -3,6 +3,7 @@ import { authenticateMachineForPool } from "@workspace/db/machines"
 import { createReceiptSigner } from "@workspace/db/receipts"
 import { PROTOCOL_VERSION } from "@workspace/protocol"
 import { githubTestAPI } from "./config"
+import { capacityResponse } from "./capacity"
 
 export { Pool } from "./pool"
 export { ScaleListener } from "./listener"
@@ -55,6 +56,7 @@ export default {
         }
       )
     }
+    if (url.pathname === "/v1/capacity") return capacityResponse(request, env)
     if (url.pathname !== "/v1/tunnel")
       return new Response("Not found", { status: 404 })
     if (request.headers.get("upgrade") !== "websocket")

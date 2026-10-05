@@ -17,6 +17,7 @@ import assert from "node:assert/strict"
 import { setTimeout as delay } from "node:timers/promises"
 import { resolve } from "node:path"
 import { parse } from "jsonc-parser"
+import { actionsToken, oidcPublicJwk } from "./oidc-fixture.mjs"
 
 const storage = mkdtempSync("/tmp/hiveworker-coordinator.")
 const reservation = createServer()
@@ -95,6 +96,7 @@ try {
       ]),
       // Machine a also serves a second organization.
       "INSERT INTO machine_pool (machine_id,organization_id,created_at) VALUES ('a','gh-502',0);",
+      "INSERT INTO ledger_entry (id,account_type,account_id,kind,amount,created_at) VALUES ('grant:gh-501','organization','gh-501','grant',5000000,0);",
     ].join("\n")
   )
   if (
@@ -117,6 +119,10 @@ try {
   delete local.routes
   delete local.account_id
   delete local.workers_dev
+  local.vars = {
+    ...local.vars,
+    FIXTURE_OIDC_PUBLIC_KEY: JSON.stringify(oidcPublicJwk),
+  }
   writeFileSync(config, JSON.stringify(local))
   worker = spawn(
     "pnpm",
@@ -215,6 +221,24 @@ try {
     daemonVersion: "0.1.0",
     presence: state,
   })
+  const capacity = (overrides = {}, label = "hive-4cpu") =>
+    fetch(`${origin}/v1/capacity?label=${label}`, {
+      headers: { Authorization: `Bearer ${actionsToken(origin, overrides)}` },
+    })
+  const available = async () => {
+    const response = await capacity()
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get("cache-control"), "no-store")
+    return (await response.json()).available
+  }
+  assert.equal(
+    (await fetch(`${origin}/v1/capacity?label=hive-4cpu`)).status,
+    401
+  )
+  assert.equal((await capacity({ aud: "wrong-audience" })).status, 401)
+  assert.equal((await capacity({ repository_owner_id: "999" })).status, 403)
+  assert.equal((await capacity({}, "unsupported")).status, 400)
+  assert.equal(await available(), false, "empty pool is unavailable")
 
   /** The HTTP status a tunnel request gets, without completing an upgrade. */
   const tunnelStatus = (headers, pool = "gh-501") =>
@@ -262,11 +286,39 @@ try {
   a.send("not json")
   assert.equal((await a.next()).type, "error")
   assert.equal(await presence("a"), "offline")
+  assert.equal(await available(), false, "socket before hello is unavailable")
   a.send(hello())
   await eventually(
     async () => (await presence("a")) === "online",
     "hello sets presence"
   )
+  assert.equal(await available(), true, "idle enrolled machine is available")
+  await fetch(`${origin}/__test/offer`, {
+    method: "POST",
+    body: JSON.stringify({ release: false }),
+  })
+  assert.equal((await a.next()).type, "job.assign")
+  assert.equal(
+    await available(),
+    false,
+    "a reserved slot for the same label is unavailable"
+  )
+  await fetch(`${origin}/__test/offer`, {
+    method: "POST",
+    body: JSON.stringify({ release: true }),
+  })
+  assert.equal((await a.next()).type, "job.release")
+  assert.equal(await available(), true)
+  await sql("update ledger_entry set amount=0 where id='grant:gh-501'")
+  assert.equal(await available(), false, "zero credit cannot acquire jobs")
+  await sql("update ledger_entry set amount=5000000 where id='grant:gh-501'")
+  await sql("update machine set status='retired' where id='a'")
+  assert.equal(
+    await available(),
+    false,
+    "retired machine is refused before the sweep"
+  )
+  await sql("update machine set status='active' where id='a'")
   assert.equal(
     (await sql("select daemon_version v from machine where id='a'"))[0].v,
     "0.1.0"
@@ -276,6 +328,7 @@ try {
     async () => (await presence("a")) === "paused",
     "presence is written through"
   )
+  assert.equal(await available(), false, "paused machine is unavailable")
   a.send("ping")
   assert.equal(await a.next(), "pong")
   console.log("Tunnel authentication, hello and presence passed.")
@@ -329,6 +382,11 @@ try {
     "globex sees it busy"
   )
   assert.equal(await presence("a"), "online", "acme's view is its own")
+  assert.equal(
+    await available(),
+    false,
+    "busy in another pool cannot accept work here"
+  )
   // Removed from one pool: that tunnel closes, the other is untouched.
   await sql(
     "update machine_pool set status='revoked' where machine_id='a' and organization_id='gh-502'"
@@ -336,11 +394,17 @@ try {
   assert.equal(await g.closedWith(), 4001)
   await delay(1500)
   assert.equal(await presence("a"), "online")
+  assert.equal(await available(), true)
   console.log("One machine serving two pools passed.")
 
   // Uninstalling the App silences the whole pool.
   await sql(
     "update github_installation set status='removed' where account_id=501"
+  )
+  assert.equal(
+    (await capacity()).status,
+    403,
+    "removed installation is immediately refused"
   )
   assert.equal(await a2.closedWith(), 4001)
   await eventually(
