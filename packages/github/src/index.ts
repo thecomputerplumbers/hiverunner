@@ -214,6 +214,14 @@ export function createGitHubApp(config: GitHubConfig) {
       repositoryId: number
     ) {
       const path = repository.split("/").map(encodeURIComponent).join("/")
+      // Public metadata can be read even when this App isn't installed on a
+      // repository. Ask the App installation endpoint before trusting it.
+      const installation = await absent(
+        request<{ id: number }>(`/repos/${path}/installation`, {
+          token: await appToken(),
+        })
+      )
+      if (installation?.id !== installationId) return false
       const result = await absent(
         request<{ id: number }>(`/repos/${path}`, {
           token: await installationToken(installationId),
