@@ -32,9 +32,12 @@ type platformState struct {
 	listenOn uint32
 	err      error
 	mu       sync.Mutex
-	// guests maps a VM's socket address to the VM. The kernel assigns that
-	// address to the VM; a guest cannot claim another's.
-	guests map[uint32]*instance
+	// guests maps a VM's socket address to what answers it. The kernel
+	// assigns that address to the VM; a guest cannot claim another's.
+	guests map[uint32]http.Handler
+	// unconfined is set once this host's QEMU has refused to confine
+	// itself, so later VMs do not ask again.
+	unconfined bool
 }
 
 // The programs a VM is made of on Linux. KVM does the virtualization; QEMU
@@ -103,7 +106,7 @@ func findTools() (tools, error) {
 
 // launch starts the VM under KVM. Its disk is an overlay on the guest image:
 // instant on any filesystem, and holding only what the job writes.
-func (r *Runner) launch(vm *instance, mac net.HardwareAddr) (err error) {
+func (r *Runner) launch(vm *instance, mac net.HardwareAddr) error {
 	found, err := findTools()
 	if err != nil {
 		return err
@@ -114,13 +117,56 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) (err error) {
 	if r.Image.Arch() != runtime.GOARCH {
 		return fmt.Errorf("the guest image is for %s and this machine is %s", r.Image.Arch(), runtime.GOARCH)
 	}
-
 	disk := filepath.Join(vm.dir, "disk.qcow2")
 	if out, err := exec.Command(found.qemuImg, "create", "-q", "-f", "qcow2",
 		"-b", r.Image.path(r.Image.Disk), "-F", "raw", disk, strconv.FormatInt(diskBytes, 10)).CombinedOutput(); err != nil {
 		return fmt.Errorf("create the job's disk: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 
+	// A socket between this VM and the host, on no network at all: the guest
+	// reaches the host's cache through it, and nothing else can. A VM
+	// without it still runs jobs; they use GitHub's cache.
+	offered := false
+	if r.Guest != nil {
+		if err := r.listen(); err != nil {
+			r.Log.Warn("this VM cannot reach the cache", "error", err)
+		} else {
+			offered = true
+		}
+	}
+
+	// A machine that cannot start says so at once, and two of its reasons
+	// are ours to work around: a socket address some other VM on this host
+	// already has, and a QEMU built without the means to confine itself.
+	for attempt := 0; ; attempt++ {
+		r.platform.mu.Lock()
+		confined := !r.platform.unconfined
+		r.platform.mu.Unlock()
+		address := uint32(0)
+		if offered {
+			address = r.socketAddress(vm, attempt)
+		}
+		said, err := r.start(found, vm, mac, disk, address, confined)
+		if err == nil {
+			return nil
+		}
+		switch {
+		case attempt < 3 && strings.Contains(said, "guest cid"):
+		case attempt < 3 && confined && (strings.Contains(said, "sandbox") || strings.Contains(said, "seccomp")):
+			r.platform.mu.Lock()
+			r.platform.unconfined = true
+			r.platform.mu.Unlock()
+			r.Log.Warn("this QEMU cannot confine itself; VMs run without its seccomp filter")
+		default:
+			return err
+		}
+	}
+}
+
+// start brings up one VM and the two helpers beside it, and returns once the
+// machine is running. If the machine stops at once, nothing is left behind
+// and what QEMU said is returned with the error.
+func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk string, address uint32, confined bool) (said string, err error) {
 	var helpers []*exec.Cmd
 	stopHelpers := func() {
 		for _, helper := range helpers {
@@ -128,13 +174,24 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) (err error) {
 			_ = helper.Wait()
 		}
 	}
+	// Sockets live in a short path of their own: a socket's path has a small
+	// fixed limit, and a work directory can be deep.
+	sockets, err := os.MkdirTemp("", "hive-")
+	if err != nil {
+		return "", err
+	}
+	forget := func() {}
 	defer func() {
 		if err != nil {
+			forget()
 			stopHelpers()
+			os.RemoveAll(sockets)
 		}
 	}()
-	// A helper never outlives the daemon, however the daemon dies.
-	start := func(log string, name string, args ...string) (*exec.Cmd, error) {
+	// A helper never outlives the daemon, however the daemon dies. (The
+	// signal follows the thread that started the helper; the Go runtime
+	// keeps its threads for the life of the process.)
+	run := func(log string, name string, args ...string) (*exec.Cmd, error) {
 		command := exec.Command(name, args...)
 		command.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 		output, err := os.OpenFile(filepath.Join(vm.dir, log), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
@@ -148,27 +205,15 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) (err error) {
 		}
 		return command, nil
 	}
-
-	// Sockets live in a short path of their own: a socket's path has a small
-	// fixed limit, and a work directory can be deep.
-	sockets, err := os.MkdirTemp("", "hive-")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			os.RemoveAll(sockets)
-		}
-	}()
 	shareSocket := filepath.Join(sockets, "fs")
 	networkSocket := filepath.Join(sockets, "net")
 
 	// The whole of what the guest can see of the host's files, served from
 	// inside a namespace that contains nothing else.
-	share, err := start("virtiofsd.log", found.virtiofsd,
+	share, err := run("virtiofsd.log", found.virtiofsd,
 		"--socket-path="+shareSocket, "--shared-dir="+vm.share, "--cache=never")
 	if err != nil {
-		return err
+		return "", err
 	}
 	helpers = append(helpers, share)
 
@@ -178,14 +223,14 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) (err error) {
 	for _, server := range upstreamDNS() {
 		network = append(network, "--dns", server)
 	}
-	relay, err := start("passt.log", found.passt, network...)
+	relay, err := run("passt.log", found.passt, network...)
 	if err != nil {
-		return err
+		return "", err
 	}
 	helpers = append(helpers, relay)
 	for _, socket := range []string{shareSocket, networkSocket} {
 		if err := waitFor(socket, 10*time.Second, share, relay); err != nil {
-			return fmt.Errorf("%w (%s)", err, tail(vm.dir, "virtiofsd.log", "passt.log"))
+			return "", fmt.Errorf("%w (%s)", err, tail(vm.dir, "virtiofsd.log", "passt.log"))
 		}
 	}
 
@@ -225,53 +270,40 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) (err error) {
 	case "amd64":
 		args = append(args, "-machine", "q35,memory-backend=mem")
 	}
-
-	// A socket between this VM and the host, on no network at all: the guest
-	// reaches the host's cache through it, and nothing else can. A VM
-	// without it still runs jobs; they use GitHub's cache.
-	address := uint32(0)
-	if r.Guest != nil {
-		if err := r.listen(); err != nil {
-			r.Log.Warn("this VM cannot reach the cache", "error", err)
-		} else {
-			address = r.socketAddress(vm)
-			args = append(args, "-device", "vhost-vsock-pci,guest-cid="+strconv.FormatUint(uint64(address), 10))
-			// Known before the guest boots, so it is never refused.
-			r.platform.mu.Lock()
-			r.platform.guests[address] = vm
-			r.platform.mu.Unlock()
-			vm.served = true
-		}
+	if confined {
+		// QEMU gives up what it does not need: new privileges, new programs,
+		// and the system calls no machine has a use for.
+		args = append(args, "-sandbox", "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny")
 	}
-	forget := func() {
-		if address == 0 {
-			return
-		}
+	if address != 0 {
+		args = append(args, "-device", "vhost-vsock-pci,guest-cid="+strconv.FormatUint(uint64(address), 10))
+		// Known before the guest boots, so it is never refused.
 		r.platform.mu.Lock()
-		if r.platform.guests[address] == vm {
-			delete(r.platform.guests, address)
-		}
+		r.platform.guests[address] = r.Guest.Handler(vm.owner)
 		r.platform.mu.Unlock()
+		forget = func() {
+			r.platform.mu.Lock()
+			delete(r.platform.guests, address)
+			r.platform.mu.Unlock()
+		}
 	}
 
-	machine, err := start("qemu.log", found.qemu, args...)
+	machine, err := run("qemu.log", found.qemu, args...)
 	if err != nil {
-		forget()
-		return err
+		return "", err
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- machine.Wait() }()
-	// A machine that cannot start says so at once: a missing device, an
-	// address in use. Give it that long before calling it started.
 	select {
 	case waitErr := <-exited:
-		forget()
-		return fmt.Errorf("the VM did not start: %v (%s)", waitErr, tail(vm.dir, "qemu.log"))
+		said = tail(vm.dir, "qemu.log")
+		return said, fmt.Errorf("the VM did not start: %v (%s)", waitErr, said)
 	case <-time.After(300 * time.Millisecond):
 	}
 
 	var stopping sync.Once
 	vm.stop = func() { stopping.Do(func() { _ = machine.Process.Kill() }) }
+	vm.served = address != 0
 	vm.unserve = forget
 	go func() {
 		waitErr := <-exited
@@ -285,22 +317,25 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) (err error) {
 		os.RemoveAll(sockets)
 		close(vm.ended)
 	}()
-	return nil
+	return "", nil
 }
 
 // socketAddress is the address the VM's end of the host socket gets. It must
 // be unique among every VM on the machine, ours or not, so it is spread by
-// the work directory and then by the VM's slot; a VM beyond the slots gets
-// one from its own directory's name.
-func (r *Runner) socketAddress(vm *instance) uint32 {
+// the work directory and then by the VM's slot. A VM beyond the slots, or
+// one whose first address turned out to be taken, gets one from its own
+// directory's name instead.
+func (r *Runner) socketAddress(vm *instance, attempt int) uint32 {
 	seed := sha256.Sum256([]byte(r.WorkDir))
-	if vm.slot < 0 {
-		seed = sha256.Sum256([]byte(vm.dir))
+	slot := max(vm.slot, 0)
+	if vm.slot < 0 || attempt > 0 {
+		seed = sha256.Sum256([]byte(vm.dir + strconv.Itoa(attempt)))
+		slot = 0
 	}
 	// Above the reserved addresses (0 to 2) and well clear of the small
 	// numbers people pick by hand.
 	base := 0x10000 + binary.BigEndian.Uint32(seed[:4])%0x3fff0000
-	return base&^0xf | uint32(max(vm.slot, 0))
+	return base&^0xf | uint32(slot)
 }
 
 // listen opens, once, the socket every guest of this runner dials. Each
@@ -308,13 +343,12 @@ func (r *Runner) socketAddress(vm *instance) uint32 {
 func (r *Runner) listen() error {
 	state := &r.platform
 	state.once.Do(func() {
-		state.guests = map[uint32]*instance{}
+		state.guests = map[uint32]http.Handler{}
 		state.listener, state.err = listenVsock(r.Guest.Port)
 		if state.err != nil {
 			state.err = fmt.Errorf("open the host socket (is the vhost_vsock module loaded?): %w", state.err)
 			return
 		}
-		handlers := sync.Map{}
 		service := &http.Server{
 			ReadHeaderTimeout: 30 * time.Second,
 			ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
@@ -323,22 +357,15 @@ func (r *Runner) listen() error {
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				caller, _ := request.Context().Value(callerKey{}).(uint32)
 				state.mu.Lock()
-				vm := state.guests[caller]
+				handler := state.guests[caller]
 				state.mu.Unlock()
-				if vm == nil {
+				if handler == nil {
 					// Not one of ours: another VM on this machine, or a
 					// process on the host itself.
 					http.Error(w, "unknown caller", http.StatusForbidden)
 					return
 				}
-				handler, _ := handlers.LoadOrStore(vm, r.Guest.Handler(vm.owner))
-				// The handler map only grows by one entry per VM, and a VM
-				// is gone when its job is; drop it with the VM.
-				go func() {
-					<-vm.ended
-					handlers.Delete(vm)
-				}()
-				handler.(http.Handler).ServeHTTP(w, request)
+				handler.ServeHTTP(w, request)
 			}),
 		}
 		go func() { _ = service.Serve(state.listener) }()
@@ -505,3 +532,18 @@ type vsockConn struct {
 
 func (c *vsockConn) LocalAddr() net.Addr  { return c.local }
 func (c *vsockConn) RemoteAddr() net.Addr { return c.remote }
+
+// dialVsockLoopback connects to this host's own end of the VM sockets, as a
+// local process would. Only the tests do: it is how they stand in for a
+// caller that is not one of the runner's guests.
+func dialVsockLoopback(port uint32) (*os.File, error) {
+	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_LOCAL, Port: port}); err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), "vsock"), nil
+}
