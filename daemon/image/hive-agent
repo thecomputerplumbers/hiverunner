@@ -89,6 +89,9 @@ if [ -e "$share/selftest" ]; then
     for node in /opt/runner/externals/node*/bin/node; do
       case "$node" in *_alpine/*) continue ;; esac
       echo "NODE=$(ACTIONS_RESULTS_URL=https://results-receiver.actions.githubusercontent.com/ sudo -u runner --preserve-env=ACTIONS_RESULTS_URL "$node" -p 'process.env.ACTIONS_RESULTS_URL')"
+      # An action's inputs have hyphens in their names, and its other
+      # settings must arrive untouched too.
+      echo "INPUTS=$(sudo -u runner env -i 'INPUT_GITHUB-TOKEN=kept' ACTIONS_RESULTS_URL=https://example.com/ "$node" -p 'process.env["INPUT_GITHUB-TOKEN"] + " " + process.env.ACTIONS_RESULTS_URL + " " + process.argv.slice(1).join(",")' a 'b c')"
     done
   } > "$share/selftest.out" 2>&1
   finish 0

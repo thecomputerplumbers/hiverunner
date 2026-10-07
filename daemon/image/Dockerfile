@@ -36,21 +36,24 @@ RUN useradd --create-home --uid 1001 --shell /bin/bash runner \
 # The runner starts every JavaScript action with one of its own copies of
 # Node. Each is put behind hive-node, which points the action at the host's
 # cache when there is one and otherwise changes nothing. The build fails if
-# the runner stops shipping Node where this expects it, rather than produce
-# an image whose jobs silently never use the cache.
+# the runner stops shipping Node where this expects it, or if an action's
+# inputs would not survive the trip, rather than produce an image whose jobs
+# silently never use the cache or, worse, lose their inputs.
 COPY hive-node /usr/local/lib/hive-node
 RUN chmod 0755 /usr/local/lib/hive-node \
- && wrapped=0 \
+ && found=0 && wrapped=0 \
  && for node in /opt/runner/externals/node*/bin/node; do \
       case "$node" in *_alpine/*) continue ;; esac; \
       [ -x "$node" ] && [ ! -L "$node" ] || { echo "unexpected $node" >&2; exit 1; }; \
+      found=$((found + 1)); \
       mv "$node" "$node.real" \
       && cp /usr/local/lib/hive-node "$node" \
       && chown runner:runner "$node" "$node.real" \
       && "$node" --version >/dev/null \
+      && [ "$(env 'INPUT_WITH-HYPHEN=kept' "$node" -p 'process.env["INPUT_WITH-HYPHEN"]')" = kept ] \
       && wrapped=$((wrapped + 1)); \
     done \
- && [ "$wrapped" -ge 1 ] \
+ && [ "$wrapped" -ge 1 ] && [ "$wrapped" -eq "$found" ] \
  && echo "Wrapped $wrapped copies of Node"
 
 COPY hive-agent /usr/local/sbin/hive-agent

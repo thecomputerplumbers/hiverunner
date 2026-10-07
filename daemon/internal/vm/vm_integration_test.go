@@ -288,6 +288,12 @@ func TestAVMReachesTheHostsServiceOnItsOwnSocket(t *testing.T) {
 	if !strings.Contains(report, "NODE=http://127.0.0.1:47071/") || strings.Contains(report, "NODE=https://") {
 		t.Errorf("an action would not be sent to the host's cache:\n%s", report)
 	}
+	// What stands in front of Node must be invisible to an action: its
+	// inputs, whose names have hyphens, any address that is not GitHub's
+	// results service, and its arguments all arrive as they were sent.
+	if !strings.Contains(report, "INPUTS=kept https://example.com/ a,b c") {
+		t.Errorf("an action's inputs or arguments do not survive the trip to Node:\n%s", report)
+	}
 	seen.Lock()
 	defer seen.Unlock()
 	if len(pools) == 0 || pools[0] != "/hive/health for selftest" {
