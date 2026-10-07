@@ -8,6 +8,14 @@
     "timeoutMinutes": 360
   },
   {
+    "type": "job.assign",
+    "assignmentId": "a-2",
+    "label": "hive-x64-4cpu",
+    "arch": "x64",
+    "vcpus": 4,
+    "timeoutMinutes": 360
+  },
+  {
     "type": "job.start",
     "assignmentId": "a-1",
     "jitConfig": "ZXhhbXBsZQ==",

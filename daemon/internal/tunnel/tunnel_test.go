@@ -71,6 +71,10 @@ func options(url, token string, presence *atomic.Value) Options {
 	}
 }
 
+// An offer this machine may take: a pool only offers a machine jobs of its
+// own architecture, whichever one the tests are running on.
+var assign = `{"type":"job.assign","assignmentId":"a-1","label":"hive","arch":"` + protocol.HostArch() + `","vcpus":2,"timeoutMinutes":60}`
+
 func TestHelloPresenceAndDecliningWithoutARunner(t *testing.T) {
 	var presence atomic.Value
 	presence.Store(protocol.Online)
@@ -78,14 +82,14 @@ func TestHelloPresenceAndDecliningWithoutARunner(t *testing.T) {
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, _ int) {
 		defer close(done)
 		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":3}`)
-		if hello := read(ctx, t, c); hello["type"] != "hello" || hello["presence"] != "online" {
+		if hello := read(ctx, t, c); hello["type"] != "hello" || hello["presence"] != "online" || hello["arch"] != protocol.HostArch() {
 			t.Errorf("first frame = %v", hello)
 		}
 		presence.Store(protocol.Paused)
 		if update := read(ctx, t, c); update["type"] != "presence" || update["presence"] != "paused" {
 			t.Errorf("presence frame = %v", update)
 		}
-		write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"timeoutMinutes":60}`)
+		write(ctx, c, assign)
 		if answer := read(ctx, t, c); answer["type"] != "job.rejected" || answer["assignmentId"] != "a-1" {
 			t.Errorf("answer to job.assign = %v", answer)
 		}
@@ -177,7 +181,7 @@ func TestOfferAcceptStartExit(t *testing.T) {
 		if hello := read(ctx, t, c); hello["assignmentId"] != nil {
 			t.Errorf("an idle machine claimed a job in hello: %v", hello)
 		}
-		write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"timeoutMinutes":60}`)
+		write(ctx, c, assign)
 		if answer := read(ctx, t, c); answer["type"] != "job.accepted" {
 			t.Errorf("answer to the offer = %v", answer)
 		}
@@ -225,7 +229,7 @@ func TestAJobSurvivesAReconnect(t *testing.T) {
 		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":3}`)
 		hello := read(ctx, t, c)
 		if attempt == 1 {
-			write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"timeoutMinutes":60}`)
+			write(ctx, c, assign)
 			read(ctx, t, c)
 			write(ctx, c, `{"type":"job.start","assignmentId":"a-1","jitConfig":"x","runnerName":"hw-m-a-1"}`)
 			time.Sleep(100 * time.Millisecond)

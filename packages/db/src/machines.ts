@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm"
 import type { AuthDb } from "@workspace/auth/db"
 import { member, organization, session, user } from "@workspace/auth/schema"
 import type { GitHubApp } from "@workspace/github"
+import { runnerArch } from "@workspace/pricing"
 
 import { canAddMachines } from "@workspace/db/membership"
 import { githubInstallation, machine, machinePool } from "@workspace/db/schema"
@@ -68,8 +69,10 @@ export function validateMachineFacts(facts: MachineFacts) {
   if (!text(facts.model, 120)) fields.model = "Missing hardware model"
   if (!text(facts.daemonVersion, 40))
     fields.daemonVersion = "Missing daemon version"
-  // v1 hosts. Widening this is a product decision, not a validation tweak.
-  if (facts.os !== "darwin" || facts.arch !== "arm64")
+  // The hosts a daemon exists for, released or not. Widening this is a
+  // product decision, not a validation tweak. The message names what has
+  // been released.
+  if (!hostArch(facts))
     fields.os = "HiveWorker runs on Apple Silicon Macs for now"
   if (!Number.isInteger(facts.cores) || facts.cores < 1 || facts.cores > 512)
     fields.cores = "Invalid core count"
@@ -81,6 +84,17 @@ export function validateMachineFacts(facts: MachineFacts) {
   )
     fields.speedScore = "Invalid benchmark result"
   return Object.keys(fields).length ? fields : null
+}
+
+/**
+ * The architecture of the jobs a machine can run, or null for a machine no
+ * daemon runs on: an Apple Silicon Mac, or Linux on arm64 or x64. It is
+ * stored in the product's words, whatever the daemon called it.
+ */
+function hostArch(facts: Pick<MachineFacts, "os" | "arch">) {
+  const arch = runnerArch(facts.arch)
+  if (facts.os === "darwin") return arch === "arm64" ? arch : null
+  return facts.os === "linux" ? arch : null
 }
 
 /**
@@ -187,7 +201,7 @@ export async function enrollMachine(
     name: input.facts.name.trim(),
     model: input.facts.model.trim(),
     os: input.facts.os,
-    arch: input.facts.arch,
+    arch: hostArch(input.facts)!,
     cores: input.facts.cores,
     memoryBytes: input.facts.memoryBytes,
     speedScore: Math.min(Math.max(input.facts.speedScore ?? 1, 0.25), 8),

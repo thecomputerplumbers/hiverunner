@@ -204,6 +204,7 @@ func session(ctx context.Context, options Options) (bool, error) {
 				// Saying which job is in hand lets the pool pick up where a
 				// dropped connection left off.
 				hello := protocol.NewHello(options.DaemonVersion, presence, options.Jobs.Holding(options.PoolID)...)
+				hello.Arch = protocol.HostArch()
 				hello.MaxVCPUs = limits.MaxVCPUs
 				// One is what the pool assumes; only more needs saying.
 				if limits.MaxJobs > 1 {

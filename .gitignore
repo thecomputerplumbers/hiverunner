@@ -50,3 +50,6 @@ next-env.d.ts
 
 # Coordinator and other Workers' local runtime state
 .wrangler/
+
+# Throwaway build output, such as a guest image built to try it
+.scratch/

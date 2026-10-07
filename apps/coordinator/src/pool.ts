@@ -2,7 +2,11 @@ import { DurableObject } from "cloudflare:workers"
 import { and, eq, inArray, ne } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { githubInstallation, machine, machinePool } from "@workspace/db/schema"
-import { RUNNER_SIZES } from "@workspace/pricing"
+import {
+  ALL_RUNNER_SIZES,
+  runnerArch,
+  type RunnerArch,
+} from "@workspace/pricing"
 import {
   CLOSE,
   PING,
@@ -13,7 +17,13 @@ import {
   type Presence,
 } from "@workspace/protocol"
 
-import { fits, pickMachine, room, type Candidate } from "./schedule"
+import {
+  fits,
+  pickMachine,
+  room,
+  type Candidate,
+  type JobSize,
+} from "./schedule"
 
 /**
  * A job this pool has placed on a machine. Kept small: every job a machine
@@ -33,6 +43,7 @@ type Held = {
 
 /** Rides along with each socket, and survives the object hibernating. */
 type Attachment = Candidate & {
+  arch: RunnerArch
   organizationId: string
   greeted: boolean
   jobs: Record<string, Held>
@@ -44,6 +55,8 @@ type Reservation = Held & { machineId: string; exited?: boolean }
 export type Assignment = {
   assignmentId: string
   label: string
+  /** The architecture the label names. Only such a machine is offered it. */
+  arch: RunnerArch
   vcpus: number
   timeoutMinutes: number
 }
@@ -92,6 +105,9 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     this.attach(server, {
       machineId,
       organizationId,
+      // What the machine said it was when it enrolled. A machine enrolled
+      // before there were two architectures is arm64.
+      arch: runnerArch(request.headers.get("x-hive-arch")) ?? "arm64",
       cores,
       speedScore,
       presence: "offline",
@@ -133,9 +149,16 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       // Said again on every connection, so lifting a limit clears it here.
       state.maxVcpus = message.maxVcpus
       state.maxJobs = message.maxJobs
+      // The daemon knows what it is running on better than its enrollment
+      // does: a machine file can be carried to another machine. One that
+      // does not say is whatever it enrolled as.
+      if (message.arch) state.arch = message.arch
       await this.db
         .update(machine)
-        .set({ daemonVersion: message.daemonVersion })
+        .set({
+          daemonVersion: message.daemonVersion,
+          ...(message.arch ? { arch: message.arch } : {}),
+        })
         .where(eq(machine.id, state.machineId))
       return this.setPresence(socket, state, message.presence)
     }
@@ -181,7 +204,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     const sockets = this.ctx.getWebSockets()
     const chosen = pickMachine(
       sockets.map((socket) => this.attachment(socket)),
-      assignment.vcpus
+      assignment
     )
     if (!chosen) return null
     const socket = sockets.find(
@@ -254,23 +277,24 @@ export class Pool extends DurableObject<CoordinatorEnv> {
 
   /**
    * How many runners of this size the pool can have at once: the ones
-   * already placed, and the room willing machines have for more.
+   * already placed, and the room willing machines have for more. Only
+   * machines of the size's architecture count, for either.
    */
-  async capacity(vcpus: number) {
+  async capacity(size: JobSize) {
     let total = 0
     for (const socket of this.ctx.getWebSockets()) {
       const state = this.attachment(socket)
-      if (!state.greeted) continue
+      if (!state.greeted || state.arch !== size.arch) continue
       total += Object.values(state.jobs).filter(
-        (held) => held.vcpus === vcpus && !held.releasing
+        (held) => held.vcpus === size.vcpus && !held.releasing
       ).length
-      if (state.presence === "online") total += room(state, vcpus)
+      if (state.presence === "online") total += room(state, size)
     }
     return total
   }
 
   /** An idle, currently authorized machine. Assigned listener slots don't count. */
-  async availableCapacity(organizationId: string, vcpus: number) {
+  async availableCapacity(organizationId: string, size: JobSize) {
     const sockets = this.ctx.getWebSockets()
     const ids = sockets.map((socket) => this.attachment(socket).machineId)
     for (let i = 0; i < ids.length; i += 50) {
@@ -320,7 +344,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
             state.organizationId === organizationId &&
             state.greeted &&
             state.presence === "online" &&
-            room(state, vcpus) > 0 &&
+            room(state, size) > 0 &&
             active.has(state.machineId) &&
             !occupied.has(state.machineId)
           )
@@ -338,8 +362,8 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       !this.env.RECEIPT_SIGNING_KEY
     )
       return
-    for (const size of RUNNER_SIZES) {
-      if (!fits(state, size.vcpus)) continue
+    for (const size of ALL_RUNNER_SIZES) {
+      if (!fits(state, size)) continue
       await this.env.LISTENER.getByName(
         `${state.organizationId}:${size.label}`
       ).activate(state.organizationId, size.label)

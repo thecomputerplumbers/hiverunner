@@ -65,6 +65,9 @@ async function sql(command) {
 }
 const hash = (token) => createHash("sha256").update(token).digest("hex")
 const tokens = { a: "hwm_machine-a", b: "hwm_machine-b" }
+// A Linux x64 box, faster than either Mac: were architecture ignored, every
+// job would go to it.
+const boxToken = "hwm_machine-x"
 
 let worker
 let passed = false
@@ -94,6 +97,8 @@ try {
         `INSERT INTO machine (id,user_id,name,model,os,arch,cores,memory_bytes,speed_score,daemon_version,token_hash,created_at) VALUES ('${id}','ada','Mac ${id}','Mac15,9','darwin','arm64',12,1,${1 + i},'0.0.0','${hash(token)}',0);`,
         `INSERT INTO machine_pool (machine_id,organization_id,created_at) VALUES ('${id}','gh-501',0);`,
       ]),
+      `INSERT INTO machine (id,user_id,name,model,os,arch,cores,memory_bytes,speed_score,daemon_version,token_hash,created_at) VALUES ('x','ada','Build box','KVM','linux','x64',16,1,5,'0.0.0','${hash(boxToken)}',0);`,
+      "INSERT INTO machine_pool (machine_id,organization_id,created_at) VALUES ('x','gh-501',0);",
       // Machine a also serves a second organization.
       "INSERT INTO machine_pool (machine_id,organization_id,created_at) VALUES ('a','gh-502',0);",
       "INSERT INTO ledger_entry (id,account_type,account_id,kind,amount,created_at) VALUES ('grant:gh-501','organization','gh-501','grant',5000000,0);",
@@ -436,6 +441,76 @@ try {
   assert.equal(await presence("a"), "online")
   assert.equal(await available(), true)
   console.log("One machine serving two pools passed.")
+
+  // A job only ever goes to a machine of its label's architecture.
+  const x64 = { label: "hive-x64-4cpu", arch: "x64" }
+  const availableOn = async (label) => {
+    const response = await capacity({}, label)
+    assert.equal(response.status, 200)
+    return (await response.json()).available
+  }
+  const offered = async (assignmentId, size = {}) =>
+    (
+      await (
+        await fetch(`${origin}/__test/offer`, {
+          method: "POST",
+          body: JSON.stringify({ assignmentId, ...size }),
+        })
+      ).json()
+    ).machineId
+  const arch = async () =>
+    (await sql("select arch from machine where id='x'"))[0].arch
+  assert.equal(
+    await availableOn("hive-x64-4cpu"),
+    false,
+    "an idle Mac is not x64 capacity"
+  )
+  assert.equal(await offered("x64-nobody", x64), null, "nor offered an x64 job")
+  // A daemon that does not say what it is counts as what it enrolled as.
+  const x = await connect(boxToken)
+  assert.equal((await x.next()).type, "welcome")
+  x.send(hello())
+  await eventually(
+    () => availableOn("hive-x64-4cpu"),
+    "an x64 box is x64 capacity"
+  )
+  assert.equal(await offered("x64-job", x64), "x")
+  assert.deepEqual(await x.next(), {
+    type: "job.assign",
+    assignmentId: "x64-job",
+    label: "hive-x64-4cpu",
+    arch: "x64",
+    vcpus: 4,
+    timeoutMinutes: 1,
+  })
+  assert.equal(await availableOn("hive-x64-4cpu"), false, "and now it is busy")
+  assert.equal(await available(), true, "which takes nothing from arm64")
+  // The Mac is idle and online, and still not offered a second x64 job.
+  assert.equal(await offered("x64-second", x64), null)
+  // An arm64 job goes to the Mac, though the idle x64 box would be faster.
+  await offer("x64-job", true)
+  assert.equal((await x.next()).type, "job.release")
+  assert.equal(await offered("arm-job"), "a")
+  assert.equal((await a2.next()).arch, "arm64")
+  assert.equal(await offered("arm-second"), null, "and never to the x64 box")
+  await offer("arm-job", true)
+  assert.equal((await a2.next()).type, "job.release")
+  // What the daemon says it is running on outranks what it enrolled as.
+  x.send({ ...hello(), arch: "arm64" })
+  await eventually(async () => (await arch()) === "arm64", "hello is recorded")
+  assert.equal(await availableOn("hive-x64-4cpu"), false)
+  x.send({ ...hello(), arch: "x64" })
+  await eventually(async () => (await arch()) === "x64", "and corrected")
+  assert.equal(await availableOn("hive-x64-4cpu"), true)
+  x.send({ ...hello(), arch: "riscv64" })
+  assert.equal((await x.next()).type, "error", "an unknown one is refused")
+  x.close()
+  await eventually(
+    async () => (await presence("x")) === "offline",
+    "the box leaves"
+  )
+  assert.equal(await availableOn("hive-x64-4cpu"), false)
+  console.log("Architecture routing passed.")
 
   // Uninstalling the App silences the whole pool.
   await sql(

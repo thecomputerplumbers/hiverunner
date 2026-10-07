@@ -5,7 +5,17 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/protocol"
 )
+
+// as makes the tests a machine of one architecture, wherever they run.
+func as(t *testing.T, arch string) {
+	t.Helper()
+	was := hostArch
+	hostArch = func() string { return arch }
+	t.Cleanup(func() { hostArch = was })
+}
 
 func write(t *testing.T, dir, name, content string) {
 	t.Helper()
@@ -15,6 +25,7 @@ func write(t *testing.T, dir, name, content string) {
 }
 
 func TestLoadImage(t *testing.T) {
+	as(t, protocol.ArchARM64)
 	dir := t.TempDir()
 	if _, err := LoadImage(dir); !errors.Is(err, ErrNoImage) {
 		t.Fatalf("empty directory: %v", err)
@@ -30,9 +41,39 @@ func TestLoadImage(t *testing.T) {
 	if err != nil || image.RunnerVersion != "2.0.0" || image.Dir != dir {
 		t.Fatalf("LoadImage() = %+v, %v", image, err)
 	}
+	// Every manifest written before there were two architectures is arm64.
+	if image.Arch != protocol.ArchARM64 {
+		t.Fatalf("a manifest that names no architecture loaded as %q", image.Arch)
+	}
+}
+
+func TestAnImageIsForOneArchitecture(t *testing.T) {
+	dir := t.TempDir()
+	manifest := func(arch string) {
+		write(t, dir, "manifest.json", `{"imageVersion":7,"runnerVersion":"2.0.0","arch":"`+arch+`","kernel":"vmlinuz","initrd":"initrd","disk":"rootfs.img","commandLine":"root=/dev/vda"}`)
+	}
+	for _, name := range []string{"vmlinuz", "initrd", "rootfs.img"} {
+		write(t, dir, name, "x")
+	}
+	manifest("x64")
+	as(t, protocol.ArchX64)
+	image, err := LoadImage(dir)
+	if err != nil || image.Arch != protocol.ArchX64 || image.Kernel != "vmlinuz" {
+		t.Fatalf("an x64 image on an x64 machine: %+v, %v", image, err)
+	}
+	// The same image on a Mac is refused before anything tries to boot it.
+	as(t, protocol.ArchARM64)
+	if _, err := LoadImage(dir); !errors.Is(err, ErrWrongArch) {
+		t.Fatalf("an x64 image on an arm64 machine: %v, want ErrWrongArch", err)
+	}
+	manifest("riscv64")
+	if _, err := LoadImage(dir); err == nil || errors.Is(err, ErrWrongArch) {
+		t.Fatalf("a manifest naming an architecture no guest is built for: %v", err)
+	}
 }
 
 func TestAManifestCannotReachOutsideItsDirectory(t *testing.T) {
+	as(t, protocol.ArchARM64)
 	dir := t.TempDir()
 	write(t, dir, "manifest.json", `{"kernel":"../../etc/passwd","initrd":"initrd","disk":"rootfs.img"}`)
 	if _, err := LoadImage(dir); err == nil {

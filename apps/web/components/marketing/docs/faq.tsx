@@ -22,12 +22,17 @@ export function Faq() {
 
       <dt>Which jobs can run on it?</dt>
       <dd>
-        Linux arm64 jobs. macOS, Windows and GPU jobs are not supported in the
-        first release.
+        Linux arm64 jobs. Linux x64 jobs have{" "}
+        <Link href="/docs/labels-and-sizes#x64">labels of their own</Link>,
+        which are not yet released. macOS, Windows and GPU jobs are not
+        supported in the first release.
       </dd>
 
       <dt>Which machines can join a hive?</dt>
-      <dd>Apple Silicon Macs that belong to members of your organization.</dd>
+      <dd>
+        Apple Silicon Macs that belong to members of your organization. Linux
+        machines, arm64 and x64, are not yet released.
+      </dd>
 
       <dt>Do I have to move every workflow?</dt>
       <dd>

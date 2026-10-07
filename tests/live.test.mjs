@@ -46,13 +46,19 @@ async function pool(t) {
     .run(orgId)
   return { db, sqlite }
 }
-const run = async (db, id, startedAt, minutes, result = "succeeded") => {
+const run = async (
+  db,
+  id,
+  startedAt,
+  minutes,
+  result = "succeeded",
+  size = { label: "hive", vcpus: 2 }
+) => {
   const jobId = await startJob(db, {
     organizationId: orgId,
     runnerRequestId: id,
     machineId: "mac",
-    label: "hive",
-    vcpus: 2,
+    ...size,
     repository: "acme/app",
     startedAt,
   })
@@ -107,6 +113,42 @@ test("the snapshot counts the window by the hour and prices it as the balance sa
     live.machines.map((machine) => [machine.name, machine.jobs]),
     [["Mac", 4]]
   )
+})
+
+test("savings compare a job at its own label's architecture", async (t) => {
+  const { db } = await pool(t)
+  const x64 = { label: "hive-x64-4cpu", vcpus: 4 }
+  // Ten arm64 minutes at $0.005, and in the same hour ten x64 minutes on
+  // four cores at GitHub's x64 price of $0.012, not arm64's $0.008.
+  await run(db, 1, at("2026-10-07T11:05:00Z"), 10)
+  await run(db, 2, at("2026-10-07T11:20:00Z"), 10, "succeeded", x64)
+  // The same size on arm64, to show the two are not priced alike.
+  await run(db, 3, at("2026-10-07T10:20:00Z"), 10, "succeeded", {
+    label: "hive-4cpu",
+    vcpus: 4,
+  })
+  const micro = (usd) => Math.round(usd * 1e6)
+
+  const live = await getLiveSnapshot(db, orgId, now)
+  assert.equal(micro(live.hours.at(-2).githubUsd), 50_000 + 120_000)
+  assert.equal(micro(live.hours.at(-3).githubUsd), 80_000)
+  assert.equal(micro(live.lifetime.githubUsd), 250_000)
+  assert.deepEqual(
+    { jobs: live.lifetime.jobs, seconds: live.lifetime.seconds },
+    { jobs: 3, seconds: 1800 }
+  )
+
+  const board = await getLeaderboard(db, orgId, now)
+  const [mac] = board.machines
+  assert.deepEqual(
+    [
+      mac.scores.all.jobs,
+      mac.scores.all.seconds,
+      micro(mac.scores.all.githubUsd),
+    ],
+    [3, 1800, 250_000]
+  )
+  assert.equal(micro(board.people[0].scores.week.githubUsd), 250_000)
 })
 
 test("a pool that pays its developers shows the whole charge as the price", async (t) => {

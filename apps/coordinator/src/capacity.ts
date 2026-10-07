@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/d1"
 import { getInstallationByOrganization } from "@workspace/db/installations"
 import { canAcquireJobs } from "@workspace/db/jobs"
 import { createGitHubApp } from "@workspace/github"
-import { RUNNER_SIZES } from "@workspace/pricing"
+import { runnerSize } from "@workspace/pricing"
 import { githubTestAPI } from "./config"
 import { verifyActionsIdentity } from "./oidc"
 
@@ -18,7 +18,7 @@ export async function capacityResponse(
     return respond({ error: "Method not allowed" }, 405)
   const url = new URL(request.url)
   const label = url.searchParams.get("label")
-  const size = RUNNER_SIZES.find((size) => size.label === label)
+  const size = runnerSize(label)
   if (!size) return respond({ error: "Unsupported runner label" }, 400)
   const token = request.headers
     .get("authorization")
@@ -64,7 +64,7 @@ export async function capacityResponse(
       (await canAcquireJobs(db, identity.organizationId)) &&
       (await env.POOL.getByName(identity.organizationId).availableCapacity(
         identity.organizationId,
-        size.vcpus
+        { vcpus: size.vcpus, arch: size.arch }
       ))
     return respond({ available: Boolean(available), label: size.label })
   } catch {

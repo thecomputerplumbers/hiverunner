@@ -18,7 +18,7 @@ import {
   type ScaleSetClient,
   type ScaleStatistics,
 } from "@workspace/github/scale-sets"
-import { RUNNER_SIZES } from "@workspace/pricing"
+import { runnerSize } from "@workspace/pricing"
 import { githubTestAPI } from "./config"
 
 type Settings = { organizationId: string; label: string; vcpus: number }
@@ -58,7 +58,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
   // remain authoritative if this isolate is evicted.
   private clientCache?: { identity: string; client: ScaleSetClient }
   async activate(organizationId: string, label: string) {
-    const size = RUNNER_SIZES.find((size) => size.label === label)
+    const size = runnerSize(label)
     if (!size) throw new Error("Unknown runner size")
     const settings = await this.ctx.storage.get<Settings>("settings")
     if (
@@ -149,7 +149,14 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       state = undefined
     }
     this.stage = "capacity"
-    const capacity = await pool.capacity(settings.vcpus)
+    // The label names the architecture as well as the size. It is read from
+    // the label, not from storage: listeners that predate a second
+    // architecture stored only a size.
+    const size = {
+      vcpus: settings.vcpus,
+      arch: runnerSize(settings.label)?.arch ?? "arm64",
+    }
+    const capacity = await pool.capacity(size)
     if (!capacity && !Object.keys(state?.slots ?? {}).length) {
       if (state?.session) {
         await this.close(client, state)
@@ -313,7 +320,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
         const chosen = await pool.offer({
           assignmentId,
           label: settings.label,
-          vcpus: settings.vcpus,
+          ...size,
           timeoutMinutes: 360,
         })
         if (!chosen) break
@@ -337,7 +344,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       const chosen = await pool.offer({
         assignmentId,
         label: settings.label,
-        vcpus: settings.vcpus,
+        ...size,
         timeoutMinutes: 360,
       })
       if (!chosen) break

@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/protocol"
 )
 
 // Image is a built guest image: see daemon/image/build.sh.
@@ -21,14 +23,27 @@ type Image struct {
 	Dir           string
 	RunnerVersion string `json:"runnerVersion"`
 	ImageVersion  int    `json:"imageVersion"`
-	Kernel        string `json:"kernel"`
-	Initrd        string `json:"initrd"`
-	Disk          string `json:"disk"`
-	CommandLine   string `json:"commandLine"`
+	// Arch is the guest's architecture, protocol.ArchARM64 or
+	// protocol.ArchX64. A manifest written before there were two says
+	// nothing, and is arm64.
+	Arch string `json:"arch"`
+	// Kernel is what direct kernel boot is given: the uncompressed Image on
+	// arm64, a bzImage on x64.
+	Kernel      string `json:"kernel"`
+	Initrd      string `json:"initrd"`
+	Disk        string `json:"disk"`
+	CommandLine string `json:"commandLine"`
 }
 
 // ErrNoImage means the guest image has not been built or installed.
 var ErrNoImage = errors.New("no guest image is installed")
+
+// ErrWrongArch means the installed guest image is for another architecture.
+// A machine boots guests of its own architecture and no other.
+var ErrWrongArch = errors.New("the guest image is for another architecture")
+
+// hostArch is what this machine is. A variable so tests can be another.
+var hostArch = protocol.HostArch
 
 // DefaultImageDir is where build.sh writes and hived looks.
 func DefaultImageDir() (string, error) {
@@ -54,6 +69,15 @@ func LoadImage(dir string) (Image, error) {
 	image := Image{Dir: dir}
 	if err := json.Unmarshal(raw, &image); err != nil {
 		return Image{}, fmt.Errorf("guest image manifest: %w", err)
+	}
+	if image.Arch == "" {
+		image.Arch = protocol.ArchARM64
+	}
+	if image.Arch != protocol.ArchARM64 && image.Arch != protocol.ArchX64 {
+		return Image{}, fmt.Errorf("guest image manifest names an unknown architecture %q", image.Arch)
+	}
+	if host := hostArch(); image.Arch != host {
+		return Image{}, fmt.Errorf("%w: it is %s and this machine is %s", ErrWrongArch, image.Arch, host)
 	}
 	for _, name := range []string{image.Kernel, image.Initrd, image.Disk} {
 		// A manifest names files beside itself and nowhere else.

@@ -77,6 +77,7 @@ export default {
     headers.delete("authorization")
     headers.set("x-hive-machine", machine.id)
     headers.set("x-hive-pool", pool)
+    headers.set("x-hive-arch", machine.arch)
     headers.set("x-hive-cores", String(machine.cores))
     headers.set("x-hive-speed", String(machine.speedScore))
     return env.POOL.getByName(pool).fetch(new Request(request, { headers }))

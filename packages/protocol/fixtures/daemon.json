@@ -20,6 +20,13 @@
     "maxVcpus": 4,
     "maxJobs": 2
   },
+  {
+    "type": "hello",
+    "protocol": 3,
+    "daemonVersion": "0.2.0",
+    "presence": "online",
+    "arch": "x64"
+  },
   { "type": "presence", "presence": "paused" },
   { "type": "presence", "presence": "draining" },
   { "type": "job.accepted", "assignmentId": "a-1" },

@@ -37,12 +37,27 @@ export const CLOSE = {
   UNSUPPORTED: 4002,
 } as const
 
+/**
+ * The architecture of a machine, and of the jobs it can run. The same two
+ * words as `RunnerArch` in `@workspace/pricing`, said again here because the
+ * protocol stands alone: the coordinator passes one where the other is
+ * wanted, so the two cannot drift without failing its typecheck.
+ */
+export const ARCHES = ["arm64", "x64"] as const
+export type Arch = (typeof ARCHES)[number]
+
 export type DaemonMessage =
   | {
       type: "hello"
       protocol: number
       daemonVersion: string
       presence: Presence
+      /**
+       * What the machine is. Absent from daemons that predate a second
+       * architecture, every one of which is an arm64 Mac; the coordinator
+       * then goes by what the machine enrolled as.
+       */
+      arch?: Arch
       /**
        * The jobs this machine is holding or running for this pool, if any.
        * A daemon that reconnects mid-job says so here, so the pool counts
@@ -85,6 +100,12 @@ export type CoordinatorMessage =
       assignmentId: string
       /** The `runs-on` label, which is also the scale set. */
       label: string
+      /**
+       * The architecture the label names. The coordinator only offers a job
+       * to a machine of that architecture; this lets the machine refuse one
+       * offered by mistake rather than run it on the wrong kind of guest.
+       */
+      arch?: Arch
       vcpus: number
       timeoutMinutes: number
     }
@@ -116,6 +137,8 @@ const isString = (value: unknown, max = 200): value is string =>
 const isPresence = (value: unknown): value is Presence =>
   PRESENCE.includes(value as Presence)
 
+const isArch = (value: unknown): value is Arch => ARCHES.includes(value as Arch)
+
 /** The most jobs one machine may run at once, whatever its owner asks for. */
 export const MAX_JOBS = 8
 
@@ -146,6 +169,7 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         !Number.isInteger(value.protocol) ||
         !isString(value.daemonVersion, 40) ||
         !isPresence(value.presence) ||
+        (value.arch !== undefined && !isArch(value.arch)) ||
         (value.holding !== undefined &&
           !(
             Array.isArray(value.holding) &&
@@ -161,6 +185,7 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         protocol: value.protocol as number,
         daemonVersion: value.daemonVersion,
         presence: value.presence,
+        ...(value.arch === undefined ? {} : { arch: value.arch as Arch }),
         ...(value.holding === undefined
           ? {}
           : { holding: value.holding as string[] }),

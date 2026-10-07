@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm"
 
 import type { AuthDb } from "@workspace/auth/db"
-import { COMPETITOR_RATES, COMPARISON_ARCH } from "@workspace/pricing"
+import { competitorUsdPerMinuteForLabel } from "@workspace/pricing"
 
 import { getBalance } from "@workspace/db/ledger"
 import { listMachines } from "@workspace/db/machines"
@@ -186,7 +186,7 @@ export async function getLiveSnapshot(
     db
       .select({
         hour: hour.as("hour"),
-        vcpus: job.vcpus,
+        label: job.label,
         jobs: sql<number>`count(*)`.as("jobs"),
         failed: sql<number>`coalesce(sum(${job.result} = 'failed'), 0)`.as(
           "failed"
@@ -196,7 +196,7 @@ export async function getLiveSnapshot(
       })
       .from(job)
       .where(inWindow)
-      .groupBy(sql`1`, job.vcpus),
+      .groupBy(sql`1`, job.label),
     db
       .select({
         machineId: job.machineId,
@@ -213,7 +213,7 @@ export async function getLiveSnapshot(
       .limit(1),
     db
       .select({
-        vcpus: job.vcpus,
+        label: job.label,
         jobs: sql<number>`count(*)`.as("jobs"),
         seconds: seconds.as("seconds"),
         price: sql<number>`coalesce(sum(${price}), 0)`.as("total"),
@@ -222,7 +222,7 @@ export async function getLiveSnapshot(
       .where(
         and(eq(job.organizationId, organizationId), isNotNull(job.completedAt))
       )
-      .groupBy(job.vcpus),
+      .groupBy(job.label),
   ])
 
   const hours: LiveHour[] = Array.from({ length: HOURS }, (_, index) => ({
@@ -233,7 +233,11 @@ export async function getLiveSnapshot(
     price: 0,
     githubUsd: 0,
   }))
-  const github = COMPETITOR_RATES.github.usdPerMinute[COMPARISON_ARCH]
+  // A job's label says its size and its architecture, and GitHub lists a
+  // price for each: an x64 minute is not compared at the arm64 rate. A label
+  // GitHub has no price for is left out rather than guessed at.
+  const github = (label: string) =>
+    competitorUsdPerMinuteForLabel("github", label) ?? 0
   for (const bucket of buckets) {
     const slot = hours[Number(bucket.hour) - (thisHour - HOURS + 1)]
     if (!slot) continue
@@ -241,17 +245,14 @@ export async function getLiveSnapshot(
     slot.failed += Number(bucket.failed)
     slot.seconds += Number(bucket.seconds)
     slot.price += Number(bucket.price)
-    // A size GitHub does not list is left out rather than guessed at.
-    slot.githubUsd +=
-      (Number(bucket.seconds) / 60) * (github[bucket.vcpus] ?? 0)
+    slot.githubUsd += (Number(bucket.seconds) / 60) * github(bucket.label)
   }
   const lifetime = { jobs: 0, seconds: 0, price: 0, githubUsd: 0 }
   for (const size of sizes) {
     lifetime.jobs += Number(size.jobs)
     lifetime.seconds += Number(size.seconds)
     lifetime.price += Number(size.price)
-    lifetime.githubUsd +=
-      (Number(size.seconds) / 60) * (github[size.vcpus] ?? 0)
+    lifetime.githubUsd += (Number(size.seconds) / 60) * github(size.label)
   }
   const work = new Map(perMachine.map((row) => [row.machineId, row]))
   return {

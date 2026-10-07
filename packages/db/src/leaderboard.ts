@@ -2,7 +2,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm"
 
 import type { AuthDb } from "@workspace/auth/db"
 import { user } from "@workspace/auth/schema"
-import { COMPARISON_ARCH, COMPETITOR_RATES } from "@workspace/pricing"
+import { competitorUsdPerMinuteForLabel } from "@workspace/pricing"
 
 import { job, machine, machinePool } from "@workspace/db/schema"
 
@@ -69,7 +69,7 @@ export async function getLeaderboard(
         userId: user.id,
         name: user.name,
         image: user.image,
-        vcpus: job.vcpus,
+        label: job.label,
         jobs: sql<number>`count(*)`.as("jobs"),
         seconds: sql<number>`coalesce(sum(${took}), 0)`.as("seconds"),
         weekJobs: sql<number>`coalesce(sum(${since(weekAgo)}), 0)`.as(
@@ -93,7 +93,7 @@ export async function getLeaderboard(
       .where(
         and(eq(job.organizationId, organizationId), isNotNull(job.completedAt))
       )
-      .groupBy(machine.id, job.vcpus),
+      .groupBy(machine.id, job.label),
     db
       .select({
         userId: machine.userId,
@@ -114,7 +114,6 @@ export async function getLeaderboard(
       .groupBy(machine.userId),
   ])
 
-  const github = COMPETITOR_RATES.github.usdPerMinute[COMPARISON_ARCH]
   const people = new Map<string, BoardPerson>()
   const machines = new Map<string, BoardMachine>()
   // Someone whose Mac has joined but not yet run a job is on the board too.
@@ -144,8 +143,9 @@ export async function getLeaderboard(
       scores: empty(),
     }
     machines.set(row.machineId, mac)
-    // A size GitHub does not list is left out rather than guessed at.
-    const rate = github[row.vcpus] ?? 0
+    // Compared at the label's own size and architecture. One GitHub does not
+    // list is left out rather than guessed at.
+    const rate = competitorUsdPerMinuteForLabel("github", row.label) ?? 0
     const windows: Array<[BoardPeriod, number, number]> = [
       ["week", Number(row.weekJobs), Number(row.weekSeconds)],
       ["month", Number(row.monthJobs), Number(row.monthSeconds)],

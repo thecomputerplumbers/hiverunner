@@ -68,6 +68,39 @@ jobs:
       - run: uname -m
 ```
 
+### Linux x64 (not yet released)
+
+A label names an architecture as well as a size. The labels above are arm64
+and stay arm64. Linux x64 jobs have their own, served only by Linux x64
+machines:
+
+| `runs-on`       | Guest vCPUs | Minimum host cores |
+| --------------- | ----------- | ------------------ |
+| `hive-x64`      | 2           | 4                  |
+| `hive-x64-4cpu` | 4           | 6                  |
+| `hive-x64-8cpu` | 8           | 10                 |
+
+The coordinator already keeps the two apart: a machine says what it is in
+`hello` (one that does not is what it enrolled as, and every machine enrolled
+before this was an arm64 Mac), and a job is only offered to, and only counts
+as capacity on, a machine of its label's architecture. A machine declines an
+offer for another architecture as a second check. The scale set for an x64
+label is created when the first x64 machine able to serve it comes online.
+Savings on the dashboard compare each job with GitHub's price for its own
+architecture.
+
+What is missing is the machine: there is no released daemon for Linux, and
+these labels are not offered on the site (`UNRELEASED_RUNNER_SIZES` in
+`@workspace/pricing`). The guest image for them builds today:
+
+```sh
+GUEST_ARCH=x64 ./daemon/image/build.sh /path/to/image
+```
+
+It is the same guest with GitHub's x64 runner and an x64 kernel, and its
+`manifest.json` says `"arch": "x64"`. `hived` refuses an image that is not
+for the machine it is running on.
+
 Jobs install their own toolchains with `setup-*` actions. `container:` and
 `services:` are not supported yet. Every job starts from a clean disk. What
 `actions/cache` saves is kept on the Mac that ran the job, per repository, and

@@ -6,6 +6,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -39,12 +40,32 @@ const (
 	CloseUnsupported = 4002
 )
 
+// The architecture of a machine, and of the jobs it can run, in the words
+// GitHub's runner uses: Go's amd64 is x64 here.
+const (
+	ArchARM64 = "arm64"
+	ArchX64   = "x64"
+)
+
+// HostArch is this machine's architecture as the protocol spells it. A
+// machine of any other kind runs no jobs, and says what Go calls it.
+func HostArch() string {
+	if runtime.GOARCH == "amd64" {
+		return ArchX64
+	}
+	return runtime.GOARCH
+}
+
 // Hello is the first frame the daemon sends.
 type Hello struct {
 	Type          string   `json:"type"`
 	Protocol      int      `json:"protocol"`
 	DaemonVersion string   `json:"daemonVersion"`
 	Presence      Presence `json:"presence"`
+	// Arch is what this machine is, so the pool only offers it jobs whose
+	// label names that architecture. A pool that hears none goes by what the
+	// machine enrolled as.
+	Arch string `json:"arch,omitempty"`
 	// Holding is the jobs this machine is holding or running for this pool,
 	// if any. A daemon that reconnects mid-job says so, so the pool counts
 	// them again instead of offering cores that are already at work.
@@ -96,7 +117,10 @@ const StartTimeout = 30 * time.Second
 type JobAssign struct {
 	AssignmentID string `json:"assignmentId"`
 	// Label is the runs-on label, which is also the scale set.
-	Label          string `json:"label"`
+	Label string `json:"label"`
+	// Arch is the architecture the label names. Absent from a coordinator
+	// that predates a second one, when every job was arm64.
+	Arch           string `json:"arch,omitempty"`
 	VCPUs          int    `json:"vcpus"`
 	TimeoutMinutes int    `json:"timeoutMinutes"`
 }
