@@ -125,8 +125,8 @@ export function JoinPool({
             <ol className="flex flex-col gap-4 text-sm">
               <li className="flex flex-col gap-2">
                 <p>
-                  <Step n={1} /> Paste this into a terminal on your Apple
-                  Silicon Mac.
+                  <Step n={1} /> Paste this into a terminal on your Mac or Linux
+                  machine.
                 </p>
                 <Snippet prompt>{command}</Snippet>
                 <div>
