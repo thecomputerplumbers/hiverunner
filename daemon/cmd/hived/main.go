@@ -297,6 +297,11 @@ func run(ctx context.Context) error {
 		// Paused, not online, when the machine cannot take a job: the pool
 		// then stops offering it any, instead of being declined each time.
 		Available: func() bool {
+			// A machine that cannot run a job at all, for want of an image
+			// or a hypervisor, is not waiting for one.
+			if runner == nil {
+				return false
+			}
 			if unusable, ok := runner.(jobs.Unusable); ok && unusable.Unusable() != "" {
 				return false
 			}

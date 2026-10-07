@@ -88,15 +88,15 @@ The daemon and the Linux image jobs run in are published to the R2 bucket
 `curl -fsSL …/install.sh | sh` is the whole of installing on a developer's
 Mac or Linux box.
 
-| Object                                      | What it is                                   |
-| ------------------------------------------- | -------------------------------------------- |
-| `latest.json`                               | The current version, with URLs and checksums |
-| `install.sh`                                | `daemon/release/install.sh`                  |
-| `hived/<version>/hived-darwin-arm64.zip`    | The daemon, signed and notarized             |
-| `images/<image>/image.aar`                  | The guest image, as an Apple Archive         |
-| `linux-<arch>.txt`                          | The same as `latest.json`, for Linux         |
-| `hived/<version>/hived-linux-<arch>.tar.gz` | The daemon for Linux                         |
-| `images/<image>/image-<arch>.tar.gz`        | The guest image, as a tarball                |
+| Object                                      | What it is                                           |
+| ------------------------------------------- | ---------------------------------------------------- |
+| `latest.json`                               | The current version, with URLs and checksums         |
+| `install.sh`                                | `daemon/release/install.sh`                          |
+| `hived/<version>/hived-darwin-arm64.zip`    | The daemon, signed and notarized                     |
+| `images/<image>/image.aar`                  | The guest image, as an Apple Archive                 |
+| `linux-<arch>.txt`                          | The same as `latest.json`, for Linux                 |
+| `hived/<version>/hived-linux-<arch>.tar.gz` | The daemon for Linux                                 |
+| `images/<image>/image-<arch>-<sum>.tar.gz`  | The guest image, as a tarball named for its checksum |
 
 A release is built and published from a clean checkout on an Apple Silicon
 Mac, because signing and notarizing need macOS:

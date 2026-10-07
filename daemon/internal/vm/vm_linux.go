@@ -219,6 +219,9 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 
 	// The guest's network: out through this user's ordinary sockets, nothing
 	// in, and no address that means the host's own loopback.
+	// (It also writes a few lines to the system log for each VM. Sending them
+	// to a file instead is refused by the confinement distributions ship it
+	// with, which lets it create a log file but not open one.)
 	network := []string{"--foreground", "--quiet", "--one-off", "--no-map-gw", "--socket", networkSocket}
 	for _, server := range upstreamDNS() {
 		network = append(network, "--dns", server)

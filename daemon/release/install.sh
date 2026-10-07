@@ -27,6 +27,22 @@ fail() {
   exit 1
 }
 
+# What to type next, said at the end on either system.
+tips() { # what this machine is called, the shell's startup file
+  say ""
+  say "  hived status     what $1 lends, and whether it is lending"
+  say "  hived pause      stop taking jobs"
+  say "  hived config     how many jobs, how large, and when"
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *)
+      say ""
+      say "$BIN_DIR is not on your PATH yet. To use the commands above, add it:"
+      say "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $2"
+      ;;
+  esac
+}
+
 # Linux is installed by its own half of this script, at the end; what is in
 # between is the Mac.
 [ "$(uname -s)" = "Linux" ] && LINUX=1 || LINUX=""
@@ -184,6 +200,7 @@ done
 
 say ""
 say "Done. This Mac now runs jobs for your hive whenever it is awake."
+tips "this Mac" "~/.zshrc && exec zsh"
 exit 0
 fi
 
@@ -346,17 +363,17 @@ if ! [ -e /dev/vhost-vsock ]; then
   say "  echo vhost_vsock | sudo tee /etc/modules-load.d/hiveworker.conf && sudo modprobe vhost_vsock"
 fi
 
+# The service belongs to this user's systemd, which took its groups when it
+# started. If the kvm group was added since, the shell has it and the
+# service does not yet, and the daemon says so in its first lines.
+sleep 3
+if journalctl --user -u hiveworker -n 20 --no-pager 2>/dev/null | grep -q "cannot open /dev/kvm"; then
+  say ""
+  say "The daemon is running but cannot use KVM yet: your login got the kvm group"
+  say "after your user's services started. Restart them (or reboot), and it will:"
+  say "  sudo systemctl restart user@$(id -u)"
+fi
+
 say ""
 say "Done. This machine now runs jobs for your hive. Logs: journalctl --user -u hiveworker"
-say ""
-say "  hived status     what this Mac lends, and whether it is lending"
-say "  hived pause      stop taking jobs"
-say "  hived config     how many jobs, how large, and when"
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    say ""
-    say "$BIN_DIR is not on your PATH yet. To use the commands above, add it:"
-    say "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && exec zsh"
-    ;;
-esac
+tips "this machine" "~/.profile"
