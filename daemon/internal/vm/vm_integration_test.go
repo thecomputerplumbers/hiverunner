@@ -8,7 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -218,4 +220,37 @@ func TestNoWarmVMWhenUnavailable(t *testing.T) {
 	until("the warm VM to be destroyed", func() bool { return !held() && leftovers(t, r) == 0 })
 	available.Store(true)
 	until("a warm VM again", held)
+}
+
+// An owner may allow several jobs at once. Each gets a VM of its own size
+// with a working network, and nothing of any of them is left afterwards.
+func TestSeveralVMsRunAtOnce(t *testing.T) {
+	r := realRunner(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	sizes := []int{2, 4, 2}
+	reports := make([]string, len(sizes))
+	errs := make([]error, len(sizes))
+	var together sync.WaitGroup
+	for i, vcpus := range sizes {
+		together.Add(1)
+		go func() {
+			defer together.Done()
+			reports[i], errs[i] = r.SelfTest(ctx, vcpus)
+		}()
+	}
+	together.Wait()
+	for i, vcpus := range sizes {
+		if errs[i] != nil {
+			t.Fatalf("VM %d: %v\n%s", i, errs[i], reports[i])
+		}
+		for _, want := range []string{"CPUS=" + strconv.Itoa(vcpus), "NETWORK=ok"} {
+			if !strings.Contains(reports[i], want) {
+				t.Errorf("VM %d's report lacks %q:\n%s", i, want, reports[i])
+			}
+		}
+	}
+	if n := leftovers(t, r); n != 0 {
+		t.Errorf("%d job directories left behind", n)
+	}
 }
