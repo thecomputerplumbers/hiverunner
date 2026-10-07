@@ -1,0 +1,22 @@
+#!/bin/sh
+# Stands in front of the Node the runner starts each JavaScript action with.
+#
+# The runner tells an action where GitHub's results service is, and that is
+# where `actions/cache` looks for caches. When the host is offering its own
+# cache to this job, the action is told the host's address instead. The host
+# answers the cache calls and passes everything else on to GitHub.
+#
+# It only ever swaps the one address it knows the host passes on to. Any
+# other value, or no cache on offer, and the action runs exactly as GitHub
+# set it up.
+offered=/etc/hive-results-url
+upstream=https://results-receiver.actions.githubusercontent.com
+if [ -r "$offered" ]; then
+  case "${ACTIONS_RESULTS_URL:-}" in
+    "$upstream" | "$upstream/")
+      ACTIONS_RESULTS_URL=$(cat "$offered")
+      export ACTIONS_RESULTS_URL
+      ;;
+  esac
+fi
+exec "$0.real" "$@"

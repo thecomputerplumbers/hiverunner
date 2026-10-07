@@ -40,6 +40,7 @@ const usage = `hived, the HiveWorker daemon
   hived run         Connect to the pool and wait for jobs
   hived status      Show what this machine lends, and whether it is lending
   hived config      Show or change this machine's settings
+  hived cache       Show or empty this machine's Actions cache
   hived pause       Stop taking jobs until you say otherwise
   hived resume      Take jobs again
   hived logout      Forget this machine's token
@@ -68,6 +69,8 @@ func main() {
 		err = status()
 	case "config":
 		err = configure(os.Args[2:])
+	case "cache":
+		err = cacheCommand(os.Args[2:])
 	case "pause":
 		err = pause(true)
 	case "resume":
@@ -256,6 +259,10 @@ func run(ctx context.Context) error {
 		// A daemon that was killed leaves its VMs' disks, and possibly a
 		// job's runner configuration, on disk. Remove them before anything
 		// else runs.
+		// The machine's own Actions cache, offered to each job's VM.
+		if store := offerCache(vmRunner, log, live.Get); store != nil {
+			go keepCacheTrimmed(ctx, store)
+		}
 		if swept, err := vm.SweepWorkDir(vmRunner.WorkDir); err != nil {
 			log.Warn("could not clear what a previous run left behind", "error", err)
 		} else if swept > 0 {
@@ -328,11 +335,18 @@ func selftest(ctx context.Context) error {
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
+	offerCache(runner, log, func() settings.Settings {
+		current, _ := settings.Load()
+		return current
+	})
 	started := time.Now()
 	report, err := runner.SelfTest(ctx, 2)
 	fmt.Print(report)
 	if err != nil {
 		return err
+	}
+	if strings.Contains(report, "CACHE=failed") {
+		return errors.New("the VM booted but could not reach this machine's Actions cache")
 	}
 	if !strings.Contains(report, "NETWORK=ok") {
 		return errors.New("the VM booted but could not reach GitHub")

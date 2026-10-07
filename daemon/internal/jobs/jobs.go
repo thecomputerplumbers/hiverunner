@@ -23,6 +23,8 @@ import (
 // Job is one GitHub Actions job to run in a throwaway VM.
 type Job struct {
 	AssignmentID string
+	// Pool is the pool that placed the job: whose work this is.
+	Pool string
 	// JITConfig is a credential. It goes to the guest and nowhere else.
 	JITConfig  string
 	RunnerName string
@@ -255,6 +257,7 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 
 	job := Job{
 		AssignmentID: start.AssignmentID,
+		Pool:         pool,
 		JITConfig:    start.JITConfig,
 		RunnerName:   start.RunnerName,
 		VCPUs:        held.vcpus,

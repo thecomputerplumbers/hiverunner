@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -44,6 +45,9 @@ type Runner struct {
 	// so a job of that size skips the boot. Zero keeps none. Tend does the
 	// keeping.
 	WarmVCPUs int
+	// Guest, if set, is a service of the host's that each VM can reach over
+	// a private socket: the Actions cache.
+	Guest *GuestService
 
 	mu      sync.Mutex
 	warm    *instance
@@ -79,6 +83,11 @@ const warmMaxAge = 20 * time.Minute
 
 // instance is one VM and everything on the host that belongs to it.
 type instance struct {
+	// pool is whose job the VM is running: "" until it has one. The guest
+	// service reads it; the guest cannot set it.
+	pool atomic.Pointer[string]
+	// service answers the guest on its private socket, if there is one.
+	service *http.Server
 	dir     string
 	share   string
 	console string
@@ -95,7 +104,7 @@ type instance struct {
 // Run hands the job to a VM, waits for it to power off, and deletes
 // everything it used. The VM is the warm one if it fits, or a fresh boot.
 func (r *Runner) Run(ctx context.Context, job jobs.Job) (int, error) {
-	return r.run(ctx, job.AssignmentID, job.VCPUs, "jitconfig", job.JITConfig, nil)
+	return r.run(ctx, job.AssignmentID, job.Pool, job.VCPUs, "jitconfig", job.JITConfig, nil)
 }
 
 // SelfTest runs a VM with no credential and returns what the guest reports
@@ -103,7 +112,7 @@ func (r *Runner) Run(ctx context.Context, job jobs.Job) (int, error) {
 // binary work on this machine.
 func (r *Runner) SelfTest(ctx context.Context, vcpus int) (string, error) {
 	var report string
-	code, err := r.run(ctx, "selftest", vcpus, "selftest", "1", func(share string) {
+	code, err := r.run(ctx, "selftest", "selftest", vcpus, "selftest", "1", func(share string) {
 		raw, _ := os.ReadFile(filepath.Join(share, "selftest.out"))
 		report = string(raw)
 	})
@@ -116,7 +125,7 @@ func (r *Runner) SelfTest(ctx context.Context, vcpus int) (string, error) {
 	return report, nil
 }
 
-func (r *Runner) run(ctx context.Context, id string, vcpus int, file, content string, collect func(share string)) (code int, err error) {
+func (r *Runner) run(ctx context.Context, id, pool string, vcpus int, file, content string, collect func(share string)) (code int, err error) {
 	started := time.Now()
 	r.mu.Lock()
 	r.active++
@@ -137,7 +146,14 @@ func (r *Runner) run(ctx context.Context, id string, vcpus int, file, content st
 	// Whatever happens: the disk, the share and the credential go.
 	defer vm.destroy()
 
-	if err := vm.handoff(file, content); err != nil {
+	// The VM now works for this pool, and is told where the host's service
+	// is before it is told about the job.
+	extras := map[string]string{}
+	if vm.service != nil && r.Guest.Enabled() {
+		vm.pool.Store(&pool)
+		extras[GuestServiceFile] = strconv.FormatUint(uint64(r.Guest.Port), 10)
+	}
+	if err := vm.handoff(extras, file, content); err != nil {
 		return -1, err
 	}
 	r.Log.Info("VM has the job", "job", id, "vcpus", vcpus, "warm", warm)
@@ -228,6 +244,13 @@ func (r *Runner) boot(vcpus int) (*instance, error) {
 	if vm.machine, err = r.configure(vcpus, disk, vm.share, vm.console, address); err != nil {
 		return fail(err)
 	}
+	// Listening before the guest boots, so it never finds the socket shut.
+	// A VM without the service still runs jobs; they use GitHub's cache.
+	if r.Guest != nil {
+		if err := vm.serve(r.Guest); err != nil {
+			r.Log.Warn("this VM cannot reach the cache", "error", err)
+		}
+	}
 	// Subscribe before starting, so a VM that dies at once is still seen.
 	changes := vm.machine.StateChangedNotify()
 	go func() {
@@ -240,18 +263,51 @@ func (r *Runner) boot(vcpus int) (*instance, error) {
 		}
 	}()
 	if err := vm.machine.Start(); err != nil {
+		if vm.service != nil {
+			vm.service.Close()
+		}
 		return fail(fmt.Errorf("start the VM: %w", err))
 	}
 	return vm, nil
 }
 
+// serve answers the guest on a socket only this VM has. Which pool the VM
+// works for is read from the instance each time, so a warm VM is served
+// nothing until a job is handed to it.
+func (vm *instance) serve(guest *GuestService) error {
+	devices := vm.machine.SocketDevices()
+	if len(devices) == 0 {
+		return errors.New("the VM has no socket device")
+	}
+	listener, err := devices[0].Listen(guest.Port)
+	if err != nil {
+		return err
+	}
+	vm.service = &http.Server{
+		Handler: guest.Handler(func() string {
+			if pool := vm.pool.Load(); pool != nil {
+				return *pool
+			}
+			return ""
+		}),
+		ReadHeaderTimeout: 30 * time.Second,
+	}
+	go func() { _ = vm.service.Serve(listener) }()
+	return nil
+}
+
 // handoff gives the VM its job. The clock goes first, because the guest has
 // none it can trust and a warm VM may have been waiting a while. The job file
 // appears whole or not at all, so the guest never reads half of one.
-func (vm *instance) handoff(file, content string) error {
+func (vm *instance) handoff(extras map[string]string, file, content string) error {
 	now := strconv.FormatInt(time.Now().Unix(), 10)
 	if err := os.WriteFile(filepath.Join(vm.share, "clock"), []byte(now), 0o600); err != nil {
 		return err
+	}
+	for name, value := range extras {
+		if err := os.WriteFile(filepath.Join(vm.share, name), []byte(value), 0o600); err != nil {
+			return err
+		}
 	}
 	// Outside the share while it is being written: the guest sees only the
 	// finished file.
@@ -281,6 +337,10 @@ func (vm *instance) destroy() {
 		case <-vm.ended:
 		case <-time.After(15 * time.Second):
 		}
+	}
+	if vm.service != nil {
+		// Also closes the socket, and any download still in flight.
+		_ = vm.service.Close()
 	}
 	os.RemoveAll(vm.dir)
 	vm.release()
@@ -479,6 +539,14 @@ func (r *Runner) configure(vcpus int, disk, share, console string, mac *vz.MACAd
 		return nil, err
 	}
 	config.SetMemoryBalloonDevicesVirtualMachineConfiguration([]vz.MemoryBalloonDeviceConfiguration{balloon})
+
+	// A socket between this VM and the host, on no network at all: the guest
+	// reaches the host's cache through it, and nothing else can.
+	socket, err := vz.NewVirtioSocketDeviceConfiguration()
+	if err != nil {
+		return nil, err
+	}
+	config.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{socket})
 
 	if ok, err := config.Validate(); !ok || err != nil {
 		return nil, fmt.Errorf("VM configuration is not valid: %w", err)

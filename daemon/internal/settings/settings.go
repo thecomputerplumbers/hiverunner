@@ -34,6 +34,11 @@ type Settings struct {
 	Warm bool `json:"warm"`
 	// Battery allows jobs while the machine is unplugged.
 	Battery bool `json:"battery"`
+	// Cache keeps an Actions cache on this machine for the jobs it runs.
+	Cache bool `json:"cache"`
+	// CacheGB is the most disk the cache may use, in gigabytes. Zero means
+	// a size chosen from the disk's: see cache.AutoLimit.
+	CacheGB int `json:"cacheGb"`
 	// Hours is when jobs may run, as "22:00-07:00" in local time. Empty
 	// means any time. A window may cross midnight.
 	Hours string `json:"hours"`
@@ -42,6 +47,9 @@ type Settings struct {
 // Sizes are the job sizes a machine can be offered, by guest vCPUs.
 var Sizes = []int{2, 4, 8}
 
+// MostCacheGB is the largest cache an owner can ask for.
+const MostCacheGB = 2000
+
 // MostJobs is the most jobs any machine runs at once, whatever its owner
 // asks for. The pool refuses a daemon that claims more.
 const MostJobs = 8
@@ -49,7 +57,7 @@ const MostJobs = 8
 // Default is a machine whose owner has decided nothing: it behaves as the
 // daemon did before there were settings.
 func Default() Settings {
-	return Settings{MaxJobs: 1, Warm: true, Battery: true}
+	return Settings{MaxJobs: 1, Warm: true, Battery: true, Cache: true}
 }
 
 // Path is the settings file, beside the machine file.
@@ -122,6 +130,9 @@ func (s Settings) validate() error {
 	if s.MaxJobs < 1 || s.MaxJobs > MostJobs {
 		return fmt.Errorf("max-jobs must be from 1 to %d", MostJobs)
 	}
+	if s.CacheGB < 0 || s.CacheGB > MostCacheGB {
+		return fmt.Errorf("cache-size must be auto or from 1 to %d", MostCacheGB)
+	}
 	_, _, err := parseHours(s.Hours)
 	return err
 }
@@ -136,7 +147,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours", "cache", "cache-size"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -158,16 +169,29 @@ func (s *Settings) Set(key, value string) error {
 			return errors.New("max-vcpus takes 2, 4, 8 or auto")
 		}
 		s.MaxVCPUs = vcpus
-	case "warm", "battery":
+	case "warm", "battery", "cache":
 		on, err := parseSwitch(value)
 		if err != nil {
 			return fmt.Errorf("%s takes on or off", key)
 		}
-		if key == "warm" {
+		switch key {
+		case "warm":
 			s.Warm = on
-		} else {
+		case "battery":
 			s.Battery = on
+		default:
+			s.Cache = on
 		}
+	case "cache-size":
+		if value == "auto" {
+			s.CacheGB = 0
+			return nil
+		}
+		gigabytes, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSuffix(value, "b"), "g"))
+		if err != nil || gigabytes < 1 || gigabytes > MostCacheGB {
+			return fmt.Errorf("cache-size takes a number of gigabytes from 1 to %d, or auto", MostCacheGB)
+		}
+		s.CacheGB = gigabytes
 	case "hours":
 		if value == "any" {
 			value = ""

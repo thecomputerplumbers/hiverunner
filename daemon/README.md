@@ -36,13 +36,15 @@ budget across all of them.
 The machine's owner decides what it lends. `hived config` shows the settings
 and `hived config set <name> <value>` changes one:
 
-| Setting     | Values                | What it does                                     |
-| ----------- | --------------------- | ------------------------------------------------ |
-| `max-jobs`  | `1` to `8`            | How many jobs run at once                        |
-| `max-vcpus` | `2`, `4`, `8`, `auto` | The largest job this Mac takes                   |
-| `warm`      | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner |
-| `battery`   | `on`, `off`           | Take jobs while unplugged                        |
-| `hours`     | `22:00-07:00`, `any`  | When jobs may start, in local time               |
+| Setting      | Values                | What it does                                     |
+| ------------ | --------------------- | ------------------------------------------------ |
+| `max-jobs`   | `1` to `8`            | How many jobs run at once                        |
+| `max-vcpus`  | `2`, `4`, `8`, `auto` | The largest job this Mac takes                   |
+| `warm`       | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner |
+| `battery`    | `on`, `off`           | Take jobs while unplugged                        |
+| `hours`      | `22:00-07:00`, `any`  | When jobs may start, in local time               |
+| `cache`      | `on`, `off`           | Keep an Actions cache on this Mac                |
+| `cache-size` | `1` to `2000`, `auto` | The most disk the cache may use, in gigabytes    |
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
@@ -62,6 +64,52 @@ pools is the judge of its own limits, because one pool cannot see another's
 jobs: an offer that would not fit is declined. The speed score was measured
 on an idle machine, so several jobs at once may each run slower than it says.
 The warm VM is only kept while no job is running.
+
+## The Actions cache
+
+A job's `actions/cache` step, and every action built on the same library
+(`setup-node`, `setup-go` and the rest), saves to and restores from this Mac
+instead of GitHub. Workflows do not change. A restore is a copy from local
+disk, and nothing counts against GitHub's cache quota.
+
+```sh
+./hived cache                  # what it holds, by repository
+./hived cache clear            # delete it all
+./hived cache clear owner/name # delete one repository's
+./hived config set cache-size 40
+./hived config set cache off
+```
+
+**Whose cache.** One cache per repository, inside one pool. A job proves
+which repository it is with the token GitHub gives it, and hived checks that
+token's signature against GitHub's published keys before believing it. The
+pool is not taken from the job at all: it is the pool whose job hived put in
+that VM. So a job cannot reach another repository's cache, and a machine
+serving two organizations keeps their caches apart. Within a repository,
+caches are scoped by branch as GitHub scopes them: a job reads its own
+branch's caches and the default branch's, and saves only to its own.
+
+**Each Mac builds its own.** The cache is on the machine, not in the pool. A
+job that lands on a Mac that has not run that repository starts cold and
+leaves a cache behind for the next one.
+
+**How a VM reaches it.** Each VM gets a socket that exists only between it
+and the host: on no network, and so not subject to the Mac's firewall. A
+relay in the guest gives that socket an address on the guest's own loopback.
+The runner tells each action where GitHub's results service is; a shim in
+front of the runner's Node swaps that one address for the relay's, and only
+when the cache has answered a health check. hived answers the cache calls
+and passes everything else, artifacts above all, on to GitHub untouched.
+
+If any part of that is missing, a job uses GitHub's cache exactly as before:
+an older guest image, the cache switched off, a runner that updated itself
+and replaced its Node, or a results address other than github.com's.
+
+**Disk.** `cache-size` caps it; `auto` is a tenth of the disk, between 10 and
+50 GB. Past the cap, the caches wanted longest ago go first. A save that
+would leave the Mac under 5 GB free is refused, and the job carries on
+without saving. The files are under `~/Library/Caches/HiveWorker`, which
+backups skip. Losing any of it is a cache miss and nothing more.
 
 ## What it keeps
 

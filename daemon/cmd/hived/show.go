@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/api"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/cache"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
@@ -103,6 +104,8 @@ func status() error {
 	fmt.Println()
 	fmt.Print(indent(screen.Box("What you lend", lending(screen, facts, current)...)))
 	fmt.Println()
+	fmt.Print(indent(screen.Box("Actions cache", cacheRows(screen, current, false)...)))
+	fmt.Println()
 	fmt.Print(indent(screen.Box("Your settings", settingRows(screen, current)...)))
 	fmt.Println(indent(screen.Dim("Change one with: hived config set max-jobs 2     Stop lending: hived pause")))
 	return nil
@@ -170,6 +173,13 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 	if current.Hours != "" {
 		hours = current.Hours
 	}
+	cacheSize := strconv.Itoa(current.CacheGB) + " GB"
+	if current.CacheGB == 0 {
+		cacheSize = "auto"
+		if dir, err := cache.DefaultDir(); err == nil {
+			cacheSize = "auto, " + bytesText(cacheLimit(current, dir))
+		}
+	}
 	row := func(key, value, meaning string) string {
 		return ui.Pad(key, 12) + ui.Pad(screen.Honey(value), 14) + screen.Dim(meaning)
 	}
@@ -179,6 +189,8 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("warm", onOff(current.Warm), "keep one VM booted so jobs start sooner"),
 		row("battery", onOff(current.Battery), "take jobs while unplugged"),
 		row("hours", hours, "when jobs may start"),
+		row("cache", onOff(current.Cache), "keep an Actions cache on this Mac"),
+		row("cache-size", cacheSize, "the most disk the cache may use"),
 		row("paused", yesNo(current.Paused), "hived pause, hived resume"),
 	}
 }
@@ -212,6 +224,8 @@ hived config set <name> <value>  Change one
   warm       on or off           keep one VM booted so jobs start sooner
   battery    on or off           take jobs while unplugged
   hours      22:00-07:00 or any  when jobs may start, in local time
+  cache      on or off           keep an Actions cache on this Mac
+  cache-size 1 to 2000 or auto   the most disk the cache may use, in GB
 `
 
 func configure(args []string) error {

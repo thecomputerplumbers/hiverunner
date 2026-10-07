@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -77,7 +78,7 @@ func TestCancellationDestroysTheVM(t *testing.T) {
 	defer cancel()
 	started := time.Now()
 	// A file the guest agent does not act on: the VM boots and waits.
-	code, err := r.run(ctx, "held", 2, "nothing-to-do", "", nil)
+	code, err := r.run(ctx, "held", "test", 2, "nothing-to-do", "", nil)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("run() = %d, %v; want a deadline error", code, err)
 	}
@@ -98,7 +99,7 @@ func TestTheShareHoldsOnlyTheJob(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	var names []string
-	_, err := r.run(ctx, "share", 1, "selftest", "1", func(share string) {
+	_, err := r.run(ctx, "share", "test", 1, "selftest", "1", func(share string) {
 		entries, _ := os.ReadDir(share)
 		for _, entry := range entries {
 			names = append(names, entry.Name())
@@ -252,5 +253,55 @@ func TestSeveralVMsRunAtOnce(t *testing.T) {
 	}
 	if n := leftovers(t, r); n != 0 {
 		t.Errorf("%d job directories left behind", n)
+	}
+}
+
+// The host's service reaches a VM over a socket that is on no network, and
+// the guest offers it to a job's actions only once it has answered.
+func TestAVMReachesTheHostsServiceOnItsOwnSocket(t *testing.T) {
+	r := realRunner(t)
+	var pools []string
+	var seen sync.Mutex
+	r.Guest = &GuestService{
+		Port: 47071,
+		Handler: func(pool func() string) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				seen.Lock()
+				pools = append(pools, request.URL.Path+" for "+pool())
+				seen.Unlock()
+				_, _ = w.Write([]byte("ok\n"))
+			})
+		},
+		Enabled: func() bool { return true },
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	report, err := r.SelfTest(ctx, 2)
+	if err != nil {
+		t.Fatalf("self-test: %v\n%s", err, report)
+	}
+	if !strings.Contains(report, "CACHE=ok") {
+		t.Fatalf("the guest did not reach the host's service:\n%s", report)
+	}
+	// An action that GitHub points at its results service is pointed at the
+	// host instead, by every copy of Node the runner ships.
+	if !strings.Contains(report, "NODE=http://127.0.0.1:47071/") || strings.Contains(report, "NODE=https://") {
+		t.Errorf("an action would not be sent to the host's cache:\n%s", report)
+	}
+	seen.Lock()
+	defer seen.Unlock()
+	if len(pools) == 0 || pools[0] != "/hive/health for selftest" {
+		t.Errorf("the host saw %v, want the guest's health check, attributed to the VM's own job", pools)
+	}
+
+	// With the owner's switch off the guest is offered nothing, and actions
+	// are left pointing at GitHub.
+	r.Guest.Enabled = func() bool { return false }
+	report, err = r.SelfTest(ctx, 2)
+	if err != nil {
+		t.Fatalf("self-test: %v\n%s", err, report)
+	}
+	if strings.Contains(report, "CACHE=") || !strings.Contains(report, "NODE=https://results-receiver.actions.githubusercontent.com/") {
+		t.Errorf("with the cache off the guest still changed something:\n%s", report)
 	}
 }

@@ -14,7 +14,7 @@ RUN apt-get update \
       systemd systemd-sysv systemd-resolved dbus udev kmod \
       linux-image-virtual initramfs-tools e2fsprogs \
       ca-certificates curl git sudo iproute2 iputils-ping \
-      jq tar gzip unzip zip xz-utils zstd openssh-client locales \
+      jq tar gzip unzip zip xz-utils zstd openssh-client locales socat \
  && locale-gen en_US.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 
@@ -32,6 +32,26 @@ RUN useradd --create-home --uid 1001 --shell /bin/bash runner \
  && /opt/runner/bin/installdependencies.sh \
  && rm -rf /var/lib/apt/lists/* \
  && chown -R runner:runner /opt/runner
+
+# The runner starts every JavaScript action with one of its own copies of
+# Node. Each is put behind hive-node, which points the action at the host's
+# cache when there is one and otherwise changes nothing. The build fails if
+# the runner stops shipping Node where this expects it, rather than produce
+# an image whose jobs silently never use the cache.
+COPY hive-node /usr/local/lib/hive-node
+RUN chmod 0755 /usr/local/lib/hive-node \
+ && wrapped=0 \
+ && for node in /opt/runner/externals/node*/bin/node; do \
+      case "$node" in *_alpine/*) continue ;; esac; \
+      [ -x "$node" ] && [ ! -L "$node" ] || { echo "unexpected $node" >&2; exit 1; }; \
+      mv "$node" "$node.real" \
+      && cp /usr/local/lib/hive-node "$node" \
+      && chown runner:runner "$node" "$node.real" \
+      && "$node" --version >/dev/null \
+      && wrapped=$((wrapped + 1)); \
+    done \
+ && [ "$wrapped" -ge 1 ] \
+ && echo "Wrapped $wrapped copies of Node"
 
 COPY hive-agent /usr/local/sbin/hive-agent
 COPY hive-agent.service /etc/systemd/system/hive-agent.service

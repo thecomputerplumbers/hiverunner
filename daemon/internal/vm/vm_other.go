@@ -17,6 +17,7 @@ type Runner struct {
 	WorkDir   string
 	Log       *slog.Logger
 	WarmVCPUs int
+	Guest     *GuestService
 }
 
 var errUnsupported = errors.New("the VM runner needs Apple's Virtualization.framework")

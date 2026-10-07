@@ -37,6 +37,9 @@ func TestSetRefusesWhatItCannotMean(t *testing.T) {
 	for _, bad := range [][2]string{
 		{"max-vcpus", "3"},
 		{"max-jobs", "0"},
+		{"cache", "sometimes"},
+		{"cache-size", "0"},
+		{"cache-size", "lots"},
 		{"max-jobs", "9"},
 		{"warm", "maybe"},
 		{"hours", "9-5"},
@@ -57,12 +60,20 @@ func TestSetAndHolding(t *testing.T) {
 	for _, change := range [][2]string{
 		{"max-vcpus", "4"},
 		{"max-jobs", "3"},
+		{"cache", "off"},
+		{"cache-size", "40GB"},
 		{"battery", "off"},
 		{"hours", "22:00-07:00"},
 	} {
 		if err := current.Set(change[0], change[1]); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if current.Cache || current.CacheGB != 40 {
+		t.Errorf("the cache settings were not set: %+v", current)
+	}
+	if err := current.Set("cache-size", "auto"); err != nil || current.CacheGB != 0 {
+		t.Errorf("cache-size auto: %+v %v", current, err)
 	}
 	if current.MaxJobs != 3 {
 		t.Errorf("max-jobs was not set: %d", current.MaxJobs)

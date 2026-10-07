@@ -69,8 +69,10 @@ jobs:
 ```
 
 Jobs install their own toolchains with `setup-*` actions. `container:` and
-`services:` are not supported yet. Every job starts from a clean disk; caches
-do not survive. x86-only binaries need an arm64 alternative. There is no menu
+`services:` are not supported yet. Every job starts from a clean disk. What
+`actions/cache` saves is kept on the Mac that ran the job, per repository, and
+restored from there: see "The Actions cache" in `daemon/README.md`. x86-only
+binaries need an arm64 alternative. There is no menu
 bar app or Keychain token storage yet. The server imposes a 360-minute VM
 limit; GitHub may impose a shorter workflow timeout.
 

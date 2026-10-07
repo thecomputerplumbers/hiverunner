@@ -44,6 +44,36 @@ if [ -r "$share/clock" ]; then
   date -u -s "@$(tr -cd '0-9' < "$share/clock")" >/dev/null 2>&1 || true
 fi
 
+# The host may offer this job its Actions cache, on a socket that exists
+# only between this VM and the host. Actions speak HTTP to an address, so a
+# relay gives the socket one on this VM's own loopback. The cache is offered
+# to the job only once it has answered; otherwise the job uses GitHub's.
+cache=failed
+if [ -r "$share/cache" ]; then
+  port=$(tr -cd '0-9' < "$share/cache")
+  if [ -n "$port" ]; then
+    modprobe vmw_vsock_virtio_transport >/dev/null 2>&1 || true
+    socat "TCP-LISTEN:$port,bind=127.0.0.1,reuseaddr,fork" "VSOCK-CONNECT:2:$port" >/dev/null 2>&1 &
+    relay=$!
+    tries=0
+    while [ "$tries" -lt 50 ]; do
+      if curl -fsS -o /dev/null -m 2 "http://127.0.0.1:$port/hive/health" 2>/dev/null; then
+        cache=ok
+        break
+      fi
+      tries=$((tries + 1))
+      sleep 0.1
+    done
+    if [ "$cache" = ok ]; then
+      # Read by hive-node, as the runner's user.
+      echo "http://127.0.0.1:$port/" > /etc/hive-results-url
+      chmod 0644 /etc/hive-results-url
+    else
+      kill "$relay" 2>/dev/null || true
+    fi
+  fi
+fi
+
 if [ -e "$share/selftest" ]; then
   # No credential involved: proves boot, the share, the network and the
   # runner binary, and nothing more.
@@ -54,6 +84,12 @@ if [ -e "$share/selftest" ]; then
     echo "USER=$(sudo -u runner id -un)"
     echo "RUNNER=$(sudo -u runner /opt/runner/bin/Runner.Listener --version)"
     curl -fsS -o /dev/null -m 20 https://api.github.com/zen && echo "NETWORK=ok" || echo "NETWORK=failed"
+    # Whether the host offered its cache, and whether this VM reached it.
+    [ -r "$share/cache" ] && echo "CACHE=$cache"
+    for node in /opt/runner/externals/node*/bin/node; do
+      case "$node" in *_alpine/*) continue ;; esac
+      echo "NODE=$(ACTIONS_RESULTS_URL=https://results-receiver.actions.githubusercontent.com/ sudo -u runner --preserve-env=ACTIONS_RESULTS_URL "$node" -p 'process.env.ACTIONS_RESULTS_URL')"
+    done
   } > "$share/selftest.out" 2>&1
   finish 0
 fi

@@ -13,4 +13,4 @@ binary=$(mktemp -t hive-vm-test)
 trap 'rm -f "$binary"' EXIT
 go test -c -o "$binary" ./internal/vm
 codesign --force --sign - --entitlements vz.entitlements "$binary" 2>/dev/null
-HIVE_VM_TEST=1 "$binary" -test.v -test.run 'VM|Share|Warm'  -test.timeout 5m "$@"
+HIVE_VM_TEST=1 "$binary" -test.v -test.run 'VM|Share|Warm'  -test.timeout 10m "$@"
