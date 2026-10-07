@@ -32,12 +32,12 @@
     },
     {
       "href": "/settings",
-      "label": "Pool settings",
+      "label": "Settings",
       "icon": "organization"
     },
     {
       "href": "/account",
-      "label": "Your account",
+      "label": "Account",
       "icon": "account"
     },
     {

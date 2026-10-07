@@ -20,7 +20,11 @@ const nav = (
     label: string
     feature?: keyof typeof product.features
   }>
-).filter((item) => !item.feature || product.features[item.feature])
+).filter(
+  (item) =>
+    // Switching pools sits beside the pool's name, not among its pages.
+    item.href !== "/pools" && (!item.feature || product.features[item.feature])
+)
 
 /** Cores a Mac keeps for the person using it, as the coordinator does. */
 const OWNER_CORES = 2
@@ -60,19 +64,27 @@ export function ConsoleShell({
   return (
     <div className="flex min-h-svh flex-col">
       <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-12 w-full max-w-7xl items-center gap-3 px-4 sm:px-6">
-          <Link
-            href="/dashboard"
-            className="flex shrink-0 items-center gap-2 font-mono text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <HiveMark className="size-5" />
-            <span className="max-w-40 truncate">
-              {organization?.name ?? product.name}
-            </span>
-          </Link>
+        <div className="mx-auto grid w-full max-w-7xl grid-cols-[1fr_auto] items-center gap-x-4 px-4 sm:px-6 md:grid-cols-[auto_1fr_auto]">
+          <div className="flex h-12 min-w-0 items-center gap-2 font-mono text-sm">
+            <Link
+              href="/dashboard"
+              className="flex min-w-0 items-center gap-2 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <HiveMark className="size-5 shrink-0" />
+              <span className="truncate">
+                {organization?.name ?? product.name}
+              </span>
+            </Link>
+            <Link
+              href="/pools"
+              className="shrink-0 border border-border px-1.5 py-0.5 text-[0.65rem] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              switch
+            </Link>
+          </div>
           <nav
             aria-label="Console"
-            className="-mb-px flex h-full min-w-0 flex-1 items-stretch gap-1 overflow-x-auto pl-2"
+            className="order-last col-span-full -mx-4 flex h-10 [scrollbar-width:none] items-stretch overflow-x-auto border-t border-border px-1 sm:-mx-6 sm:px-4 md:order-none md:col-span-1 md:mx-0 md:h-12 md:border-t-0 md:px-0 [&::-webkit-scrollbar]:hidden"
           >
             {nav.map((item, index) => {
               const active =
@@ -83,7 +95,7 @@ export function ConsoleShell({
                   href={item.href}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex shrink-0 items-center gap-1.5 border-b-2 px-2 font-mono text-xs whitespace-nowrap outline-none focus-visible:bg-muted",
+                    "-mb-px flex flex-1 shrink-0 items-center justify-center gap-1.5 border-b-2 px-1.5 font-mono text-xs whitespace-nowrap outline-none focus-visible:bg-muted md:flex-none md:px-3",
                     active
                       ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground hover:text-foreground"
