@@ -1,34 +1,54 @@
 "use client"
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { FieldError } from "@workspace/ui/components/field"
 
-/** The standing instruction to keep the balance up, and the way to change it. */
+const select =
+  "h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+
+/**
+ * The standing instruction to keep the balance up, written as the sentence
+ * it is, with each part of it a choice.
+ */
 export function AutoTopUp({
   enabled,
   amount,
-  amounts,
   below,
+  cap,
+  amounts,
+  belows,
+  caps,
   card,
+  chargedThisMonth,
 }: {
   enabled: boolean
   amount: number
-  amounts: readonly number[]
   below: number
+  /** Null is no monthly limit. */
+  cap: number | null
+  amounts: readonly number[]
+  belows: readonly number[]
+  caps: readonly number[]
   card: string
+  chargedThisMonth: number
 }) {
+  const [draft, setDraft] = useState({ amount, below, cap })
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const id = useId()
+  const changed =
+    draft.amount !== amount || draft.below !== below || draft.cap !== cap
+  const capTooLow = draft.cap !== null && draft.cap < draft.amount
 
-  async function save(next: { enabled: boolean; amount?: number }) {
+  async function save(next: { enabled: boolean }) {
     setPending(true)
     setError(null)
     try {
       const response = await fetch("/api/wallet/auto-top-up", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
+        body: JSON.stringify({ ...next, ...draft }),
       })
       const body = (await response.json().catch(() => ({}))) as {
         error?: string
@@ -41,42 +61,127 @@ export function AutoTopUp({
     }
   }
 
+  const reachedCap = enabled && cap !== null && chargedThisMonth + amount > cap
+
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <p>
+        <strong>{enabled ? "On." : "Off."}</strong>{" "}
+        {enabled
+          ? `Charges ${card}.`
+          : `Nothing is charged unless you add funds yourself. ${card[0]!.toUpperCase()}${card.slice(1)} is saved.`}
+      </p>
+      <div className="flex flex-col gap-3 text-sm">
+        <label
+          htmlFor={`${id}-below`}
+          className="flex flex-wrap items-center gap-2"
+        >
+          When the balance falls below
+          <select
+            id={`${id}-below`}
+            className={select}
+            value={draft.below}
+            disabled={pending}
+            onChange={(event) =>
+              setDraft({ ...draft, below: Number(event.target.value) })
+            }
+          >
+            {belows.map((option) => (
+              <option key={option} value={option}>
+                ${option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
+          htmlFor={`${id}-amount`}
+          className="flex flex-wrap items-center gap-2"
+        >
+          add
+          <select
+            id={`${id}-amount`}
+            className={select}
+            value={draft.amount}
+            disabled={pending}
+            onChange={(event) =>
+              setDraft({ ...draft, amount: Number(event.target.value) })
+            }
+          >
+            {amounts.map((option) => (
+              <option key={option} value={option}>
+                ${option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
+          htmlFor={`${id}-cap`}
+          className="flex flex-wrap items-center gap-2"
+        >
+          and charge at most
+          <select
+            id={`${id}-cap`}
+            className={select}
+            value={draft.cap ?? "none"}
+            disabled={pending}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                cap:
+                  event.target.value === "none"
+                    ? null
+                    : Number(event.target.value),
+              })
+            }
+          >
+            <option value="none">any amount</option>
+            {caps.map((option) => (
+              <option key={option} value={option}>
+                ${option}
+              </option>
+            ))}
+          </select>
+          a month.
+        </label>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {reachedCap
+          ? `This month's limit is reached: $${chargedThisMonth} of $${cap} charged. Automatic top-up resumes on the 1st, and you can still add funds yourself.`
+          : `Charged automatically so far this month: $${chargedThisMonth}${cap === null ? "" : ` of $${cap}`}. Payments you make yourself do not count.`}
+      </p>
+      {capTooLow && (
+        <FieldError>
+          The monthly limit has to cover at least one top-up of ${draft.amount}.
+        </FieldError>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
         {enabled ? (
           <>
-            <strong>On.</strong> When the balance falls below ${below}, $
-            {amount} is charged to {card}.
+            <Button
+              size="sm"
+              disabled={pending || !changed || capTooLow}
+              onClick={() => save({ enabled: true })}
+            >
+              Save changes
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => save({ enabled: false })}
+            >
+              Turn off
+            </Button>
           </>
         ) : (
-          <>
-            <strong>Off.</strong> Nothing is charged unless you add funds
-            yourself. {card} is saved.
-          </>
+          <Button
+            size="sm"
+            disabled={pending || capTooLow}
+            onClick={() => save({ enabled: true })}
+          >
+            Turn on
+          </Button>
         )}
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        {enabled &&
-          amounts.map((offered) => (
-            <Button
-              key={offered}
-              size="sm"
-              variant={offered === amount ? "secondary" : "outline"}
-              disabled={pending || offered === amount}
-              onClick={() => save({ enabled: true, amount: offered })}
-            >
-              ${offered}
-            </Button>
-          ))}
-        <Button
-          size="sm"
-          variant={enabled ? "outline" : "default"}
-          disabled={pending}
-          onClick={() => save({ enabled: !enabled })}
-        >
-          {enabled ? "Turn off" : `Turn on, $${amount} at a time`}
-        </Button>
       </div>
       {error && <FieldError>{error}</FieldError>}
     </div>

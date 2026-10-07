@@ -1,14 +1,15 @@
-import { and, eq, isNull, lt, or } from "drizzle-orm"
+import { and, eq, gte, isNull, lt, or, sql } from "drizzle-orm"
 
 import type { AuthDb } from "@workspace/auth/db"
 import {
-  AUTO_TOP_UP_BELOW_USD,
+  AUTO_TOP_UP_BELOW_USD_OPTIONS,
+  AUTO_TOP_UP_MONTHLY_CAP_USD_OPTIONS,
+  MICRO,
   TOP_UP_AMOUNTS_USD,
-  usdToMicroTokens,
 } from "@workspace/pricing"
 
 import { getBalance, recordPurchase } from "@workspace/db/ledger"
-import { autoTopUp } from "@workspace/db/schema"
+import { autoTopUp, ledgerEntry } from "@workspace/db/schema"
 
 /**
  * How long a charge may be in flight before it is given up on and another
@@ -32,8 +33,43 @@ export function getAutoTopUp(db: AuthDb, organizationId: string) {
     .then(([row]) => row ?? null)
 }
 
-function offered(cents: number) {
-  return TOP_UP_AMOUNTS_USD.some((dollars) => dollars * 100 === cents)
+const among = (options: readonly number[], cents: number) =>
+  options.some((dollars) => dollars * 100 === cents)
+const offered = (cents: number) => among(TOP_UP_AMOUNTS_USD, cents)
+
+/** Ledger amounts are millionths of a dollar; cards are charged in cents. */
+const centsToLedger = (cents: number) => (cents * MICRO) / 100
+
+/**
+ * What automatic top-up has charged an organization so far this calendar
+ * month, in cents. Automatic charges are the purchases keyed by a Stripe
+ * PaymentIntent; ones made by hand through Checkout are keyed by its session
+ * and do not count against the ceiling.
+ */
+export async function autoChargedThisMonth(
+  db: AuthDb,
+  organizationId: string,
+  now = new Date()
+) {
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  )
+  const [row] = await db
+    .select({
+      total: sql<number>`coalesce(sum(${ledgerEntry.amount}), 0)`.as("total"),
+    })
+    .from(ledgerEntry)
+    .where(
+      and(
+        eq(ledgerEntry.accountType, "organization"),
+        eq(ledgerEntry.accountId, organizationId),
+        eq(ledgerEntry.kind, "purchase"),
+        // An exact prefix, not LIKE: `_` is a wildcard there.
+        sql`substr(${ledgerEntry.id}, 1, 12) = 'purchase:pi_'`,
+        gte(ledgerEntry.createdAt, monthStart)
+      )
+    )
+  return Math.round((Number(row?.total ?? 0) * 100) / MICRO)
 }
 
 /**
@@ -83,16 +119,44 @@ export async function rememberCard(
 }
 
 /**
- * Turns automatic top-up on or off, or changes the amount. It cannot be
- * turned on without a saved card.
+ * Turns automatic top-up on or off, or changes how it behaves: what it adds,
+ * the balance it acts below, and the most it may charge in a month. It
+ * cannot be turned on without a saved card.
  */
 export async function setAutoTopUp(
   db: AuthDb,
-  input: { organizationId: string; enabled: boolean; amountCents?: number }
+  input: {
+    organizationId: string
+    enabled: boolean
+    amountCents?: number
+    belowCents?: number
+    /** Null removes the ceiling. Left out, it stays as it was. */
+    monthlyCapCents?: number | null
+  }
 ) {
   const current = await getAutoTopUp(db, input.organizationId)
   if (input.amountCents !== undefined && !offered(input.amountCents))
     throw new Error("Choose one of the amounts offered")
+  if (
+    input.belowCents !== undefined &&
+    !among(AUTO_TOP_UP_BELOW_USD_OPTIONS, input.belowCents)
+  )
+    throw new Error("Choose one of the balances offered")
+  if (
+    input.monthlyCapCents !== undefined &&
+    input.monthlyCapCents !== null &&
+    !among(AUTO_TOP_UP_MONTHLY_CAP_USD_OPTIONS, input.monthlyCapCents)
+  )
+    throw new Error("Choose one of the monthly limits offered")
+  const amount = input.amountCents ?? current?.amountCents ?? 0
+  const cap =
+    input.monthlyCapCents === undefined
+      ? (current?.monthlyCapCents ?? null)
+      : input.monthlyCapCents
+  // A ceiling below one top-up would mean it never charges at all, while
+  // saying it is on.
+  if (cap !== null && cap < amount)
+    throw new Error("The monthly limit must cover at least one top-up")
   if (!current?.paymentMethodId) {
     if (input.enabled)
       throw new Error("Add funds by card once before turning this on")
@@ -105,6 +169,12 @@ export async function setAutoTopUp(
       ...(input.amountCents === undefined
         ? {}
         : { amountCents: input.amountCents }),
+      ...(input.belowCents === undefined
+        ? {}
+        : { belowCents: input.belowCents }),
+      ...(input.monthlyCapCents === undefined
+        ? {}
+        : { monthlyCapCents: input.monthlyCapCents }),
       // Turning it back on is the owner saying the problem is dealt with.
       ...(input.enabled ? { lastError: null } : {}),
       updatedAt: new Date(),
@@ -116,7 +186,8 @@ export async function setAutoTopUp(
 
 /**
  * The organizations whose saved card should be charged now: automatic top-up
- * is on and the balance is under the line.
+ * is on, the balance is under the line the organization chose, and the
+ * charge would not take it past its monthly ceiling.
  *
  * Each comes back with the time its charge was claimed, which names that one
  * charge to Stripe. An organization with no charge in flight is claimed now,
@@ -142,7 +213,16 @@ export async function claimDueTopUps(db: AuthDb, now = new Date()) {
       accountType: "organization",
       accountId: candidate.organizationId,
     })
-    if (balance >= usdToMicroTokens(AUTO_TOP_UP_BELOW_USD)) continue
+    if (balance >= centsToLedger(candidate.belowCents)) continue
+    // The owner's ceiling. Reaching it is not a failure and turns nothing
+    // off: charging resumes by itself when the month turns.
+    if (
+      candidate.monthlyCapCents !== null &&
+      (await autoChargedThisMonth(db, candidate.organizationId, now)) +
+        candidate.amountCents >
+        candidate.monthlyCapCents
+    )
+      continue
     await db
       .update(autoTopUp)
       .set({ pendingSince: now, updatedAt: now })

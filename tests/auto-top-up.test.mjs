@@ -3,6 +3,7 @@ import { test } from "node:test"
 import { database } from "./database.mjs"
 import { getBalance, recordPurchase } from "../packages/db/src/ledger.ts"
 import {
+  autoChargedThisMonth,
   claimDueTopUps,
   getAutoTopUp,
   rememberCard,
@@ -329,4 +330,158 @@ test("automatic top-up cannot be turned on without a card, or for an amount not 
     amountCents: 10000,
   })
   assert.equal(saved.amountCents, 10000)
+})
+
+test("the organization chooses the balance it tops up below", async (t) => {
+  // $8 left. Under the default line of $5 nothing is due.
+  const db = await organization(t, { dollars: 8 })
+  assert.equal((await claimDueTopUps(db)).length, 0)
+  await setAutoTopUp(db, {
+    organizationId: "org_1",
+    enabled: true,
+    belowCents: 1000,
+  })
+  const [due] = await claimDueTopUps(db)
+  assert.equal(due.amountCents, 2500)
+  await assert.rejects(
+    setAutoTopUp(db, {
+      organizationId: "org_1",
+      enabled: true,
+      belowCents: 700,
+    }),
+    /balances offered/
+  )
+})
+
+test("a monthly limit stops automatic charges, and only those, until the month turns", async (t) => {
+  const db = await organization(t)
+  const october = new Date("2026-10-20T12:00:00Z")
+  await setAutoTopUp(db, {
+    organizationId: "org_1",
+    enabled: true,
+    monthlyCapCents: 5000,
+  })
+  const auto = (id, when) =>
+    recordPurchase(db, {
+      organizationId: "org_1",
+      paymentId: id,
+      cents: 2500,
+      now: when,
+    })
+  // One automatic charge this month: $25 of $50. Another fits.
+  await auto("pi_oct_1", new Date("2026-10-05T00:00:00Z"))
+  assert.equal(await autoChargedThisMonth(db, "org_1", october), 2500)
+  // A payment made by hand does not count against the limit.
+  await auto("cs_by_hand", new Date("2026-10-06T00:00:00Z"))
+  assert.equal(await autoChargedThisMonth(db, "org_1", october), 2500)
+  // Nor does one from last month.
+  await auto("pi_sep", new Date("2026-09-30T23:59:59Z"))
+  assert.equal(await autoChargedThisMonth(db, "org_1", october), 2500)
+})
+
+test("at the monthly limit nothing is charged and nothing is switched off", async (t) => {
+  const { db, sqlite } = database(t)
+  sqlite.exec(
+    "INSERT INTO organization (id,name,slug,created_at) VALUES ('org_1','acme','org_1',0)"
+  )
+  await upsertCustomer(db, {
+    id: "cus_1",
+    organizationId: "org_1",
+    email: "owner@example.test",
+    livemode: false,
+  })
+  await rememberCard(db, {
+    organizationId: "org_1",
+    card,
+    amountCents: 2500,
+    enable: true,
+  })
+  await setAutoTopUp(db, {
+    organizationId: "org_1",
+    enabled: true,
+    monthlyCapCents: 5000,
+  })
+  const october = new Date("2026-10-20T12:00:00Z")
+  // Two automatic charges this month already, all of it spent: the balance
+  // is zero and the $50 limit is used up.
+  for (const id of ["pi_a", "pi_b"])
+    await recordPurchase(db, {
+      organizationId: "org_1",
+      paymentId: id,
+      cents: 2500,
+      now: new Date("2026-10-10T00:00:00Z"),
+    })
+  sqlite.exec(
+    "INSERT INTO ledger_entry (id,account_type,account_id,kind,amount,created_at) VALUES ('charge:spent','organization','org_1','charge',-50000000,0)"
+  )
+  assert.equal(await getBalance(db, account), 0)
+  const fake = stripe()
+  assert.equal(await chargeDueTopUps(db, fake, october), 0)
+  assert.equal(fake.calls.length, 0)
+  const saved = await getAutoTopUp(db, "org_1")
+  assert.equal(saved.enabled, true, "a limit reached is not a failure")
+  assert.equal(saved.lastError, null)
+  // On the 1st it charges again without anyone touching it.
+  assert.equal(
+    await chargeDueTopUps(db, fake, new Date("2026-11-01T00:05:00Z")),
+    1
+  )
+  // Raising the limit lets it charge now.
+  const fresh = stripe()
+  sqlite.exec("UPDATE auto_top_up SET pending_since = NULL")
+  await setAutoTopUp(db, {
+    organizationId: "org_1",
+    enabled: true,
+    monthlyCapCents: 10000,
+  })
+  assert.equal(await chargeDueTopUps(db, fresh, october), 1)
+})
+
+test("a monthly limit must be one offered, and must cover a top-up", async (t) => {
+  const db = await organization(t)
+  await assert.rejects(
+    setAutoTopUp(db, {
+      organizationId: "org_1",
+      enabled: true,
+      monthlyCapCents: 4200,
+    }),
+    /monthly limits offered/
+  )
+  // $100 at a time cannot live under a $50 ceiling, whichever is set second.
+  await assert.rejects(
+    setAutoTopUp(db, {
+      organizationId: "org_1",
+      enabled: true,
+      amountCents: 10000,
+      monthlyCapCents: 5000,
+    }),
+    /at least one top-up/
+  )
+  await setAutoTopUp(db, {
+    organizationId: "org_1",
+    enabled: true,
+    monthlyCapCents: 5000,
+  })
+  await assert.rejects(
+    setAutoTopUp(db, {
+      organizationId: "org_1",
+      enabled: true,
+      amountCents: 10000,
+    }),
+    /at least one top-up/
+  )
+  // Null removes the limit; leaving it out keeps it.
+  let saved = await setAutoTopUp(db, {
+    organizationId: "org_1",
+    enabled: true,
+    belowCents: 1000,
+  })
+  assert.equal(saved.monthlyCapCents, 5000)
+  saved = await setAutoTopUp(db, {
+    organizationId: "org_1",
+    enabled: true,
+    monthlyCapCents: null,
+  })
+  assert.equal(saved.monthlyCapCents, null)
+  assert.equal(saved.belowCents, 1000)
 })

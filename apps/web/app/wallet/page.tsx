@@ -1,8 +1,10 @@
 import { roleAtLeast } from "@workspace/auth"
 import { getBalance, listEntries } from "@workspace/db/ledger"
-import { getAutoTopUp } from "@workspace/db/top-up"
+import { autoChargedThisMonth, getAutoTopUp } from "@workspace/db/top-up"
 import {
   AUTO_TOP_UP_BELOW_USD,
+  AUTO_TOP_UP_BELOW_USD_OPTIONS,
+  AUTO_TOP_UP_MONTHLY_CAP_USD_OPTIONS,
   RUNNER_SIZES,
   TOP_UP_AMOUNTS_USD,
   TRIAL_GRANT_USD,
@@ -45,6 +47,9 @@ export default async function WalletPage({
     getAutoTopUp(db, organizationId),
     searchParams,
   ])
+  const chargedThisMonth = saved
+    ? await autoChargedThisMonth(db, organizationId)
+    : 0
   const card = saved?.paymentMethodId
     ? `the ${saved.cardBrand ? saved.cardBrand[0]!.toUpperCase() + saved.cardBrand.slice(1) : "card"} ending ${saved.cardLast4 ?? "····"}`
     : null
@@ -104,7 +109,7 @@ export default async function WalletPage({
           <>
             <AddFunds
               amounts={TOP_UP_AMOUNTS_USD}
-              below={AUTO_TOP_UP_BELOW_USD}
+              below={(saved?.belowCents ?? AUTO_TOP_UP_BELOW_USD * 100) / 100}
               offerAuto={!saved?.enabled}
             />
             <p className="text-sm text-muted-foreground">
@@ -126,14 +131,22 @@ export default async function WalletPage({
             <AutoTopUp
               enabled={saved.enabled}
               amount={saved.amountCents / 100}
+              below={saved.belowCents / 100}
+              cap={
+                saved.monthlyCapCents === null
+                  ? null
+                  : saved.monthlyCapCents / 100
+              }
               amounts={TOP_UP_AMOUNTS_USD}
-              below={AUTO_TOP_UP_BELOW_USD}
+              belows={AUTO_TOP_UP_BELOW_USD_OPTIONS}
+              caps={AUTO_TOP_UP_MONTHLY_CAP_USD_OPTIONS}
               card={card}
+              chargedThisMonth={chargedThisMonth / 100}
             />
           ) : (
             <p className="text-muted-foreground">
               {saved.enabled
-                ? `On: $${saved.amountCents / 100} is added when the balance falls below $${AUTO_TOP_UP_BELOW_USD}.`
+                ? `On: $${saved.amountCents / 100} is added when the balance falls below $${saved.belowCents / 100}.`
                 : "Off."}
             </p>
           )}

@@ -37,10 +37,20 @@ export const TRIAL_GRANT_WITH_CARD_USD = 10
 export const TOP_UP_AMOUNTS_USD = [10, 25, 50, 100] as const
 
 /**
- * Automatic top-up charges the saved card when the balance falls below this,
- * in USD: enough left that jobs keep running while the charge goes through.
+ * The balances an organization can choose to top up below, in USD. The first
+ * is the default: enough left that jobs keep running while the charge goes
+ * through.
  */
-export const AUTO_TOP_UP_BELOW_USD = 5
+export const AUTO_TOP_UP_BELOW_USD_OPTIONS = [5, 10, 25, 50] as const
+export const AUTO_TOP_UP_BELOW_USD = AUTO_TOP_UP_BELOW_USD_OPTIONS[0]
+
+/**
+ * The most automatic top-up may charge in a calendar month, in USD, for an
+ * organization that wants a ceiling. Payments made by hand do not count.
+ */
+export const AUTO_TOP_UP_MONTHLY_CAP_USD_OPTIONS = [
+  50, 100, 250, 500, 1000,
+] as const
 
 /**
  * Job sizes. Each label is its own scale set, because a scale set is one

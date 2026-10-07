@@ -256,6 +256,13 @@ export const autoTopUp = sqliteTable("auto_top_up", {
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
   /** What is charged each time, in cents. */
   amountCents: integer("amount_cents").notNull(),
+  /** The balance, in cents, below which the card is charged. */
+  belowCents: integer("below_cents").notNull().default(500),
+  /**
+   * The most automatic charges may add up to in a calendar month, in cents.
+   * Null is no ceiling.
+   */
+  monthlyCapCents: integer("monthly_cap_cents"),
   /** The card processor's id for the saved card. Not a card number. */
   paymentMethodId: text("payment_method_id"),
   /** For "Visa ending 4242": what an owner needs to recognise the card. */
