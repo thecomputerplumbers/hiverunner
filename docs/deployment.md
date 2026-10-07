@@ -121,6 +121,10 @@ against the checksum in the manifest it fetched over HTTPS, as it does on a
 Mac. Linux reads `linux-<arch>.txt`, lines of `name=value`, because a JSON
 parser is not on every box.
 
+A version is published once: its files are cached for a year under their
+names, so the script refuses to publish a version the bucket already has.
+Bump `daemon/VERSION` instead.
+
 `./daemon/release/publish.sh --out DIR` builds the same tree locally without
 signing or uploading. Serve `DIR` and point the installer at it to try a
 change to either script:

@@ -178,15 +178,29 @@ put() { # key file content-type cache-control
   (cd ../apps/web && pnpm exec wrangler r2 object put "$BUCKET/$1" --file "$2" --content-type "$3" --cache-control "$4" --remote >/dev/null)
   echo "   $1"
 }
+# Whether the bucket has an object, asked in a way the CDN in front of it
+# cannot answer from memory and will not remember: a plain request for a
+# missing object leaves "not found" cached at that address for minutes, and
+# the installer is then told the file just uploaded does not exist.
+published() { curl -fsI -H "Cache-Control: no-cache" "$BASE/$1?published=$(date +%s)$$" >/dev/null 2>&1; }
+
+# A version is published once. Its files are cached for a year under their
+# names, so replacing one leaves some people with the old file and a manifest
+# whose checksum is for the new.
+if published "hived/$version/hived-darwin-arm64.zip"; then
+  echo "Version $version is already published. Bump daemon/VERSION, commit, and publish that." >&2
+  exit 1
+fi
+
 # The large, versioned files first and the manifest that points at them last:
 # nobody is ever sent to a file that is not there yet.
-if ! curl -fsI "$BASE/images/$image_version/image.aar" >/dev/null 2>&1; then
+if ! published "images/$image_version/image.aar"; then
   put "images/$image_version/image.aar" "$image_aar" application/octet-stream "public, max-age=31536000, immutable"
 fi
 put "hived/$version/hived-darwin-arm64.zip" "$daemon_zip" application/zip "public, max-age=31536000, immutable"
 for arch in $linux_arches; do
   this_image=$(sed -n 's/^image_version=//p' "$out/linux-$arch.txt")
-  if ! curl -fsI "$BASE/images/$this_image/image-$arch.tar.gz" >/dev/null 2>&1; then
+  if ! published "images/$this_image/image-$arch.tar.gz"; then
     put "images/$this_image/image-$arch.tar.gz" "$out/images/$this_image/image-$arch.tar.gz" application/gzip "public, max-age=31536000, immutable"
   fi
   put "hived/$version/hived-linux-$arch.tar.gz" "$out/hived/$version/hived-linux-$arch.tar.gz" application/gzip "public, max-age=31536000, immutable"
