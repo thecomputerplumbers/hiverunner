@@ -2,7 +2,7 @@ import Link from "next/link"
 import { RUNNER_SIZES } from "@workspace/pricing"
 import { Code, CodeBlock } from "../code"
 import { RouteDiagram } from "../route-diagram"
-import { COORDINATOR_ORIGIN, DAEMON_RELEASED, INSTALL_COMMAND } from "../site"
+import { DAEMON_RELEASED, INSTALL_COMMAND } from "../site"
 import { RouteLink } from "@/components/route-link"
 
 /**
@@ -15,33 +15,19 @@ const ROUTED_WORKFLOW = `jobs:
     permissions:
       id-token: write
     outputs:
-      runner: \${{ steps.probe.outputs.runner }}
-    env:
-      HIVE: ${COORDINATOR_ORIGIN}
-      LABEL: hive
-      FALLBACK: ubuntu-latest
+      runner: \${{ steps.hive.outputs.runner }}
     steps:
-      - id: probe
-        run: |
-          runner=$FALLBACK
-          token=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \\
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$HIVE" | jq -r .value) || token=
-          deadline=$((SECONDS + 15))
-          while [ -n "$token" ] && [ $SECONDS -lt $deadline ]; do
-            if curl -fsS --max-time 5 -H "Authorization: Bearer $token" \\
-              "$HIVE/v1/capacity?label=$LABEL" | jq -e .available > /dev/null; then
-              runner=$LABEL
-              break
-            fi
-            sleep 2
-          done
-          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+      - id: hive
+        uses: thecomputerplumbers/hive-route@v1
+        with:
+          label: hive
+          fallback: ubuntu-latest
 
   test:
     needs: route
     runs-on: \${{ needs.route.outputs.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: make test`
 
 export function Quickstart() {
@@ -94,11 +80,16 @@ export function Quickstart() {
       <RouteDiagram />
       <CodeBlock title=".github/workflows/ci.yml">{ROUTED_WORKFLOW}</CodeBlock>
       <p>
-        Set <Code>LABEL</Code> to a{" "}
+        Set <Code>label</Code> to a{" "}
         <Link href="/docs/labels-and-sizes">size</Link> and{" "}
-        <Code>FALLBACK</Code> to your current runner. Add{" "}
+        <Code>fallback</Code> to your current runner. Add{" "}
         <Code>needs: route</Code> and the <Code>runs-on</Code> line to each job
-        you want routed.
+        you want routed. The step is{" "}
+        <a href="https://github.com/thecomputerplumbers/hive-route">
+          one short file you can read
+        </a>
+        : it asks whether a machine is free, waits up to fifteen seconds for
+        one, and never fails your workflow.
       </p>
 
       <h2 id="good-to-know">Good to know</h2>

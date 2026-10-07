@@ -50,6 +50,29 @@ binary, after asking.
 
 Building and publishing a release is in `docs/deployment.md`.
 
+## On Windows
+
+Jobs are Linux, so on Windows the daemon is the Linux x86-64 one, inside a
+Linux of its own under WSL 2, which on Windows 11 passes hardware
+virtualization through. `release/install.ps1` does the setup:
+
+```powershell
+irm https://get.hiveworkr.thecomputerplumbers.com/install.ps1 | iex
+```
+
+It imports Ubuntu 24.04 as a distribution named `HiveWorker`, separate from
+any other, installs QEMU, virtiofsd and passt in it, turns on systemd, makes
+`/dev/kvm` usable by the daemon's user at each start, runs `install.sh`
+inside, and adds a per-user Run entry that keeps the distribution alive
+while the person is signed in (WSL stops one that nothing is attached to).
+It also puts a `hived` command on the Windows PATH that calls the one
+inside. It asks for no administrator rights; if WSL itself is missing it
+prints the one command that adds it and stops. Setting
+`$env:HIVE_UNINSTALL = '1'` first removes everything.
+
+This script has been checked for syntax only. It has not yet been run on a
+Windows machine.
+
 ## On Linux
 
 The same daemon and the same jobs, on arm64 and on x86-64. An arm64 box runs

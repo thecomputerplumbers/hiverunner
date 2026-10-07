@@ -161,6 +161,12 @@ zero. This experiment used isolated local accounting data, with no deployment.
 
 ## Capacity routing with GitHub-hosted fallback
 
+Workflows do this with one step, the public action
+[`thecomputerplumbers/hive-route`](https://github.com/thecomputerplumbers/hive-route)
+(`uses: thecomputerplumbers/hive-route@v1`, inputs `label`, `fallback` and
+`wait`). Its source lives in that repository, not this one. What it does is
+what this section describes.
+
 GitHub Actions can run a preflight job on `ubuntu-latest` and pass its selected
 runner through a job output to `runs-on`. A workflow can poll
 `GET https://connect.hiveworkr.thecomputerplumbers.com/v1/capacity?label=hive-4cpu`

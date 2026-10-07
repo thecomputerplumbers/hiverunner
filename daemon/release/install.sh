@@ -401,10 +401,17 @@ fi
 # started. If the kvm group was added since, the shell has it and the
 # service does not yet, and the daemon says so in its first lines.
 sleep 3
-if journalctl --user -u hiveworker -n 20 --no-pager 2>/dev/null | grep -q "cannot open /dev/kvm"; then
+started=$(journalctl --user -u hiveworker -n 20 --no-pager 2>/dev/null || true)
+if printf '%s' "$started" | grep -q "cannot open /dev/kvm"; then
   say ""
   say "The daemon is running but cannot use KVM yet: your login got the kvm group"
   say "after your user's services started. Restart them (or reboot), and it will:"
+  say "  sudo systemctl restart user@$(id -u)"
+elif printf '%s' "$started" | grep -q "cannot open /dev/vhost-vsock" && [ -r /dev/vhost-vsock ] && [ -w /dev/vhost-vsock ]; then
+  say ""
+  say "Jobs will run, but without this machine's own Actions cache until your"
+  say "user's services are restarted: they started before your login got the"
+  say "kvm group. Restart them (or reboot):"
   say "  sudo systemctl restart user@$(id -u)"
 fi
 

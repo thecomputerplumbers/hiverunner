@@ -8,6 +8,7 @@
 #
 #   latest.json                               what install.sh reads
 #   install.sh
+#   install.ps1                               the same for Windows: sets up WSL, then runs install.sh in it
 #   hived/<version>/hived-darwin-arm64.zip    signed and notarized
 #   images/<image>/image.aar                  the Linux image, as an Apple Archive
 #   linux-<arch>.txt                          what install.sh reads on Linux
@@ -178,6 +179,7 @@ else
 fi
 
 cp release/install.sh "$out/install.sh"
+cp release/install.ps1 "$out/install.ps1"
 cat > "$out/latest.json" <<JSON
 {
   "version": "$version",
@@ -244,6 +246,7 @@ for arch in $linux_arches; do
 done
 [ -z "$linux_arches" ] || put "tools/virtiofsd.NOTICE.txt" "$out/tools/virtiofsd.NOTICE.txt" "text/plain; charset=utf-8" "public, max-age=3600"
 put "install.sh" "$out/install.sh" "text/x-shellscript; charset=utf-8" "public, max-age=60"
+put "install.ps1" "$out/install.ps1" "text/plain; charset=utf-8" "public, max-age=60"
 put "latest.json" "$out/latest.json" application/json "public, max-age=60"
 for arch in $linux_arches; do
   put "linux-$arch.txt" "$out/linux-$arch.txt" "text/plain; charset=utf-8" "public, max-age=60"

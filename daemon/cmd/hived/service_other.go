@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 )
@@ -26,4 +27,27 @@ func stopService() {
 // systemd keeps a unit loaded until it is told the file has gone.
 func forgetService() {
 	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+}
+
+// openBrowser shows the sign-in page where there is a browser to show it in.
+// The link is printed too, so a machine with no screen loses nothing.
+func openBrowser(url string) {
+	// Under Windows' Linux subsystem the browser is Windows' own.
+	if os.Getenv("WSL_DISTRO_NAME") != "" {
+		if explorer := "/mnt/c/Windows/explorer.exe"; exists(explorer) {
+			_ = exec.Command(explorer, url).Start()
+		}
+		return
+	}
+	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		return
+	}
+	if opener, err := exec.LookPath("xdg-open"); err == nil {
+		_ = exec.Command(opener, url).Start()
+	}
+}
+
+func exists(file string) bool {
+	_, err := os.Stat(file)
+	return err == nil
 }

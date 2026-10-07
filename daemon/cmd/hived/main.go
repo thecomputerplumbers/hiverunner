@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -128,8 +127,8 @@ func login(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("\nTo add this machine, approve this code in your browser:\n\n    %s\n\n%s\n\n", code.UserCode, code.VerificationURIComplete)
-	if !*noBrowser && runtime.GOOS == "darwin" {
-		_ = exec.Command("/usr/bin/open", code.VerificationURIComplete).Start()
+	if !*noBrowser {
+		openBrowser(code.VerificationURIComplete)
 	}
 	fmt.Println("Waiting for approval...")
 	token, err := client.AwaitToken(ctx, code)

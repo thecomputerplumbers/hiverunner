@@ -28,3 +28,9 @@ func stopService() {
 
 // launchd forgets a service whose file is gone.
 func forgetService() {}
+
+// openBrowser shows the sign-in page. The link is printed too, so a failure
+// here costs a click.
+func openBrowser(url string) {
+	_ = exec.Command("/usr/bin/open", url).Start()
+}
