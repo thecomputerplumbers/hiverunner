@@ -98,7 +98,7 @@ GUEST_ARCH=x64 ./daemon/image/build.sh /path/to/image
 ```
 
 It is the same guest with GitHub's x64 runner and an x64 kernel, and its
-`manifest.json` says `"arch": "x64"`. `hived` refuses an image that is not
+`manifest.json` says `"arch": "amd64"`, Go's name for it. `hived` refuses an image that is not
 for the machine it is running on.
 
 Jobs install their own toolchains with `setup-*` actions. `container:` and

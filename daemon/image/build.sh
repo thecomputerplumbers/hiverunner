@@ -22,16 +22,17 @@ RUNNER_SHA256_X64="70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816
 IMAGE_VERSION=7
 
 # Direct kernel boot wants a different file on each: the uncompressed Image
-# on arm64, the compressed bzImage on x64.
+# on arm64, the compressed bzImage on x64. GitHub's runner calls the second
+# x64 and Go, whose name the manifest uses, amd64.
 case "${GUEST_ARCH:-arm64}" in
   arm64 | aarch64)
-    arch=arm64 platform=linux/arm64 kernel=Image
+    arch=arm64 goarch=arm64 platform=linux/arm64 kernel=Image
     cmdline="console=hvc0 root=/dev/vda rw quiet"
     sha="${RUNNER_SHA256:-$RUNNER_SHA256_ARM64}"
     tag="hiveworker-guest:${IMAGE_VERSION}-${RUNNER_VERSION}"
     ;;
   x64 | amd64 | x86_64)
-    arch=x64 platform=linux/amd64 kernel=vmlinuz
+    arch=x64 goarch=amd64 platform=linux/amd64 kernel=vmlinuz
     # The initrd is built to look for a hibernation image on the swap device
     # of whatever machine built it. A guest has none, and on x64 the initrd
     # waits half a minute for it to appear unless it is told not to.
@@ -122,7 +123,7 @@ cat > "$out/manifest.json" <<JSON
 {
   "imageVersion": $IMAGE_VERSION,
   "runnerVersion": "$RUNNER_VERSION",
-  "arch": "$arch",
+  "arch": "$goarch",
   "kernel": "$kernel",
   "initrd": "initrd",
   "disk": "rootfs.img",

@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/thecomputerplumbers/hiveworker/daemon/internal/protocol"
 )
 
 // as makes the tests a machine of one architecture, wherever they run.
@@ -25,7 +23,7 @@ func write(t *testing.T, dir, name, content string) {
 }
 
 func TestLoadImage(t *testing.T) {
-	as(t, protocol.ArchARM64)
+	as(t, "arm64")
 	dir := t.TempDir()
 	if _, err := LoadImage(dir); !errors.Is(err, ErrNoImage) {
 		t.Fatalf("empty directory: %v", err)
@@ -42,8 +40,8 @@ func TestLoadImage(t *testing.T) {
 		t.Fatalf("LoadImage() = %+v, %v", image, err)
 	}
 	// Every manifest written before there were two architectures is arm64.
-	if image.Arch != protocol.ArchARM64 {
-		t.Fatalf("a manifest that names no architecture loaded as %q", image.Arch)
+	if image.Arch() != "arm64" || image.Architecture != "" {
+		t.Fatalf("a manifest that names no architecture loaded as %q", image.Arch())
 	}
 }
 
@@ -55,25 +53,28 @@ func TestAnImageIsForOneArchitecture(t *testing.T) {
 	for _, name := range []string{"vmlinuz", "initrd", "rootfs.img"} {
 		write(t, dir, name, "x")
 	}
-	manifest("x64")
-	as(t, protocol.ArchX64)
+	manifest("amd64")
+	as(t, "amd64")
 	image, err := LoadImage(dir)
-	if err != nil || image.Arch != protocol.ArchX64 || image.Kernel != "vmlinuz" {
-		t.Fatalf("an x64 image on an x64 machine: %+v, %v", image, err)
+	if err != nil || image.Arch() != "amd64" || image.Kernel != "vmlinuz" {
+		t.Fatalf("an amd64 image on an amd64 machine: %+v, %v", image, err)
 	}
 	// The same image on a Mac is refused before anything tries to boot it.
-	as(t, protocol.ArchARM64)
+	as(t, "arm64")
 	if _, err := LoadImage(dir); !errors.Is(err, ErrWrongArch) {
-		t.Fatalf("an x64 image on an arm64 machine: %v, want ErrWrongArch", err)
+		t.Fatalf("an amd64 image on an arm64 machine: %v, want ErrWrongArch", err)
 	}
-	manifest("riscv64")
-	if _, err := LoadImage(dir); err == nil || errors.Is(err, ErrWrongArch) {
-		t.Fatalf("a manifest naming an architecture no guest is built for: %v", err)
+	// The manifest speaks Go's names. GitHub's word for it is not one.
+	for _, arch := range []string{"x64", "riscv64"} {
+		manifest(arch)
+		if _, err := LoadImage(dir); err == nil || errors.Is(err, ErrWrongArch) {
+			t.Fatalf("a manifest naming %q: %v", arch, err)
+		}
 	}
 }
 
 func TestAManifestCannotReachOutsideItsDirectory(t *testing.T) {
-	as(t, protocol.ArchARM64)
+	as(t, "arm64")
 	dir := t.TempDir()
 	write(t, dir, "manifest.json", `{"kernel":"../../etc/passwd","initrd":"initrd","disk":"rootfs.img"}`)
 	if _, err := LoadImage(dir); err == nil {
