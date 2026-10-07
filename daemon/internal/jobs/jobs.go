@@ -1,9 +1,11 @@
-// Package jobs owns the machine's one job slot and the life of the job in it.
+// Package jobs owns the machine's job slots and the lives of the jobs in
+// them.
 //
-// A machine serving several organizations still runs one job at a time. Each
-// pool's tunnel brings offers here; whichever arrives first gets the slot and
-// the others are declined. The job outlives any one tunnel connection: if the
-// tunnel drops mid-job the runner carries on, and its result is delivered
+// A machine runs as many jobs at once as its owner allows, one by default,
+// and that is one budget across every organization it serves. Each pool's
+// tunnel brings offers here; an offer that fits what is left gets a slot and
+// one that does not is declined. A job outlives any one tunnel connection: if
+// the tunnel drops mid-job the runner carries on, and its result is delivered
 // when the tunnel returns.
 package jobs
 
@@ -11,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -44,10 +47,28 @@ type Unusable interface {
 
 // Reasons an offer is declined, in the machine's own words.
 const (
-	ReasonBusy     = "this machine is running a job for another pool"
+	ReasonBusy     = "this machine is running as many jobs as its owner allows"
+	ReasonNoCores  = "this machine does not have the cores free for this job"
 	ReasonNoRunner = "this machine cannot run jobs: no runner image is installed"
 	ReasonTooLarge = "this job is larger than this machine's owner allows"
 )
+
+// OwnerCores is what every job leaves for the machine's owner. The pool
+// applies the same rule when it chooses a machine.
+const OwnerCores = 2
+
+// Limits is what the machine may lend at once. The zero value is one job of
+// any size on a machine of unknown size, which is what the daemon did before
+// its owner could say otherwise.
+type Limits struct {
+	// MaxJobs is how many jobs may run at once. Below one means one.
+	MaxJobs int
+	// MaxVCPUs is the largest single job. Zero means any.
+	MaxVCPUs int
+	// Cores is the machine's core count. Zero means unknown, and no job is
+	// declined for want of cores.
+	Cores int
+}
 
 type phase int
 
@@ -65,21 +86,22 @@ type slot struct {
 	// cancel stops the start timer (accepted) or the runner (running).
 	cancel func()
 	// released means the coordinator backed out of a running job: its VM is
-	// being destroyed, and its result is of no interest.
+	// being destroyed.
 	released bool
 }
 
-// Manager is the slot. It is safe for use by every pool's tunnel at once.
+// Manager is the slots. It is safe for use by every pool's tunnel at once.
 type Manager struct {
 	runner       Runner
 	startTimeout time.Duration
 	log          *slog.Logger
-	// takes is the owner's limit on job size. Nil takes any size.
-	takes func(vcpus int) bool
+	// limits is asked on every offer, so it may change while the daemon
+	// runs. Nil is the zero Limits.
+	limits func() Limits
 
-	mu      sync.Mutex
-	current *slot
-	exits   map[string]chan protocol.JobExited
+	mu    sync.Mutex
+	held  map[string]*slot
+	exits map[string]chan protocol.JobExited
 	// running counts jobs whose runner has not returned, so shutdown can
 	// wait for their VMs to be destroyed.
 	running sync.WaitGroup
@@ -92,36 +114,63 @@ func New(runner Runner, log *slog.Logger) *Manager {
 		runner:       runner,
 		startTimeout: protocol.StartTimeout,
 		log:          log,
+		held:         map[string]*slot{},
 		exits:        map[string]chan protocol.JobExited{},
 	}
 }
 
-// Limit sets the owner's limit on job size. It is asked on every offer, so
-// it may change while the daemon runs. Call it before the first offer.
-func (m *Manager) Limit(takes func(vcpus int) bool) {
-	m.takes = takes
+// Limit sets what the machine may lend at once. Call it before the first
+// offer.
+func (m *Manager) Limit(limits func() Limits) {
+	m.limits = limits
 }
 
-// Busy reports whether a job holds the slot.
+func (m *Manager) limit() Limits {
+	var limits Limits
+	if m.limits != nil {
+		limits = m.limits()
+	}
+	if limits.MaxJobs < 1 {
+		limits.MaxJobs = 1
+	}
+	return limits
+}
+
+// key names a slot. Assignment ids are a pool's own, so two pools may use
+// the same one.
+func key(pool, assignmentID string) string { return pool + "\x00" + assignmentID }
+
+// Busy reports whether any job holds a slot.
 func (m *Manager) Busy() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.current != nil
+	return len(m.held) > 0
 }
 
-// Current is the assignment this pool has in the slot, or "". A reconnecting
-// tunnel reports it in hello.
-func (m *Manager) Current(pool string) string {
+// Full reports whether every slot the owner allows is taken.
+func (m *Manager) Full() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.current != nil && m.current.pool == pool {
-		return m.current.assignmentID
+	return len(m.held) >= m.limit().MaxJobs
+}
+
+// Holding is the assignments this pool has in slots, oldest name first. A
+// reconnecting tunnel reports them in hello.
+func (m *Manager) Holding(pool string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for _, held := range m.held {
+		if held.pool == pool {
+			ids = append(ids, held.assignmentID)
+		}
 	}
-	return ""
+	sort.Strings(ids)
+	return ids
 }
 
 // Offer answers a pool's job offer: "" to accept, or the reason it is
-// declined. Accepting reserves the slot until Start, Release, or the start
+// declined. Accepting reserves a slot until Start, Release, or the start
 // timeout, whichever comes first.
 func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) {
 	m.mu.Lock()
@@ -134,17 +183,29 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 			return reason
 		}
 	}
-	if m.current != nil {
-		// The coordinator repeating itself is not a second job.
-		if m.current.pool == pool && m.current.assignmentID == offer.AssignmentID {
-			return ""
-		}
+	id := key(pool, offer.AssignmentID)
+	// The coordinator repeating itself is not a second job.
+	if _, ok := m.held[id]; ok {
+		return ""
+	}
+	// The pool is told the limits and should not offer past them. These are
+	// for the offer made before it heard, and for another pool's jobs, which
+	// this pool cannot see.
+	limits := m.limit()
+	if limits.MaxVCPUs != 0 && offer.VCPUs > limits.MaxVCPUs {
+		return ReasonTooLarge
+	}
+	if len(m.held) >= limits.MaxJobs {
 		return ReasonBusy
 	}
-	// The pool is told the limit and should not offer past it. This is for
-	// the offer made before it heard, or by a coordinator too old to listen.
-	if m.takes != nil && !m.takes(offer.VCPUs) {
-		return ReasonTooLarge
+	used := 0
+	for _, held := range m.held {
+		used += held.vcpus
+	}
+	// Only stacked jobs are checked: the pool alone decides whether a lone
+	// job fits the machine, as it always has.
+	if limits.Cores > 0 && used > 0 && used+offer.VCPUs+OwnerCores > limits.Cores {
+		return ReasonNoCores
 	}
 	held := &slot{
 		pool:         pool,
@@ -158,13 +219,13 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	timer := time.AfterFunc(m.startTimeout, func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		if m.current == held && held.phase == accepted {
-			m.log.Warn("an accepted job was never started; freeing the machine", "assignment", held.assignmentID)
-			m.current = nil
+		if m.held[id] == held && held.phase == accepted {
+			m.log.Warn("an accepted job was never started; freeing its slot", "assignment", held.assignmentID)
+			delete(m.held, id)
 		}
 	})
 	held.cancel = func() { timer.Stop() }
-	m.current = held
+	m.held[id] = held
 	return ""
 }
 
@@ -175,9 +236,10 @@ var ErrNotHeld = errors.New("this machine is not holding that job")
 // Start runs an accepted job. It returns at once; the result arrives on
 // Exits for the pool.
 func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobStart) error {
+	id := key(pool, start.AssignmentID)
 	m.mu.Lock()
-	held := m.current
-	if held == nil || held.pool != pool || held.assignmentID != start.AssignmentID || held.phase != accepted {
+	held := m.held[id]
+	if held == nil || held.phase != accepted {
 		m.mu.Unlock()
 		return ErrNotHeld
 	}
@@ -215,27 +277,27 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		// before its VM is destroyed, even when the job was released.
 		m.mu.Lock()
 		released := held.released
-		if m.current == held {
-			m.current = nil
+		if m.held[id] == held {
+			delete(m.held, id)
 		}
 		m.mu.Unlock()
 		m.log.Info("job ended", "assignment", job.AssignmentID, "exit", exitCode, "released", released)
-		// A released job's result is of no interest to the coordinator.
-		if !released {
-			exits <- protocol.NewJobExited(job.AssignmentID, exitCode)
-		}
+		// Said for a released job too: its result is of no interest to the
+		// coordinator, but that its cores are free again is.
+		exits <- protocol.NewJobExited(job.AssignmentID, exitCode)
 	}()
 	return nil
 }
 
 // Release backs out of a job this pool placed. An accepted offer is dropped
-// at once. A running job is stopped, and the slot stays taken until its VM is
-// destroyed: a machine still tearing one job down is not free for another.
+// at once. A running job is stopped, and its slot stays taken until its VM
+// is destroyed: cores still tearing one job down are not free for another.
 func (m *Manager) Release(pool, assignmentID string) {
+	id := key(pool, assignmentID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	held := m.current
-	if held == nil || held.pool != pool || held.assignmentID != assignmentID {
+	held := m.held[id]
+	if held == nil {
 		return
 	}
 	m.log.Info("job released by the coordinator", "assignment", assignmentID)
@@ -244,7 +306,7 @@ func (m *Manager) Release(pool, assignmentID string) {
 		held.released = true
 		return
 	}
-	m.current = nil
+	delete(m.held, id)
 }
 
 // Wait returns when no job's runner is still running, which means every VM
@@ -264,8 +326,9 @@ func (m *Manager) Exits(pool string) chan protocol.JobExited {
 
 func (m *Manager) exitsLocked(pool string) chan protocol.JobExited {
 	if m.exits[pool] == nil {
-		// One job at a time means at most a few can ever be waiting.
-		m.exits[pool] = make(chan protocol.JobExited, 16)
+		// Room for every slot's result several times over, so a job ending
+		// while the tunnel is down never waits on it.
+		m.exits[pool] = make(chan protocol.JobExited, 64)
 	}
 	return m.exits[pool]
 }

@@ -290,7 +290,10 @@ func run(ctx context.Context) error {
 			}
 			return holding() == ""
 		},
-		MaxVCPUs: func() int { return live.Get().MaxVCPUs },
+		Limits: func() jobs.Limits {
+			current := live.Get()
+			return jobs.Limits{MaxJobs: current.MaxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU()}
+		},
 	})
 }
 

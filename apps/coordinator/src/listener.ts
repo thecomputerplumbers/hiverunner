@@ -149,7 +149,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       state = undefined
     }
     this.stage = "capacity"
-    const capacity = await pool.capacity(settings.label, settings.vcpus)
+    const capacity = await pool.capacity(settings.vcpus)
     if (!capacity && !Object.keys(state?.slots ?? {}).length) {
       if (state?.session) {
         await this.close(client, state)

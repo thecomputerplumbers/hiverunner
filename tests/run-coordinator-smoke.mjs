@@ -217,7 +217,7 @@ try {
   }
   const hello = (state = "online") => ({
     type: "hello",
-    protocol: 2,
+    protocol: 3,
     daemonVersion: "0.1.0",
     presence: state,
   })
@@ -278,7 +278,7 @@ try {
   assert.deepEqual(await a.next(), {
     type: "welcome",
     machineId: "a",
-    protocol: 2,
+    protocol: 3,
   })
   // Nothing is believed before hello, and junk does not kill the tunnel.
   a.send({ type: "presence", presence: "online" })
@@ -307,6 +307,46 @@ try {
     method: "POST",
     body: JSON.stringify({ release: true }),
   })
+  assert.equal((await a.next()).type, "job.release")
+  assert.equal(await available(), true)
+
+  // An owner who allows two jobs lends two slots, and no more.
+  const offer = (assignmentId, release = false) =>
+    fetch(`${origin}/__test/offer`, {
+      method: "POST",
+      body: JSON.stringify({ assignmentId, release }),
+    })
+  a.send({ ...hello(), maxJobs: 2 })
+  await offer("first")
+  assert.equal((await a.next()).assignmentId, "first")
+  await eventually(available, "a machine with one job of two has room")
+  assert.equal(await presence("a"), "online")
+  a.send({ type: "job.accepted", assignmentId: "first" })
+  await eventually(
+    async () => (await presence("a")) === "busy",
+    "a machine at work shows as busy"
+  )
+  assert.equal(await available(), true, "and still has room for a second")
+  await offer("second")
+  assert.equal((await a.next()).assignmentId, "second")
+  assert.equal(await available(), false, "two jobs of two is full")
+  await offer("third")
+  await offer("second", true)
+  assert.deepEqual(await a.next(), {
+    type: "job.release",
+    assignmentId: "second",
+  })
+  assert.equal(await available(), true, "a released offer frees its slot")
+  a.send({ type: "job.rejected", assignmentId: "first", reason: "test" })
+  await eventually(
+    async () => (await presence("a")) === "online",
+    "an idle machine is online again"
+  )
+  a.send(hello())
+  await offer("alone")
+  assert.equal((await a.next()).assignmentId, "alone")
+  assert.equal(await available(), false, "without the setting, one job")
+  await offer("alone", true)
   assert.equal((await a.next()).type, "job.release")
   assert.equal(await available(), true)
   await sql("update ledger_entry set amount=0 where id='grant:gh-501'")

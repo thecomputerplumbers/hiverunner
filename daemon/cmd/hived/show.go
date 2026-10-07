@@ -12,14 +12,11 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/api"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/host"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/settings"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/ui"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/vm"
 )
-
-// ownerCores is what every job leaves for the machine's owner. The pool
-// applies the same rule when it chooses a machine.
-const ownerCores = 2
 
 const gib = 1 << 30
 
@@ -34,8 +31,8 @@ func labelFor(vcpus int) string {
 // refusal is why this machine does not take a job of this size, or "".
 func refusal(vcpus int, facts host.Facts, current settings.Settings) string {
 	switch {
-	case facts.Cores < vcpus+ownerCores:
-		return fmt.Sprintf("needs %d cores", vcpus+ownerCores)
+	case facts.Cores < vcpus+jobs.OwnerCores:
+		return fmt.Sprintf("needs %d cores", vcpus+jobs.OwnerCores)
 	case !current.Takes(vcpus):
 		return "above your max-vcpus"
 	}
@@ -107,28 +104,50 @@ func status() error {
 	fmt.Print(indent(screen.Box("What you lend", lending(screen, facts, current)...)))
 	fmt.Println()
 	fmt.Print(indent(screen.Box("Your settings", settingRows(screen, current)...)))
-	fmt.Println(indent(screen.Dim("Change one with: hived config set max-vcpus 4    Stop lending: hived pause")))
+	fmt.Println(indent(screen.Dim("Change one with: hived config set max-jobs 2     Stop lending: hived pause")))
 	return nil
 }
 
-// lending draws how much of the machine the largest job it takes would use,
-// and which job sizes it takes at all.
-func lending(screen ui.Screen, facts host.Facts, current settings.Settings) []string {
-	largest := 0
-	for _, vcpus := range settings.Sizes {
-		if refusal(vcpus, facts, current) == "" {
-			largest = vcpus
+// most is the fullest this machine gets: the jobs that use the most cores
+// at once within the owner's limits, by size. Sizes double, so taking the
+// largest that still fits each time is the best that can be done.
+func most(facts host.Facts, current settings.Settings) []int {
+	var jobsAtOnce []int
+	free := facts.Cores - jobs.OwnerCores
+	for len(jobsAtOnce) < current.MaxJobs {
+		taken := 0
+		for _, vcpus := range settings.Sizes {
+			if vcpus <= free && refusal(vcpus, facts, current) == "" {
+				taken = vcpus
+			}
 		}
+		if taken == 0 {
+			break
+		}
+		jobsAtOnce = append(jobsAtOnce, taken)
+		free -= taken
 	}
-	memory := 0
-	if largest > 0 {
-		memory = int(vm.GuestMemoryBytes(largest, uint64(facts.MemoryBytes)) / gib)
+	return jobsAtOnce
+}
+
+// lending draws how much of the machine its jobs use when it is as full as
+// its owner allows, and which job sizes it takes at all.
+func lending(screen ui.Screen, facts host.Facts, current settings.Settings) []string {
+	cores, memory := 0, 0
+	fullest := most(facts, current)
+	for _, vcpus := range fullest {
+		cores += vcpus
+		memory += int(vm.GuestMemoryBytes(vcpus, uint64(facts.MemoryBytes)) / gib)
+	}
+	atOnce := "One job at a time."
+	if current.MaxJobs > 1 {
+		atOnce = fmt.Sprintf("Up to %d jobs at a time.", current.MaxJobs)
 	}
 	const bar = 30
 	rows := []string{
-		field("Cores", screen.Bar(largest, facts.Cores, bar)+fmt.Sprintf("  %d of %d", largest, facts.Cores)),
+		field("Cores", screen.Bar(cores, facts.Cores, bar)+fmt.Sprintf("  %d of %d", cores, facts.Cores)),
 		field("Memory", screen.Bar(memory, int(facts.MemoryBytes/gib), bar)+fmt.Sprintf("  %d of %d GB", memory, facts.MemoryBytes/gib)),
-		field("", screen.Dim("At most, to the largest job it takes. One job at a time.")),
+		field("", screen.Dim("At its fullest. "+atOnce)),
 		"",
 	}
 	for _, vcpus := range settings.Sizes {
@@ -155,6 +174,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		return ui.Pad(key, 12) + ui.Pad(screen.Honey(value), 14) + screen.Dim(meaning)
 	}
 	return []string{
+		row("max-jobs", strconv.Itoa(current.MaxJobs), "how many jobs run at once"),
 		row("max-vcpus", limit, "the largest job this Mac takes"),
 		row("warm", onOff(current.Warm), "keep one VM booted so jobs start sooner"),
 		row("battery", onOff(current.Battery), "take jobs while unplugged"),
@@ -187,6 +207,7 @@ func yesNo(yes bool) string {
 const configUsage = `hived config                    Show this machine's settings
 hived config set <name> <value>  Change one
 
+  max-jobs   1 to 8              how many jobs run at once
   max-vcpus  2, 4, 8 or auto     the largest job this Mac takes
   warm       on or off           keep one VM booted so jobs start sooner
   battery    on or off           take jobs while unplugged

@@ -56,12 +56,13 @@ export default {
       )
     }
     if (path === "/__test/offer" && request.method === "POST") {
-      const { release } = await request.json()
+      const { release, assignmentId = "capacity-fixture" } =
+        await request.json()
       const pool = env.POOL.getByName("gh-501")
-      if (release) await pool.release("capacity-fixture")
+      if (release) await pool.release(assignmentId)
       else
         await pool.offer({
-          assignmentId: "capacity-fixture",
+          assignmentId,
           label: "hive-4cpu",
           vcpus: 4,
           timeoutMinutes: 1,

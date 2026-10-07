@@ -28,7 +28,8 @@ A machine belongs to its owner, not to a pool. At `hived login` someone in
 several organizations chooses which of them the machine serves, and can add or
 remove pools later from the dashboard without touching the machine: the
 running daemon asks the server every minute and opens or closes a tunnel per
-pool to match. It runs one job at a time across all of them.
+pool to match. Its job slots, one unless its owner allows more, are one
+budget across all of them.
 
 ## The owner's settings
 
@@ -37,6 +38,7 @@ and `hived config set <name> <value>` changes one:
 
 | Setting     | Values                | What it does                                     |
 | ----------- | --------------------- | ------------------------------------------------ |
+| `max-jobs`  | `1` to `8`            | How many jobs run at once                        |
 | `max-vcpus` | `2`, `4`, `8`, `auto` | The largest job this Mac takes                   |
 | `warm`      | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner |
 | `battery`   | `on`, `off`           | Take jobs while unplugged                        |
@@ -49,10 +51,17 @@ The settings live in `settings.json` beside the machine file and can be edited
 by hand. A running daemon reads the file again when it changes, so nothing
 needs restarting; a file it cannot read is reported and the last good settings
 stay in force. Outside its hours, on battery with `battery` off, or paused, the
-machine reports `paused` and the pool offers it nothing. The job-size limit is
-sent to the pool in `hello`, so the pool neither offers larger jobs nor counts
-the machine as capacity for them; changing it reconnects the tunnel once the
-machine is idle.
+machine reports `paused` and the pool offers it nothing. The limits on job
+size and job count are sent to the pool in `hello`, so the pool neither offers
+past them nor counts the machine as capacity it does not have; changing one
+reconnects the tunnel once the machine is idle.
+
+Jobs running at once share the Mac: together they never take the last two
+cores, and each gets its own VM, memory and disk. A machine serving several
+pools is the judge of its own limits, because one pool cannot see another's
+jobs: an offer that would not fit is declined. The speed score was measured
+on an idle machine, so several jobs at once may each run slower than it says.
+The warm VM is only kept while no job is running.
 
 ## What it keeps
 
@@ -67,8 +76,8 @@ Keychain is planned.
 Each job gets its own Linux virtual machine under Apple's
 Virtualization.framework, and the machine is destroyed when the job ends.
 
-1. The coordinator offers a job (`job.assign`). The daemon takes its one job
-   slot and accepts, or declines if it is busy with another pool's job.
+1. The coordinator offers a job (`job.assign`). The daemon takes a free job
+   slot and accepts, or declines if it has none or not the cores.
 2. The coordinator sends GitHub's one-time runner configuration (`job.start`).
 3. The daemon clones the guest disk (copy-on-write, instant on APFS), creates
    an empty directory for the job, writes the configuration into it, and boots

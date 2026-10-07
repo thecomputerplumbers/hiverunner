@@ -54,7 +54,7 @@ func TestAJobRunsAndItsResultIsDelivered(t *testing.T) {
 	if reason := m.Offer("acme", offer("a-1")); reason != "" {
 		t.Fatalf("offer declined: %s", reason)
 	}
-	if !m.Busy() || m.Current("acme") != "a-1" || m.Current("globex") != "" {
+	if !m.Busy() || len(m.Holding("acme")) != 1 || m.Holding("acme")[0] != "a-1" || len(m.Holding("globex")) != 0 {
 		t.Fatal("the slot is not held for acme")
 	}
 	if err := m.Start(context.Background(), "acme", start("a-1")); err != nil {
@@ -143,7 +143,7 @@ func (r *slow) Run(ctx context.Context, _ Job) (int, error) {
 }
 
 // The order that matters: a released job's VM is destroyed before the
-// machine takes anything else, and its result is never reported.
+// machine takes anything in its place, and only then is the pool told.
 func TestAReleasedJobHoldsTheSlotUntilItsVMIsGone(t *testing.T) {
 	runner := newSlow()
 	m := New(runner, quiet)
@@ -161,7 +161,7 @@ func TestAReleasedJobHoldsTheSlotUntilItsVMIsGone(t *testing.T) {
 	if reason := m.Offer("globex", offer("g-1")); reason != ReasonBusy {
 		t.Fatalf("another pool's offer during teardown: %q, want it declined as busy", reason)
 	}
-	if m.Current("acme") != "a-1" {
+	if held := m.Holding("acme"); len(held) != 1 || held[0] != "a-1" {
 		t.Fatal("a reconnect during teardown would not name the job still on the machine")
 	}
 	// Releasing twice changes nothing.
@@ -179,10 +179,14 @@ func TestAReleasedJobHoldsTheSlotUntilItsVMIsGone(t *testing.T) {
 	if reason := m.Offer("globex", offer("g-1")); reason != "" {
 		t.Fatalf("offer after teardown: %q", reason)
 	}
+	// The pool is told the job is gone, so it can count the cores as free.
 	select {
 	case exit := <-m.Exits("acme"):
-		t.Fatalf("a released job reported %+v", exit)
-	case <-time.After(100 * time.Millisecond):
+		if exit.AssignmentID != "a-1" {
+			t.Fatalf("the wrong job was reported gone: %+v", exit)
+		}
+	case <-within(t, "the released job's exit"):
+		t.Fatal("the pool was never told the released job's VM is gone")
 	}
 }
 
@@ -238,7 +242,7 @@ func TestTheJobTimeoutDestroysTheRunner(t *testing.T) {
 	short.TimeoutMinutes = 0
 	m.Offer("acme", short)
 	m.mu.Lock()
-	m.current.timeout = 30 * time.Millisecond
+	m.held[key("acme", "a-1")].timeout = 30 * time.Millisecond
 	m.mu.Unlock()
 	if err := m.Start(context.Background(), "acme", start("a-1")); err != nil {
 		t.Fatal(err)
@@ -281,7 +285,7 @@ func TestAnUnusableRunnerDeclinesWithItsReason(t *testing.T) {
 
 func TestAnOfferPastTheOwnersLimitIsDeclined(t *testing.T) {
 	manager := New(newFake(), quiet)
-	manager.Limit(func(vcpus int) bool { return vcpus <= 4 })
+	manager.Limit(func() Limits { return Limits{MaxVCPUs: 4} })
 	if reason := manager.Offer("p", &protocol.JobAssign{AssignmentID: "big", VCPUs: 8}); reason != ReasonTooLarge {
 		t.Fatalf("an 8 vCPU offer under a limit of 4: %q", reason)
 	}
@@ -290,5 +294,92 @@ func TestAnOfferPastTheOwnersLimitIsDeclined(t *testing.T) {
 	}
 	if reason := manager.Offer("p", &protocol.JobAssign{AssignmentID: "fits", VCPUs: 4}); reason != "" {
 		t.Fatalf("a 4 vCPU offer under a limit of 4 was declined: %q", reason)
+	}
+}
+
+func limited(limits Limits) func() Limits { return func() Limits { return limits } }
+
+func sized(id string, vcpus int) *protocol.JobAssign {
+	job := offer(id)
+	job.VCPUs = vcpus
+	return job
+}
+
+// An owner who allows two jobs gets two, from any mix of pools, and not a
+// third.
+func TestSeveralJobsRunAtOnceUpToTheOwnersLimit(t *testing.T) {
+	runner := newFake()
+	runner.started = make(chan Job, 2)
+	m := New(runner, quiet)
+	m.Limit(limited(Limits{MaxJobs: 2, Cores: 18}))
+
+	if reason := m.Offer("acme", offer("a-1")); reason != "" {
+		t.Fatalf("first offer: %q", reason)
+	}
+	if m.Full() {
+		t.Fatal("one job of two filled the machine")
+	}
+	if reason := m.Offer("globex", offer("g-1")); reason != "" {
+		t.Fatalf("second offer, from another pool: %q", reason)
+	}
+	if !m.Full() {
+		t.Fatal("two jobs of two did not fill the machine")
+	}
+	if reason := m.Offer("acme", offer("a-2")); reason != ReasonBusy {
+		t.Fatalf("third offer: %q, want it declined as busy", reason)
+	}
+	for _, started := range []struct{ pool, id string }{{"acme", "a-1"}, {"globex", "g-1"}} {
+		if err := m.Start(context.Background(), started.pool, start(started.id)); err != nil {
+			t.Fatal(err)
+		}
+		<-runner.started
+	}
+
+	// One finishing frees one slot, and the other job is untouched.
+	runner.finish <- 0
+	var done protocol.JobExited
+	select {
+	case done = <-m.Exits("acme"):
+	case done = <-m.Exits("globex"):
+	case <-within(t, "the first exit"):
+		t.Fatal("no job reported its exit")
+	}
+	if m.Full() || !m.Busy() {
+		t.Fatal("one job ending should leave one running and one slot free")
+	}
+	if len(m.Holding("acme"))+len(m.Holding("globex")) != 1 {
+		t.Fatalf("after %s ended the machine holds the wrong jobs", done.AssignmentID)
+	}
+	runner.finish <- 0
+	m.Wait()
+}
+
+// Two pools cannot see each other's jobs, so the machine itself refuses a
+// job that would leave its owner without cores.
+func TestStackedJobsLeaveTheOwnerTheirCores(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Limit(limited(Limits{MaxJobs: 4, Cores: 12}))
+	if reason := m.Offer("acme", sized("a-1", 8)); reason != "" {
+		t.Fatalf("8 of 12 cores: %q", reason)
+	}
+	if reason := m.Offer("globex", sized("g-1", 4)); reason != ReasonNoCores {
+		t.Fatalf("4 more of 12 cores, with 8 in use: %q, want no cores", reason)
+	}
+	if reason := m.Offer("globex", sized("g-2", 2)); reason != "" {
+		t.Fatalf("2 more of 12 cores, with 8 in use: %q", reason)
+	}
+}
+
+// Assignment ids are each pool's own.
+func TestTwoPoolsMayUseTheSameAssignmentID(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Limit(limited(Limits{MaxJobs: 2}))
+	m.Offer("acme", offer("same"))
+	if reason := m.Offer("globex", offer("same")); reason != "" {
+		t.Fatalf("another pool's job with the same id: %q", reason)
+	}
+	m.Release("acme", "same")
+	if held := m.Holding("globex"); len(held) != 1 {
+		t.Fatal("releasing one pool's job dropped the other's")
 	}
 }

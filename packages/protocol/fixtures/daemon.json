@@ -1,23 +1,24 @@
 [
   {
     "type": "hello",
-    "protocol": 2,
+    "protocol": 3,
     "daemonVersion": "0.1.0",
     "presence": "online"
   },
   {
     "type": "hello",
-    "protocol": 2,
+    "protocol": 3,
     "daemonVersion": "0.1.0",
     "presence": "busy",
-    "assignmentId": "a-1"
+    "holding": ["a-1", "a-2"]
   },
   {
     "type": "hello",
-    "protocol": 2,
+    "protocol": 3,
     "daemonVersion": "0.1.0",
     "presence": "online",
-    "maxVcpus": 4
+    "maxVcpus": 4,
+    "maxJobs": 2
   },
   { "type": "presence", "presence": "paused" },
   { "type": "presence", "presence": "draining" },

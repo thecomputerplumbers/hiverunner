@@ -67,9 +67,10 @@ func (r *Runner) Unusable() string {
 	return ""
 }
 
-// A machine runs one job at a time, with perhaps a warm VM beside it and one
-// being torn down. Four network identities cover that with room.
-const macSlots = 4
+// A machine runs a handful of jobs at once at most, with perhaps a warm VM
+// beside them and one being torn down. Sixteen network identities cover that
+// with room.
+const macSlots = 16
 
 var _ jobs.Runner = (*Runner)(nil)
 
@@ -311,7 +312,7 @@ func (r *Runner) mac() (*vz.MACAddress, func(), error) {
 	}
 	seed := sha256.Sum256([]byte(r.WorkDir))
 	// 0x02: locally administered, unicast.
-	hardware := net.HardwareAddr{0x02, 0x68, seed[0], seed[1], seed[2], seed[3]&0xfc | byte(slot)}
+	hardware := net.HardwareAddr{0x02, 0x68, seed[0], seed[1], seed[2], seed[3]&0xf0 | byte(slot)}
 	address, err := vz.NewMACAddress(hardware)
 	release := func() {
 		r.mu.Lock()

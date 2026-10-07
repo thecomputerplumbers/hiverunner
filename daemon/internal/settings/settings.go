@@ -28,6 +28,8 @@ type Settings struct {
 	// MaxVCPUs is the largest job this machine takes. Zero means as large as
 	// the machine allows.
 	MaxVCPUs int `json:"maxVcpus"`
+	// MaxJobs is how many jobs this machine runs at once.
+	MaxJobs int `json:"maxJobs"`
 	// Warm keeps one VM booted while idle, so a job skips the boot.
 	Warm bool `json:"warm"`
 	// Battery allows jobs while the machine is unplugged.
@@ -40,10 +42,14 @@ type Settings struct {
 // Sizes are the job sizes a machine can be offered, by guest vCPUs.
 var Sizes = []int{2, 4, 8}
 
+// MostJobs is the most jobs any machine runs at once, whatever its owner
+// asks for. The pool refuses a daemon that claims more.
+const MostJobs = 8
+
 // Default is a machine whose owner has decided nothing: it behaves as the
 // daemon did before there were settings.
 func Default() Settings {
-	return Settings{Warm: true, Battery: true}
+	return Settings{MaxJobs: 1, Warm: true, Battery: true}
 }
 
 // Path is the settings file, beside the machine file.
@@ -75,6 +81,10 @@ func read(path string) (Settings, error) {
 	}
 	if err := json.Unmarshal(raw, &current); err != nil {
 		return Default(), fmt.Errorf("%s is not readable: %w", path, err)
+	}
+	// A file written by hand may leave it out as zero.
+	if current.MaxJobs == 0 {
+		current.MaxJobs = 1
 	}
 	if err := current.validate(); err != nil {
 		return Default(), fmt.Errorf("%s: %w", path, err)
@@ -109,6 +119,9 @@ func (s Settings) validate() error {
 	if s.MaxVCPUs != 0 && !isSize(s.MaxVCPUs) {
 		return fmt.Errorf("max-vcpus must be 2, 4, 8 or auto")
 	}
+	if s.MaxJobs < 1 || s.MaxJobs > MostJobs {
+		return fmt.Errorf("max-jobs must be from 1 to %d", MostJobs)
+	}
 	_, _, err := parseHours(s.Hours)
 	return err
 }
@@ -123,12 +136,18 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-vcpus", "warm", "battery", "hours"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch key {
+	case "max-jobs":
+		jobs, err := strconv.Atoi(value)
+		if err != nil || jobs < 1 || jobs > MostJobs {
+			return fmt.Errorf("max-jobs takes a number from 1 to %d", MostJobs)
+		}
+		s.MaxJobs = jobs
 	case "max-vcpus":
 		if value == "auto" {
 			s.MaxVCPUs = 0

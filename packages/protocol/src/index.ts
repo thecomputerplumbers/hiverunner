@@ -9,7 +9,7 @@
  */
 
 /** Bumped on any change an older peer could not safely ignore. */
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 
 /** Sent and answered without waking the coordinator's object. */
 export const PING = "ping"
@@ -44,19 +44,24 @@ export type DaemonMessage =
       daemonVersion: string
       presence: Presence
       /**
-       * The job this machine is holding or running, if any. A daemon that
-       * reconnects mid-job says so here, so the pool restores `busy` instead
-       * of offering a machine that is already at work.
+       * The jobs this machine is holding or running for this pool, if any.
+       * A daemon that reconnects mid-job says so here, so the pool counts
+       * them again instead of offering cores that are already at work.
        */
-      assignmentId?: string
+      holding?: string[]
       /**
        * The largest job the machine's owner lets it take. Absent means as
        * large as the machine allows.
        */
       maxVcpus?: number
+      /**
+       * How many jobs the machine's owner lets it run at once. Absent means
+       * one.
+       */
+      maxJobs?: number
     }
   | { type: "presence"; presence: Presence }
-  /** The machine has reserved its one job slot for this offer. */
+  /** The machine has reserved a job slot for this offer. */
   | { type: "job.accepted"; assignmentId: string }
   | { type: "job.rejected"; assignmentId: string; reason: string }
   /** The runner has ended and the VM is gone. `exitCode` is the runner's. */
@@ -111,6 +116,17 @@ const isString = (value: unknown, max = 200): value is string =>
 const isPresence = (value: unknown): value is Presence =>
   PRESENCE.includes(value as Presence)
 
+/** The most jobs one machine may run at once, whatever its owner asks for. */
+export const MAX_JOBS = 8
+
+function isCount(value: unknown, most: number) {
+  return (
+    Number.isInteger(value) &&
+    (value as number) >= 1 &&
+    (value as number) <= most
+  )
+}
+
 /**
  * A frame from a daemon, or null if it is not one. Daemons run on machines
  * we do not control, so nothing about a frame is assumed.
@@ -130,13 +146,14 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         !Number.isInteger(value.protocol) ||
         !isString(value.daemonVersion, 40) ||
         !isPresence(value.presence) ||
-        (value.assignmentId !== undefined && !isString(value.assignmentId)) ||
-        (value.maxVcpus !== undefined &&
+        (value.holding !== undefined &&
           !(
-            Number.isInteger(value.maxVcpus) &&
-            (value.maxVcpus as number) >= 1 &&
-            (value.maxVcpus as number) <= 256
-          ))
+            Array.isArray(value.holding) &&
+            value.holding.length <= MAX_JOBS &&
+            value.holding.every((id) => isString(id))
+          )) ||
+        (value.maxVcpus !== undefined && !isCount(value.maxVcpus, 256)) ||
+        (value.maxJobs !== undefined && !isCount(value.maxJobs, MAX_JOBS))
       )
         return null
       return {
@@ -144,12 +161,15 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         protocol: value.protocol as number,
         daemonVersion: value.daemonVersion,
         presence: value.presence,
-        ...(value.assignmentId === undefined
+        ...(value.holding === undefined
           ? {}
-          : { assignmentId: value.assignmentId }),
+          : { holding: value.holding as string[] }),
         ...(value.maxVcpus === undefined
           ? {}
           : { maxVcpus: value.maxVcpus as number }),
+        ...(value.maxJobs === undefined
+          ? {}
+          : { maxJobs: value.maxJobs as number }),
       }
     case "presence":
       return isPresence(value.presence)

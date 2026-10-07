@@ -36,6 +36,8 @@ func TestSetRefusesWhatItCannotMean(t *testing.T) {
 	current := Default()
 	for _, bad := range [][2]string{
 		{"max-vcpus", "3"},
+		{"max-jobs", "0"},
+		{"max-jobs", "9"},
 		{"warm", "maybe"},
 		{"hours", "9-5"},
 		{"hours", "09:00-09:00"},
@@ -54,12 +56,16 @@ func TestSetAndHolding(t *testing.T) {
 	current := Default()
 	for _, change := range [][2]string{
 		{"max-vcpus", "4"},
+		{"max-jobs", "3"},
 		{"battery", "off"},
 		{"hours", "22:00-07:00"},
 	} {
 		if err := current.Set(change[0], change[1]); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if current.MaxJobs != 3 {
+		t.Errorf("max-jobs was not set: %d", current.MaxJobs)
 	}
 	if current.Takes(8) || !current.Takes(4) {
 		t.Errorf("a limit of 4 takes the wrong sizes")

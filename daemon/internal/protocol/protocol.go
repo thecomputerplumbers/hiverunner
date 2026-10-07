@@ -10,7 +10,7 @@ import (
 )
 
 // Version is bumped on any change an older peer could not safely ignore.
-const Version = 2
+const Version = 3
 
 // Keepalive frames. The coordinator answers Ping at the edge without waking.
 const (
@@ -45,13 +45,16 @@ type Hello struct {
 	Protocol      int      `json:"protocol"`
 	DaemonVersion string   `json:"daemonVersion"`
 	Presence      Presence `json:"presence"`
-	// AssignmentID is the job this machine is holding or running, if any. A
-	// daemon that reconnects mid-job says so, so the pool restores busy
-	// instead of offering a machine that is already at work.
-	AssignmentID string `json:"assignmentId,omitempty"`
+	// Holding is the jobs this machine is holding or running for this pool,
+	// if any. A daemon that reconnects mid-job says so, so the pool counts
+	// them again instead of offering cores that are already at work.
+	Holding []string `json:"holding,omitempty"`
 	// MaxVCPUs is the largest job the machine's owner lets it take. Absent
 	// means as large as the machine allows.
 	MaxVCPUs int `json:"maxVcpus,omitempty"`
+	// MaxJobs is how many jobs the owner lets the machine run at once.
+	// Absent means one.
+	MaxJobs int `json:"maxJobs,omitempty"`
 }
 
 // PresenceUpdate reports a change of state.
@@ -121,8 +124,8 @@ type Error struct {
 // Drain asks the daemon to finish its job and take no more.
 type Drain struct{}
 
-func NewHello(daemonVersion string, presence Presence, assignmentID string) Hello {
-	return Hello{Type: "hello", Protocol: Version, DaemonVersion: daemonVersion, Presence: presence, AssignmentID: assignmentID}
+func NewHello(daemonVersion string, presence Presence, holding ...string) Hello {
+	return Hello{Type: "hello", Protocol: Version, DaemonVersion: daemonVersion, Presence: presence, Holding: holding}
 }
 
 func NewPresence(presence Presence) PresenceUpdate {

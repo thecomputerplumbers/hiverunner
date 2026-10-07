@@ -313,10 +313,10 @@ try {
     ws.send(
       JSON.stringify({
         type: "hello",
-        protocol: 2,
+        protocol: 3,
         daemonVersion: "0.1.0",
         presence: assignmentId ? "busy" : "online",
-        assignmentId,
+        holding: assignmentId ? [assignmentId] : undefined,
       })
     )
     return ws

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { pickMachine } from "../apps/coordinator/src/schedule.ts"
+import { pickMachine, room } from "../apps/coordinator/src/schedule.ts"
 
 const machine = (machineId, extra = {}) => ({
   machineId,
@@ -14,7 +14,10 @@ test("only free, online machines are offered jobs", () => {
   assert.equal(pickMachine([], 2), null)
   for (const presence of ["offline", "paused", "busy", "draining"])
     assert.equal(pickMachine([machine("a", { presence })], 2), null, presence)
-  assert.equal(pickMachine([machine("a", { assignmentId: "x" })], 2), null)
+  assert.equal(
+    pickMachine([machine("a", { jobs: { x: { vcpus: 2 } } })], 2),
+    null
+  )
   assert.equal(pickMachine([machine("a")], 2).machineId, "a")
 })
 
@@ -46,4 +49,27 @@ test("a job never exceeds the limit a machine's owner set", () => {
     machine("slow", { cores: 24, speedScore: 1 }),
   ]
   assert.equal(pickMachine(pool, 8).machineId, "slow")
+})
+
+test("a machine takes several jobs only as far as its owner and cores allow", () => {
+  const studio = machine("studio", { cores: 18, maxJobs: 3 })
+  assert.equal(room(studio, 8), 2)
+  assert.equal(room(studio, 2), 3)
+  const working = { ...studio, jobs: { a: { vcpus: 8 } } }
+  assert.equal(room(working, 8), 1)
+  assert.equal(pickMachine([working], 8).machineId, "studio")
+  const full = { ...studio, jobs: { a: { vcpus: 8 }, b: { vcpus: 8 } } }
+  // A slot is left, but not the cores: sixteen are lent and two are the owner's.
+  assert.equal(room(full, 2), 0)
+  assert.equal(pickMachine([full], 2), null)
+  // Without a word from its owner a machine runs one job, as it always has.
+  assert.equal(room(machine("air", { jobs: { a: { vcpus: 2 } } }), 2), 0)
+})
+
+test("work spreads across equal machines before it stacks", () => {
+  const pool = [
+    machine("one", { cores: 18, maxJobs: 2, jobs: { a: { vcpus: 4 } } }),
+    machine("two", { cores: 18, maxJobs: 2 }),
+  ]
+  assert.equal(pickMachine(pool, 4).machineId, "two")
 })

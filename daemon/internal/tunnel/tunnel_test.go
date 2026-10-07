@@ -77,7 +77,7 @@ func TestHelloPresenceAndDecliningWithoutARunner(t *testing.T) {
 	done := make(chan struct{})
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, _ int) {
 		defer close(done)
-		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":3}`)
 		if hello := read(ctx, t, c); hello["type"] != "hello" || hello["presence"] != "online" {
 			t.Errorf("first frame = %v", hello)
 		}
@@ -132,7 +132,7 @@ func TestADroppedConnectionIsRetried(t *testing.T) {
 	presence.Store(protocol.Online)
 	second := make(chan struct{})
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, attempt int) {
-		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":3}`)
 		read(ctx, t, c)
 		if attempt == 1 {
 			return // Drop it, as a deploy would.
@@ -173,7 +173,7 @@ func TestOfferAcceptStartExit(t *testing.T) {
 	done := make(chan struct{})
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, _ int) {
 		defer close(done)
-		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":3}`)
 		if hello := read(ctx, t, c); hello["assignmentId"] != nil {
 			t.Errorf("an idle machine claimed a job in hello: %v", hello)
 		}
@@ -222,7 +222,7 @@ func TestAJobSurvivesAReconnect(t *testing.T) {
 	runner := held{finish: make(chan int)}
 	done := make(chan struct{})
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, attempt int) {
-		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":3}`)
 		hello := read(ctx, t, c)
 		if attempt == 1 {
 			write(ctx, c, `{"type":"job.assign","assignmentId":"a-1","label":"hive","vcpus":2,"timeoutMinutes":60}`)
@@ -232,7 +232,7 @@ func TestAJobSurvivesAReconnect(t *testing.T) {
 			return // Drop the connection with the job running.
 		}
 		defer close(done)
-		if hello["assignmentId"] != "a-1" {
+		if holding, _ := hello["holding"].([]any); len(holding) != 1 || holding[0] != "a-1" {
 			t.Errorf("reconnect hello = %v, want it to name the running job", hello)
 		}
 		runner.finish <- 0
@@ -263,7 +263,7 @@ func TestChangingTheJobSizeLimitSaysHelloAgain(t *testing.T) {
 	limit.Store(4)
 	done := make(chan struct{})
 	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, attempt int) {
-		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":3}`)
 		hello := read(ctx, t, c)
 		switch attempt {
 		case 1:
@@ -281,7 +281,7 @@ func TestChangingTheJobSizeLimitSaysHelloAgain(t *testing.T) {
 		}
 	})
 	o := options(url, "hwm_good", &presence)
-	o.MaxVCPUs = func() int { return int(limit.Load()) }
+	o.Limits = func() jobs.Limits { return jobs.Limits{MaxVCPUs: int(limit.Load())} }
 	ctx, cancel := context.WithCancel(context.Background())
 	finished := make(chan error, 1)
 	go func() { finished <- Run(ctx, o) }()

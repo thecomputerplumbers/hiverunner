@@ -48,8 +48,8 @@ Build the image once with Docker, then build the daemon with Go:
 `login` opens the browser to approve machine enrollment. The GitHub App must
 be installed on the organization and its repository must be accessible to the
 runner group. The daemon pauses availability when the lid is closed and
-keeps running on battery. One machine runs one job across all its pools and leaves two cores
-for its owner.
+keeps running on battery. One machine runs one job at a time across all its pools unless its
+owner raises `max-jobs`, and always leaves two cores for its owner.
 
 Use these labels in a repository's workflow:
 

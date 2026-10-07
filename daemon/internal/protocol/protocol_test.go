@@ -43,11 +43,12 @@ func TestEveryCoordinatorFixtureDecodes(t *testing.T) {
 // What the daemon sends must be byte-for-byte what the coordinator's own
 // fixtures say a daemon sends.
 func TestDaemonMessagesMatchFixtures(t *testing.T) {
-	limited := NewHello("0.1.0", Online, "")
+	limited := NewHello("0.1.0", Online)
 	limited.MaxVCPUs = 4
+	limited.MaxJobs = 2
 	sent := []any{
-		NewHello("0.1.0", Online, ""),
-		NewHello("0.1.0", Busy, "a-1"),
+		NewHello("0.1.0", Online),
+		NewHello("0.1.0", Busy, "a-1", "a-2"),
 		limited,
 		NewPresence(Paused),
 		NewPresence(Draining),

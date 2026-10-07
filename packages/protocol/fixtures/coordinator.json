@@ -1,5 +1,5 @@
 [
-  { "type": "welcome", "machineId": "m-1", "protocol": 2 },
+  { "type": "welcome", "machineId": "m-1", "protocol": 3 },
   {
     "type": "job.assign",
     "assignmentId": "a-1",
