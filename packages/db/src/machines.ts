@@ -69,11 +69,11 @@ export function validateMachineFacts(facts: MachineFacts) {
   if (!text(facts.model, 120)) fields.model = "Missing hardware model"
   if (!text(facts.daemonVersion, 40))
     fields.daemonVersion = "Missing daemon version"
-  // The hosts a daemon exists for, released or not. Widening this is a
-  // product decision, not a validation tweak. The message names what has
-  // been released.
+  // The hosts a daemon exists for. Widening this is a product decision, not
+  // a validation tweak.
   if (!hostArch(facts))
-    fields.os = "HiveWorker runs on Apple Silicon Macs for now"
+    fields.os =
+      "HiveWorker runs on Apple Silicon Macs, and on Linux on arm64 or x64"
   if (!Number.isInteger(facts.cores) || facts.cores < 1 || facts.cores > 512)
     fields.cores = "Invalid core count"
   if (!Number.isSafeInteger(facts.memoryBytes) || facts.memoryBytes < 2 ** 30)
@@ -88,13 +88,16 @@ export function validateMachineFacts(facts: MachineFacts) {
 
 /**
  * The architecture of the jobs a machine can run, or null for a machine no
- * daemon runs on: an Apple Silicon Mac, or Linux on arm64 or x64. It is
- * stored in the product's words, whatever the daemon called it.
+ * daemon runs on. The daemon reports Go's names for what it is, and exactly
+ * three are hosts: darwin/arm64, linux/arm64 and linux/amd64. What is stored
+ * is the product's word, so Go's amd64 becomes the labels' x64.
  */
 function hostArch(facts: Pick<MachineFacts, "os" | "arch">) {
-  const arch = runnerArch(facts.arch)
-  if (facts.os === "darwin") return arch === "arm64" ? arch : null
-  return facts.os === "linux" ? arch : null
+  const known =
+    facts.arch === "arm64"
+      ? facts.os === "darwin" || facts.os === "linux"
+      : facts.arch === "amd64" && facts.os === "linux"
+  return known ? runnerArch(facts.arch) : null
 }
 
 /**

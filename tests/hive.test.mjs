@@ -467,14 +467,11 @@ test("machines enroll once, authenticate by token, and stop when revoked", async
 })
 
 test("a machine enrolls as what it is, in the product's words", async (t) => {
-  // A Mac is Apple Silicon; a Linux box is arm64 or x64, whatever it calls it.
+  // The daemon reports Go's names, and exactly three are hosts.
   for (const [os, arch] of [
     ["darwin", "arm64"],
     ["linux", "arm64"],
-    ["linux", "aarch64"],
     ["linux", "amd64"],
-    ["linux", "x86_64"],
-    ["linux", "x64"],
   ])
     assert.equal(
       validateMachineFacts({ ...mac, os, arch }),
@@ -484,6 +481,9 @@ test("a machine enrolls as what it is, in the product's words", async (t) => {
   for (const [os, arch] of [
     ["darwin", "amd64"],
     ["darwin", "x64"],
+    ["linux", "x64"],
+    ["linux", "x86_64"],
+    ["linux", "aarch64"],
     ["linux", "riscv64"],
     ["linux", "386"],
     ["windows", "amd64"],
