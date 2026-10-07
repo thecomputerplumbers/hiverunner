@@ -270,8 +270,16 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		m.log.Info("job started", "assignment", job.AssignmentID, "runner", job.RunnerName, "vcpus", job.VCPUs)
 		// Run returns only once the VM and its files are gone.
 		exitCode, err := m.runner.Run(runCtx, job)
+		m.mu.Lock()
+		released := held.released
+		m.mu.Unlock()
 		if err != nil {
-			m.log.Error("job failed to run", "assignment", job.AssignmentID, "error", err)
+			// The pool releases a job once GitHub says it is over, which
+			// stops a VM that was about to stop anyway. That is not a
+			// failure and should not read as one in the owner's log.
+			if !released {
+				m.log.Error("job failed to run", "assignment", job.AssignmentID, "error", err)
+			}
 			if exitCode == 0 {
 				exitCode = -1
 			}
@@ -279,7 +287,6 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		// The slot is freed here and nowhere else for a running job: not
 		// before its VM is destroyed, even when the job was released.
 		m.mu.Lock()
-		released := held.released
 		if m.held[id] == held {
 			delete(m.held, id)
 		}

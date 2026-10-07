@@ -181,7 +181,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		}
 	}
 	row := func(key, value, meaning string) string {
-		return ui.Pad(key, 12) + ui.Pad(screen.Honey(value), 14) + screen.Dim(meaning)
+		return ui.Pad(key, 12) + ui.Pad(screen.Honey(value), 16) + screen.Dim(meaning)
 	}
 	return []string{
 		row("max-jobs", strconv.Itoa(current.MaxJobs), "how many jobs run at once"),

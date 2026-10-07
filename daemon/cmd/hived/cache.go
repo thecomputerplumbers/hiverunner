@@ -108,22 +108,23 @@ func cacheRows(screen ui.Screen, current settings.Settings, detailed bool) []str
 	rows := []string{
 		field("Disk", screen.Bar(int(total>>20), int(limit>>20), 30)+"  "+bytesText(total)+" of "+bytesText(limit)),
 		field("", screen.Dim(plural(entries, "cache", "caches")+" from "+plural(len(repos), "repository", "repositories")+
-			". One cache per repository.")),
+			". Each repository has its own.")),
 	}
 	if !detailed || len(repos) == 0 {
 		return rows
 	}
 	rows = append(rows, "")
 	for _, repo := range repos {
-		name := repo.RepoName
-		if name == "" {
-			name = "repository " + repo.Repo
+		// GitHub's token names a repository by number and nothing else.
+		name := "repository " + repo.Repo
+		if repo.RepoName != "" {
+			name = repo.RepoName
 		}
-		if ui.Width(name) > 34 {
-			name = name[:33] + "…"
+		if ui.Width(name) > 32 {
+			name = name[:31] + "…"
 		}
-		rows = append(rows, ui.Pad(screen.Honey(name), 36)+ui.Pad(bytesText(repo.Bytes), 10)+
-			ui.Pad(plural(repo.Entries, "cache", "caches"), 12)+screen.Dim(ago(repo.Used)))
+		rows = append(rows, ui.Pad(screen.Honey(name), 34)+ui.Pad(bytesText(repo.Bytes), 10)+
+			ui.Pad(plural(repo.Entries, "cache", "caches"), 11)+screen.Dim(ago(repo.Used)))
 	}
 	return rows
 }
@@ -144,7 +145,7 @@ func ago(when time.Time) string {
 
 const cacheUsage = `hived cache                 Show what the Actions cache holds
 hived cache clear           Delete every cache
-hived cache clear <repo>    Delete one repository's, by owner/name
+hived cache clear <repo>    Delete one repository's, by the id shown
 
 The cache is on by default. Change it with:
   hived config set cache off
@@ -185,5 +186,5 @@ func cacheCommand(args []string) error {
 		fmt.Print(cacheUsage)
 		return nil
 	}
-	return errors.New("usage: hived cache [clear [owner/name]]; see hived cache help")
+	return errors.New("usage: hived cache [clear [repository-id]]; see hived cache help")
 }

@@ -186,6 +186,12 @@ func (r *Runner) run(ctx context.Context, id, pool string, vcpus int, file, cont
 		r.stale.Store(true)
 		r.Log.Error("GitHub refused the guest's runner as too old; this machine will decline jobs until the image is rebuilt", "runner", r.Image.RunnerVersion)
 	}
+	if errors.Is(err, context.Canceled) {
+		// Stopped on purpose: released by the pool, or the daemon is
+		// shutting down. The caller knows which; it is not a VM failing.
+		r.Log.Info("VM stopped", "job", id, "exit", code, "seconds", int(time.Since(started).Seconds()))
+		return code, err
+	}
 	if err != nil {
 		// The guest's console is not logged. A job can write anything to it,
 		// secrets included, and this log outlives the VM. Keeping it is an

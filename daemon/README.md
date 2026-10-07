@@ -75,7 +75,7 @@ disk, and nothing counts against GitHub's cache quota.
 ```sh
 ./hived cache                  # what it holds, by repository
 ./hived cache clear            # delete it all
-./hived cache clear owner/name # delete one repository's
+./hived cache clear 1403685691 # delete one repository's, by its id
 ./hived config set cache-size 40
 ./hived config set cache off
 ```
@@ -88,6 +88,9 @@ that VM. So a job cannot reach another repository's cache, and a machine
 serving two organizations keeps their caches apart. Within a repository,
 caches are scoped by branch as GitHub scopes them: a job reads its own
 branch's caches and the default branch's, and saves only to its own.
+
+`hived cache` lists repositories by GitHub's numeric id: that is all the
+job's token says about which repository it is.
 
 **Each Mac builds its own.** The cache is on the machine, not in the pool. A
 job that lands on a Mac that has not run that repository starts cold and

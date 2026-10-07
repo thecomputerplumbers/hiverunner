@@ -595,11 +595,13 @@ func (s *Store) remove(entry Entry) error {
 	return os.RemoveAll(doomed)
 }
 
-// Trim brings the cache within its limit now. The daemon calls it when the
-// owner lowers the limit.
+// Trim brings the cache within its limit now. The daemon calls it on a
+// timer, which is how a lowered limit takes effect without a save.
 func (s *Store) Trim() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Also the saves a cancelled job began and never finished.
+	s.sweepUploads()
 	s.evict("")
 }
 
