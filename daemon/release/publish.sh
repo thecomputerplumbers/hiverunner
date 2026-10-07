@@ -12,7 +12,7 @@
 #   images/<image>/image.aar                  the Linux image, as an Apple Archive
 #   linux-<arch>.txt                          what install.sh reads on Linux
 #   hived/<version>/hived-linux-<arch>.tar.gz
-#   images/<image>/image-<arch>-<sum>.tar.gz  the same image, as a tarball
+#   images/<image>/image-<arch>-<sum>.tar.gz.aa, .ab, …  the same image, as a tarball in pieces
 #
 # Linux on arm64 runs the image the Mac does. Linux on x86-64 needs its own,
 # built with `GUEST_ARCH=x64 ./image/build.sh DIR`; name that directory in
@@ -131,7 +131,12 @@ linux() { # arch image-directory
     "$(plutil -extract disk raw -o - "$dir/manifest.json")"
   image_tar_sha=$(shasum -a 256 "$packing" | cut -d' ' -f1)
   image_key="images/$this_image/image-$arch-$(printf %.12s "$image_tar_sha").tar.gz"
-  mv "$packing" "$out/$image_key"
+  image_megabytes=$(($(stat -f %z "$packing") / 1048576))
+  # In pieces: the bucket takes at most 300 MB in one upload, and an image
+  # can be more. The installer puts them back together and checks the whole.
+  split -b 200m "$packing" "$out/$image_key."
+  rm "$packing"
+  image_parts=$(cd "$out/images/$this_image" && ls "$(basename "$image_key")".* | sed 's/.*\.//' | tr '\n' ' ' | sed 's/ $//')
   cat > "$out/linux-$arch.txt" <<MANIFEST
 version=$version
 commit=$(git rev-parse HEAD)
@@ -139,11 +144,12 @@ daemon_url=$BASE/hived/$version/hived-linux-$arch.tar.gz
 daemon_sha256=$(shasum -a 256 "$daemon_tar" | cut -d' ' -f1)
 image_version=$this_image
 image_url=$BASE/$image_key
+image_parts=$image_parts
 image_sha256=$image_tar_sha
-image_megabytes=$(($(stat -f %z "$out/$image_key") / 1048576))
+image_megabytes=$image_megabytes
 MANIFEST
   linux_arches="$linux_arches $arch"
-  echo "   $arch: daemon and image $this_image, $(($(stat -f %z "$out/$image_key") / 1048576)) MB"
+  echo "   $arch: daemon and image $this_image, $image_megabytes MB"
 }
 linux arm64 "$image_dir"
 if [ -n "${HIVE_IMAGE_AMD64:-}" ]; then
@@ -204,7 +210,13 @@ fi
 put "hived/$version/hived-darwin-arm64.zip" "$daemon_zip" application/zip "public, max-age=31536000, immutable"
 for arch in $linux_arches; do
   image_key=$(sed -n "s|^image_url=$BASE/||p" "$out/linux-$arch.txt")
-  put "$image_key" "$out/$image_key" application/gzip "public, max-age=31536000, immutable"
+  for part in $(sed -n 's/^image_parts=//p' "$out/linux-$arch.txt"); do
+    # Named for the whole image's checksum, so a piece already there is the
+    # same piece.
+    if ! published "$image_key.$part"; then
+      put "$image_key.$part" "$out/$image_key.$part" application/octet-stream "public, max-age=31536000, immutable"
+    fi
+  done
   put "hived/$version/hived-linux-$arch.tar.gz" "$out/hived/$version/hived-linux-$arch.tar.gz" application/gzip "public, max-age=31536000, immutable"
 done
 put "install.sh" "$out/install.sh" "text/x-shellscript; charset=utf-8" "public, max-age=60"

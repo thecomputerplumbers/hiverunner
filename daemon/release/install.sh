@@ -269,9 +269,10 @@ daemon_url=$(field daemon_url)
 daemon_sha=$(field daemon_sha256)
 image_version=$(field image_version)
 image_url=$(field image_url)
+image_parts=$(field image_parts)
 image_sha=$(field image_sha256)
 image_mb=$(field image_megabytes)
-[ -n "$version" ] && [ -n "$daemon_url" ] && [ -n "$daemon_sha" ] && [ -n "$image_url" ] && [ -n "$image_sha" ] ||
+[ -n "$version" ] && [ -n "$daemon_url" ] && [ -n "$daemon_sha" ] && [ -n "$image_url" ] && [ -n "$image_parts" ] && [ -n "$image_sha" ] ||
   fail "the release manifest is incomplete. Try again in a few minutes."
 say "HiveWorker $version"
 
@@ -296,7 +297,13 @@ if [ "$have" = "$image_version" ]; then
   say "Already up to date ($image_version)."
 else
   say "Downloading ${image_mb:-about 300} MB. This is the slow part."
-  fetch -# -o "$work/image.tar.gz" "$image_url"
+  # The image is published in pieces. The checksum is of the whole.
+  : >"$work/image.tar.gz"
+  for part in $image_parts; do
+    fetch -# -o "$work/image.part" "$image_url.$part"
+    cat "$work/image.part" >>"$work/image.tar.gz"
+    rm -f "$work/image.part"
+  done
   check "$work/image.tar.gz" "$image_sha"
   mkdir -p "$DATA_DIR"
   rm -rf "$DATA_DIR/image.new"
