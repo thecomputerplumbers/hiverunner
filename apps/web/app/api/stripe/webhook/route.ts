@@ -1,3 +1,4 @@
+import product from "@/config/product.json"
 import { logError } from "@/lib/diagnostics"
 import { env } from "cloudflare:workers"
 import {
@@ -35,6 +36,10 @@ export async function POST(request: Request) {
   const db = getDb()
 
   async function syncSubscriptionEvent(event: { data: { object: unknown } }) {
+    // A Stripe account can be shared with another product, and its webhook
+    // delivers that product's subscriptions here too. They are only ours
+    // when this app sells subscriptions at all.
+    if (!product.features.billing) return
     // A deleted subscription arrives with `status: "canceled"`, so the same
     // write covers cancellation — there is nothing to delete locally.
     const subscription = event.data.object as StripeSubscription
@@ -51,7 +56,11 @@ export async function POST(request: Request) {
       "checkout.session.completed": async (event) => {
         const checkout = event.data.object as unknown as StripeCheckoutSession
 
-        if (checkout.mode === "subscription" && checkout.subscription) {
+        if (
+          product.features.billing &&
+          checkout.mode === "subscription" &&
+          checkout.subscription
+        ) {
           await reconcileSubscription(db, stripe(), checkout.subscription, {
             organizationId:
               checkout.metadata?.organization_id ??
