@@ -1,0 +1,21 @@
+# Temporary: proves the docs' example steps on both architectures. Deleted after.
+name: Bun smoke
+on:
+  push:
+    branches: [bun-docs]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        runner: [hive, hive-x64]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: |
+          mkdir t && cd t
+          printf 'import { expect, test } from "bun:test"\ntest("adds", () => expect(1 + 1).toBe(2))\n' > add.test.ts
+          bun test
