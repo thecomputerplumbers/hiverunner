@@ -1,6 +1,8 @@
 import { getLiveSnapshot, listLiveJobs } from "@workspace/db/live"
 
 import { AccountPage } from "@/components/account-page"
+import { JobsPerDay, byDay } from "@/components/console/charts"
+import { Panel } from "@/components/console/panel"
 import { getDb } from "@/db"
 import { requirePool } from "@/lib/session"
 import { JobList } from "./job-list"
@@ -20,6 +22,11 @@ export default async function JobsPage() {
         Jobs that ran in the {installation.accountLogin} pool. Logs stay on
         GitHub; each job here has a signed receipt.
       </p>
+      {jobs.length > 0 && (
+        <Panel title="jobs per day" aside="14 days, UTC">
+          <JobsPerDay days={byDay(live.hours)} />
+        </Panel>
+      )}
       <JobList jobs={jobs} />
     </AccountPage>
   )

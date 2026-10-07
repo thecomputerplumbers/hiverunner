@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm"
 
 import type { AuthDb } from "@workspace/auth/db"
 import { COMPETITOR_RATES, COMPARISON_ARCH } from "@workspace/pricing"
@@ -91,6 +91,15 @@ export type LiveSnapshot = {
    * does unless the pool pays its developers directly.
    */
   earnsBack: boolean
+  /** Every job this pool has finished, since its first. */
+  lifetime: {
+    jobs: number
+    seconds: number
+    /** Micro-tokens that left the balance. */
+    price: number
+    /** What the same minutes list for on GitHub-hosted runners, in USD. */
+    githubUsd: number
+  }
   machines: LiveMachine[]
   running: LiveJob[]
   recent: LiveJob[]
@@ -126,7 +135,7 @@ export async function listLiveJobs(
 }
 
 /**
- * Everything the console draws, in one read. It is polled, so it is six
+ * Everything the console draws, in one read. It is polled, so it is a handful of
  * indexed queries and no more; the charts are grouped in SQL, never by
  * fetching the jobs.
  */
@@ -143,58 +152,78 @@ export async function getLiveSnapshot(
     eq(job.organizationId, organizationId),
     gte(job.startedAt, since)
   )
-  const [balance, machines, running, recent, buckets, perMachine, settings] =
-    await Promise.all([
-      getBalance(db, {
-        accountType: "organization",
-        accountId: organizationId,
-      }),
-      listMachines(db, organizationId),
-      db
-        .select(jobColumns)
-        .from(job)
-        .innerJoin(machine, eq(machine.id, job.machineId))
-        .where(
-          and(eq(job.organizationId, organizationId), isNull(job.completedAt))
-        )
-        .orderBy(desc(job.startedAt))
-        .limit(50),
-      db
-        .select(jobColumns)
-        .from(job)
-        .innerJoin(machine, eq(machine.id, job.machineId))
-        .where(eq(job.organizationId, organizationId))
-        .orderBy(desc(job.startedAt))
-        .limit(12),
-      db
-        .select({
-          hour: hour.as("hour"),
-          vcpus: job.vcpus,
-          jobs: sql<number>`count(*)`.as("jobs"),
-          failed: sql<number>`coalesce(sum(${job.result} = 'failed'), 0)`.as(
-            "failed"
-          ),
-          seconds: seconds.as("seconds"),
-          price: sql<number>`coalesce(sum(${price}), 0)`.as("total"),
-        })
-        .from(job)
-        .where(inWindow)
-        .groupBy(sql`1`, job.vcpus),
-      db
-        .select({
-          machineId: job.machineId,
-          jobs: sql<number>`count(*)`.as("jobs"),
-          seconds: seconds.as("seconds"),
-        })
-        .from(job)
-        .where(inWindow)
-        .groupBy(job.machineId),
-      db
-        .select({ destination: poolSettings.earningsDestination })
-        .from(poolSettings)
-        .where(eq(poolSettings.organizationId, organizationId))
-        .limit(1),
-    ])
+  const [
+    balance,
+    machines,
+    running,
+    recent,
+    buckets,
+    perMachine,
+    settings,
+    sizes,
+  ] = await Promise.all([
+    getBalance(db, {
+      accountType: "organization",
+      accountId: organizationId,
+    }),
+    listMachines(db, organizationId),
+    db
+      .select(jobColumns)
+      .from(job)
+      .innerJoin(machine, eq(machine.id, job.machineId))
+      .where(
+        and(eq(job.organizationId, organizationId), isNull(job.completedAt))
+      )
+      .orderBy(desc(job.startedAt))
+      .limit(50),
+    db
+      .select(jobColumns)
+      .from(job)
+      .innerJoin(machine, eq(machine.id, job.machineId))
+      .where(eq(job.organizationId, organizationId))
+      .orderBy(desc(job.startedAt))
+      .limit(12),
+    db
+      .select({
+        hour: hour.as("hour"),
+        vcpus: job.vcpus,
+        jobs: sql<number>`count(*)`.as("jobs"),
+        failed: sql<number>`coalesce(sum(${job.result} = 'failed'), 0)`.as(
+          "failed"
+        ),
+        seconds: seconds.as("seconds"),
+        price: sql<number>`coalesce(sum(${price}), 0)`.as("total"),
+      })
+      .from(job)
+      .where(inWindow)
+      .groupBy(sql`1`, job.vcpus),
+    db
+      .select({
+        machineId: job.machineId,
+        jobs: sql<number>`count(*)`.as("jobs"),
+        seconds: seconds.as("seconds"),
+      })
+      .from(job)
+      .where(inWindow)
+      .groupBy(job.machineId),
+    db
+      .select({ destination: poolSettings.earningsDestination })
+      .from(poolSettings)
+      .where(eq(poolSettings.organizationId, organizationId))
+      .limit(1),
+    db
+      .select({
+        vcpus: job.vcpus,
+        jobs: sql<number>`count(*)`.as("jobs"),
+        seconds: seconds.as("seconds"),
+        price: sql<number>`coalesce(sum(${price}), 0)`.as("total"),
+      })
+      .from(job)
+      .where(
+        and(eq(job.organizationId, organizationId), isNotNull(job.completedAt))
+      )
+      .groupBy(job.vcpus),
+  ])
 
   const hours: LiveHour[] = Array.from({ length: HOURS }, (_, index) => ({
     at: (thisHour - HOURS + 1 + index) * HOUR,
@@ -216,11 +245,20 @@ export async function getLiveSnapshot(
     slot.githubUsd +=
       (Number(bucket.seconds) / 60) * (github[bucket.vcpus] ?? 0)
   }
+  const lifetime = { jobs: 0, seconds: 0, price: 0, githubUsd: 0 }
+  for (const size of sizes) {
+    lifetime.jobs += Number(size.jobs)
+    lifetime.seconds += Number(size.seconds)
+    lifetime.price += Number(size.price)
+    lifetime.githubUsd +=
+      (Number(size.seconds) / 60) * (github[size.vcpus] ?? 0)
+  }
   const work = new Map(perMachine.map((row) => [row.machineId, row]))
   return {
     now: now.getTime(),
     balance,
     earnsBack: settings[0]?.destination !== "developer",
+    lifetime,
     machines: machines.map((row) => ({
       id: row.id,
       name: row.name,

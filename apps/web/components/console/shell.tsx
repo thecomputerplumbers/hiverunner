@@ -11,7 +11,7 @@ import { cn } from "@workspace/ui/lib/utils"
 
 import product from "@/config/product.json"
 import { HiveMark } from "@/components/marketing/hive-mark"
-import { formatMoney, formatUtc } from "./format"
+import { formatMoney, formatUsd, formatUtc } from "./format"
 import { useLive, useNow } from "./live"
 
 const nav = (
@@ -128,14 +128,14 @@ export function ConsoleShell({
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-6 pb-16 sm:px-6">
-        <h1 className="mb-5 flex items-baseline gap-2 font-mono text-lg font-medium tracking-tight">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-8 pb-20 sm:px-6">
+        <h1 className="mb-6 flex items-baseline gap-2 font-mono text-lg font-medium tracking-tight">
           <span aria-hidden="true" className="text-primary">
             ~/
           </span>
           {title}
         </h1>
-        <div className="flex flex-col gap-4">{children}</div>
+        <div className="flex flex-col gap-8">{children}</div>
       </main>
 
       <StatusLine pool={organization?.name} />
@@ -161,6 +161,16 @@ function StatusLine({ pool }: { pool?: string }) {
     ["running", String(snapshot.running.length), "/jobs"],
     ["vcpu", `${inUse}/${capacity}`],
     ["balance", formatMoney(snapshot.balance), "/wallet"],
+    [
+      "saved",
+      formatUsd(
+        Math.max(
+          0,
+          snapshot.lifetime.githubUsd - snapshot.lifetime.price / 1_000_000
+        )
+      ),
+      "/dashboard",
+    ],
   ]
   return (
     <footer className="fixed inset-x-0 bottom-0 z-30 flex h-7 items-stretch border-t border-border bg-background font-mono text-[0.7rem] leading-none">

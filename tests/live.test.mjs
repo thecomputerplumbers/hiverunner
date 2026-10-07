@@ -91,6 +91,11 @@ test("the snapshot counts the window by the hour and prices it as the balance sa
   )
   assert.equal(live.balance, 5_000_000 - 4 * 3750)
   assert.equal(live.earnsBack, true)
+  // Savings count every finished job, however old, and none still running.
+  assert.deepEqual(
+    { ...live.lifetime, githubUsd: Math.round(live.lifetime.githubUsd * 1e6) },
+    { jobs: 4, seconds: 2400, price: 4 * 3750, githubUsd: 200_000 }
+  )
   assert.deepEqual(
     live.running.map((job) => [job.id, job.price, job.completedAt]),
     [[running, null, null]]

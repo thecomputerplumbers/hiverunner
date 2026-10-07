@@ -5,13 +5,6 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { RUNNER_SIZES, privatePoolUsdPerMinute } from "@workspace/pricing"
 
-import {
-  CostLines,
-  HourHeat,
-  JobsPerDay,
-  Spark,
-  byDay,
-} from "@/components/console/charts"
 import { CombLegend, PoolComb } from "@/components/console/comb"
 import {
   formatMinutes,
@@ -21,10 +14,7 @@ import {
 import { InvitePanel } from "@/components/console/invite"
 import { JobTable, RunningJobs } from "@/components/console/jobs"
 import { useLive } from "@/components/console/live"
-import { Panel, Snippet, Stat } from "@/components/console/panel"
-
-/** Cores a Mac keeps for the person using it, as the coordinator does. */
-const OWNER_CORES = 2
+import { Panel, Snippet } from "@/components/console/panel"
 
 /**
  * The pool, now. Everything here redraws from the polled snapshot; the
@@ -48,38 +38,23 @@ export function LiveDashboard({
   }, [counted, router])
 
   if (!snapshot) return null
-  const { machines, running, recent, hours, balance, earnsBack } = snapshot
-  const days = byDay(hours)
-  const last24 = hours.slice(-24)
-  const sum = (
-    rows: typeof hours,
-    key: "jobs" | "failed" | "seconds" | "price"
-  ) => rows.reduce((total, row) => total + row[key], 0)
-  const jobs24 = sum(last24, "jobs")
-  const failed24 = sum(last24, "failed")
-  const seconds = sum(hours, "seconds")
-  const spent = sum(hours, "price") / 1_000_000
-  const github = hours.reduce((total, hour) => total + hour.githubUsd, 0)
-  const weekSpend = sum(hours.slice(-24 * 7), "price") / 7
+  const { machines, running, recent, balance, earnsBack, lifetime, hours } =
+    snapshot
+  const weekSpend =
+    hours.slice(-24 * 7).reduce((total, hour) => total + hour.price, 0) / 7
   const runway = weekSpend > 0 ? balance / weekSpend : null
-  const awake = machines.filter(
-    (machine) => machine.presence === "online" || machine.presence === "busy"
-  )
-  const capacity = awake.reduce(
-    (total, machine) => total + Math.max(0, machine.cores - OWNER_CORES),
-    0
-  )
-  const inUse = running.reduce((total, job) => total + job.vcpus, 0)
   const size = RUNNER_SIZES[0]
   const minutesLeft = Math.max(
     0,
     Math.floor(balance / 1_000_000 / privatePoolUsdPerMinute(size.vcpus).net)
   )
-  const worked = seconds > 0
+  const worked = lifetime.jobs > 0
 
   return (
     <>
-      <div className="grid gap-4 lg:grid-cols-5">
+      <Savings lifetime={lifetime} />
+
+      <div className="grid gap-6 lg:grid-cols-5">
         <Panel
           title="pool"
           aside={
@@ -88,43 +63,14 @@ export function LiveDashboard({
             </Link>
           }
           className="lg:col-span-3"
-          bodyClassName="flex flex-col gap-4"
+          bodyClassName="flex flex-col gap-5"
         >
           <PoolComb
             machines={machines}
             running={running}
             seat={{ label: "+ invite", href: "#invite" }}
           />
-          <div className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between font-mono text-xs">
-              <span className="text-muted-foreground">vCPUs running jobs</span>
-              <span className="tabular-nums">
-                {inUse} of {capacity}
-              </span>
-            </div>
-            <div
-              className="flex h-2 gap-px"
-              role="img"
-              aria-label={`${inUse} of ${capacity} vCPUs are running jobs`}
-            >
-              {capacity ? (
-                Array.from({ length: Math.min(capacity, 96) }, (_, index) => (
-                  <span
-                    key={index}
-                    className={
-                      index <
-                      Math.round((inUse / capacity) * Math.min(capacity, 96))
-                        ? "flex-1 bg-primary"
-                        : "flex-1 bg-foreground/10"
-                    }
-                  />
-                ))
-              ) : (
-                <span className="flex-1 bg-foreground/10" />
-              )}
-            </div>
-            <CombLegend machines={machines} />
-          </div>
+          <CombLegend machines={machines} />
         </Panel>
         <Panel
           title="running now"
@@ -135,110 +81,141 @@ export function LiveDashboard({
         </Panel>
       </div>
 
-      {machines.length < 5 ? (
-        <InvitePanel machines={machines} {...invite} />
-      ) : null}
-
-      <section
-        aria-label="Totals"
-        className="grid border border-border bg-card/50 sm:grid-cols-2 lg:grid-cols-4 [&>div]:border-border lg:[&>div+div]:border-l sm:[&>div:nth-child(even)]:border-l max-sm:[&>div:nth-child(n+2)]:border-t max-lg:[&>div:nth-child(n+3)]:border-t"
-      >
-        <Stat label="balance" value={formatMoney(balance)}>
-          {runway === null
-            ? `About ${minutesLeft.toLocaleString("en-US")} minutes on a ${size.vcpus}-vCPU runner.`
-            : `About ${runway >= 365 ? "a year or more" : `${Math.max(1, Math.round(runway))} days`} at this week's pace.`}{" "}
-          <Link className="text-foreground underline" href="/wallet">
-            {balance > 0 ? "Billing" : "Add funds"}
-          </Link>
-        </Stat>
-        <Stat label="jobs, last 24 h" value={jobs24.toLocaleString("en-US")}>
-          <Spark values={last24.map((hour) => hour.jobs)} className="mb-1.5" />
-          {jobs24
-            ? `${Math.round(((jobs24 - failed24) / jobs24) * 100)}% passed`
-            : "None yet today."}
-        </Stat>
-        <Stat label="runner minutes, 14 days" value={formatMinutes(seconds)}>
-          <Spark values={days.map((day) => day.seconds)} className="mb-1.5" />
-          {formatUsd(spent)} spent
-        </Stat>
-        <Stat
-          label="saved against GitHub-hosted"
-          value={formatUsd(Math.max(0, github - spent))}
-        >
-          {worked && spent > 0
-            ? `${(github / spent).toFixed(1)}× cheaper for the same minutes, at list price.`
-            : "Counts from your first job."}
-        </Stat>
-      </section>
+      <InvitePanel machines={machines} {...invite} />
 
       {worked ? (
-        <>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Panel title="jobs per day" aside="14 days, UTC">
-              <JobsPerDay days={days} />
-            </Panel>
-            <Panel title="cost of the same minutes" aside="running total">
-              <CostLines days={days} />
-            </Panel>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-5">
-            <Panel
-              title="latest jobs"
-              aside={
-                <Link href="/jobs" className="hover:text-foreground">
-                  all jobs
-                </Link>
-              }
-              className="lg:col-span-3"
-            >
-              <JobTable jobs={recent} earnsBack={earnsBack} />
-            </Panel>
-            <Panel title="when the pool works" className="lg:col-span-2">
-              <HourHeat hours={hours} />
-            </Panel>
-          </div>
-        </>
+        <Panel
+          title="latest jobs"
+          aside={
+            <Link href="/jobs" className="hover:text-foreground">
+              all jobs
+            </Link>
+          }
+        >
+          <JobTable jobs={recent.slice(0, 6)} earnsBack={earnsBack} />
+        </Panel>
       ) : null}
 
-      {machines.length >= 5 ? (
-        <InvitePanel machines={machines} {...invite} />
-      ) : null}
+      <p className="text-sm text-muted-foreground">
+        <span className="font-mono text-foreground tabular-nums">
+          {formatMoney(balance)}
+        </span>{" "}
+        of credit left, about{" "}
+        {runway === null
+          ? `${minutesLeft.toLocaleString("en-US")} minutes on a ${size.vcpus}-vCPU runner`
+          : `${runway >= 365 ? "a year or more" : `${Math.max(1, Math.round(runway))} days`} at this week's pace`}
+        .{" "}
+        <Link className="text-foreground underline" href="/wallet">
+          {balance > 0 ? "Billing" : "Add funds"}
+        </Link>
+      </p>
 
-      <Panel
-        title="use it in a workflow"
-        bodyClassName="grid gap-4 md:grid-cols-2"
-      >
-        <div className="flex flex-col gap-3">
-          <Snippet>{`jobs:\n  test:\n    runs-on: ${size.label}`}</Snippet>
-          <p className="text-sm text-muted-foreground">
-            Change one line. Jobs wait in GitHub&apos;s queue until a Mac in
-            your pool is free.
-          </p>
-        </div>
-        <table className="h-fit w-full font-mono text-xs">
-          <thead>
-            <tr className="text-left text-muted-foreground [&>th]:pb-2 [&>th]:font-normal">
-              <th>runs-on</th>
-              <th>vCPUs</th>
-              <th className="text-right">per minute</th>
-            </tr>
-          </thead>
-          <tbody>
-            {RUNNER_SIZES.map((runner) => (
-              <tr
-                key={runner.label}
-                className="border-t border-border [&>td]:py-2"
-              >
-                <td className="text-primary">{runner.label}</td>
-                <td>{runner.vcpus}</td>
-                <td className="text-right tabular-nums">
-                  ${privatePoolUsdPerMinute(runner.vcpus).net.toFixed(5)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
+      {worked ? null : <Workflow />}
     </>
+  )
+}
+
+/**
+ * The one number the page is for: what this pool has kept, against the list
+ * price of the same minutes on GitHub-hosted runners. Two bars to the same
+ * scale say the rest.
+ */
+function Savings({
+  lifetime,
+}: {
+  lifetime: NonNullable<ReturnType<typeof useLive>["snapshot"]>["lifetime"]
+}) {
+  const spent = lifetime.price / 1_000_000
+  const saved = Math.max(0, lifetime.githubUsd - spent)
+  const bars: Array<[string, number, string]> = [
+    ["GitHub-hosted", lifetime.githubUsd, "bg-foreground/25"],
+    ["this pool", spent, "bg-primary"],
+  ]
+  return (
+    <section
+      aria-label="Savings"
+      className="grid items-end gap-x-12 gap-y-6 py-4 lg:grid-cols-2"
+    >
+      <div className="flex flex-col gap-2">
+        <p className="font-mono text-sm text-muted-foreground">saved so far</p>
+        <p className="font-mono text-6xl font-medium tracking-tight text-primary tabular-nums sm:text-7xl">
+          {formatUsd(saved)}
+        </p>
+        <p className="max-w-md text-muted-foreground">
+          {lifetime.jobs && spent > 0 ? (
+            <>
+              <span className="text-foreground">
+                {(lifetime.githubUsd / spent).toFixed(1)}× cheaper
+              </span>{" "}
+              than GitHub-hosted runners, over {formatMinutes(lifetime.seconds)}{" "}
+              minutes and {lifetime.jobs.toLocaleString("en-US")} jobs.
+            </>
+          ) : (
+            "Counts from your first job, against GitHub-hosted list price for the same minutes."
+          )}
+        </p>
+      </div>
+      {lifetime.jobs ? (
+        <dl className="flex flex-col gap-4 font-mono text-xs">
+          {bars.map(([label, usd, tone]) => (
+            <div key={label} className="flex flex-col gap-1.5">
+              <div className="flex items-baseline justify-between">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="text-sm tabular-nums">{formatUsd(usd)}</dd>
+              </div>
+              <span className="block h-3 bg-foreground/[0.04]">
+                <span
+                  className={`block h-full ${tone}`}
+                  style={{
+                    width: `${Math.max(1, (usd / Math.max(lifetime.githubUsd, 0.0001)) * 100)}%`,
+                  }}
+                />
+              </span>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </section>
+  )
+}
+
+function Workflow() {
+  const size = RUNNER_SIZES[0]
+  return (
+    <Panel
+      title="use it in a workflow"
+      bodyClassName="grid gap-6 md:grid-cols-2"
+    >
+      <div className="flex flex-col gap-3">
+        <Snippet>{`jobs:\n  test:\n    runs-on: ${size.label}`}</Snippet>
+        <p className="text-sm text-muted-foreground">
+          Change one line. Jobs wait in GitHub&apos;s queue until a Mac in your
+          pool is free.
+        </p>
+      </div>
+      <table className="h-fit w-full font-mono text-xs">
+        <thead>
+          <tr className="text-left text-muted-foreground [&>th]:pb-2 [&>th]:font-normal">
+            <th>runs-on</th>
+            <th>vCPUs</th>
+            <th className="text-right">per minute</th>
+          </tr>
+        </thead>
+        <tbody>
+          {RUNNER_SIZES.map((runner) => (
+            <tr
+              key={runner.label}
+              className="border-t border-border [&>td]:py-2"
+            >
+              <td className="text-primary">{runner.label}</td>
+              <td>{runner.vcpus}</td>
+              <td className="text-right tabular-nums">
+                ${privatePoolUsdPerMinute(runner.vcpus).net.toFixed(5)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
   )
 }
