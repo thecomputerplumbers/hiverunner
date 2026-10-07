@@ -10,6 +10,7 @@ import {
   privatePoolUsdPerMinute,
 } from "@workspace/pricing"
 import { Code } from "@/components/marketing/code"
+import { CostChart } from "@/components/marketing/cost-chart"
 import {
   formatCount,
   formatIsoDate,
@@ -28,7 +29,7 @@ export const metadata = {
 
 const percent = new Intl.NumberFormat("en-US", { style: "percent" })
 const base = privatePoolUsdPerMinute(RUNNER_SIZES[0].vcpus)
-const trialMinutes = Math.floor(TRIAL_GRANT_USD / base.gross)
+const trialMinutes = Math.floor(TRIAL_GRANT_USD / base.net)
 
 export default function PricingPage() {
   return (
@@ -41,17 +42,20 @@ export default function PricingPage() {
         <PricingCalculator />
       </Container>
 
+      <Band title="A month as usage grows">
+        <CostChart vcpus={RUNNER_SIZES[0].vcpus} />
+      </Band>
+
       <Band title="Price per minute">
         <div className="overflow-x-auto">
           <table className="w-full min-w-xl text-left text-sm">
             <caption className="sr-only">
               Per-minute prices for Linux arm64 runners by size
             </caption>
-            <thead className="text-muted-foreground">
+            <thead className="font-mono text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 pr-4 font-medium">Size</th>
                 <th className="py-2 pr-4 font-medium">HiveWorker</th>
-                <th className="py-2 pr-4 font-medium">HiveWorker, net</th>
                 <th className="py-2 pr-4 font-medium">
                   {COMPETITOR_RATES.github.name}
                 </th>
@@ -60,7 +64,7 @@ export default function PricingPage() {
                 </th>
               </tr>
             </thead>
-            <tbody className="tabular-nums">
+            <tbody className="font-mono tabular-nums">
               {RUNNER_SIZES.map((size) => {
                 const hive = privatePoolUsdPerMinute(size.vcpus)
                 return (
@@ -68,10 +72,7 @@ export default function PricingPage() {
                     <th className="py-3 pr-4 font-medium">
                       {size.vcpus} vCPU <Code>{size.label}</Code>
                     </th>
-                    <td className="py-3 pr-4 font-semibold">
-                      {formatRate(hive.gross)}
-                    </td>
-                    <td className="py-3 pr-4 font-semibold">
+                    <td className="py-3 pr-4 font-medium text-primary">
                       {formatRate(hive.net)}
                     </td>
                     <td className="py-3 pr-4">
@@ -100,11 +101,11 @@ export default function PricingPage() {
             Blacksmith's pricing page
           </a>
           . Free minutes and plan allowances are left out. HiveWorker prices are
-          at reference speed in a private pool.
+          at reference speed in a private pool whose machines are your own.
         </p>
       </Band>
 
-      <Band title="Price paid and net cost">
+      <Band title="How the price works">
         <p className="leading-7">
           Your organization pays the full price of each job. HiveWorker keeps{" "}
           {percent.format(JOB_TAX_RATE)} of it, which is its only revenue, and
@@ -114,8 +115,8 @@ export default function PricingPage() {
           In a private pool that machine belongs to your organization. When the
           pool is set to pay the organization's wallet, the{" "}
           {percent.format(1 - JOB_TAX_RATE)} comes straight back and can pay for
-          the next job. The net cost is what is left: {formatRate(base.net)} for
-          a {RUNNER_SIZES[0].vcpus} vCPU minute.
+          the next job. The price is what is left: {formatRate(base.net)} for a{" "}
+          {RUNNER_SIZES[0].vcpus} vCPU minute.
         </p>
       </Band>
 
@@ -123,10 +124,11 @@ export default function PricingPage() {
         <p className="leading-7">
           One compute unit is one vCPU for one minute at reference speed. The
           reference is one core of a standard GitHub-hosted runner. A compute
-          unit costs {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)} in a private pool.
+          unit is charged at {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)} in a
+          private pool, before the machine's share comes back.
         </p>
-        <p className="rounded-lg bg-muted px-4 py-3 font-medium">
-          Job price = minutes × vCPUs × speed score × price per compute unit
+        <p className="border border-border px-4 py-3 font-mono text-sm">
+          Job charge = minutes × vCPUs × speed score × rate per compute unit
         </p>
         <p className="leading-7 text-muted-foreground">
           Minutes are counted from GitHub's own job start and finish, rounded up
@@ -150,8 +152,7 @@ export default function PricingPage() {
         <p className="leading-7 text-muted-foreground">
           {formatUsd(TRIAL_GRANT_USD)} pays for about{" "}
           {formatCount(trialMinutes)} minutes on the {RUNNER_SIZES[0].vcpus}{" "}
-          vCPU runner at the full price, and for more when your own machines
-          earn the payments back.
+          vCPU runner on your own machines.
         </p>
       </Band>
 

@@ -13,19 +13,21 @@ import { NavLink } from "./nav-link"
 import { MARKETING_NAV } from "./site"
 import { RouteLink } from "@/components/route-link"
 
+/** Square, mono, and underlined in honey on the section being read. */
+const navLink =
+  "rounded-none font-mono text-xs decoration-primary decoration-2 underline-offset-8 hover:bg-transparent data-active:bg-transparent data-active:underline"
+
 export function MarketingHeader() {
   return (
-    <div className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-md">
+    <div className="sticky top-0 z-30 border-b border-border bg-background">
       <SiteHeader variant="plain" className="px-1 pt-0 sm:px-2 sm:pt-0">
         <Brand render={<Link href="/" />} className="text-base">
           <HiveMark className="size-6" />
-          <BrandWordmark className="font-semibold">
-            {product.name}
-          </BrandWordmark>
+          <BrandWordmark className="font-medium">{product.name}</BrandWordmark>
         </Brand>
         <SiteHeaderNav aria-label="Main" className="hidden md:flex">
           {MARKETING_NAV.map((item) => (
-            <NavLink key={item.href} href={item.href}>
+            <NavLink key={item.href} href={item.href} className={navLink}>
               {item.label}
             </NavLink>
           ))}
@@ -35,12 +37,16 @@ export function MarketingHeader() {
           <Button
             nativeButton={false}
             variant="ghost"
-            className="hidden sm:inline-flex"
+            className="hidden font-mono text-xs sm:inline-flex"
             render={<Link href="/sign-in" />}
           >
             Sign in
           </Button>
-          <Button nativeButton={false} render={<RouteLink to="/install" />}>
+          <Button
+            nativeButton={false}
+            className="font-mono text-xs"
+            render={<RouteLink to="/install" />}
+          >
             Install
           </Button>
         </SiteHeaderActions>

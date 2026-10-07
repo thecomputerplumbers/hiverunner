@@ -30,3 +30,8 @@ export function formatIsoDate(date: string) {
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`))
 }
+
+/** How many times one price is another: "20×", or "2.5×" when it is not whole. */
+export function formatMultiple(ratio: number) {
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(ratio)}×`
+}

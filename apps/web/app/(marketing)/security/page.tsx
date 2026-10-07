@@ -49,7 +49,7 @@ export default function SecurityPage() {
         </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-xl text-left text-sm">
-            <thead className="text-muted-foreground">
+            <thead className="font-mono text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 pr-4 font-medium">Permission</th>
                 <th className="py-2 pr-4 font-medium">Access</th>
@@ -176,8 +176,8 @@ function Fact({
   children: React.ReactNode
 }) {
   return (
-    <div className="border-l-2 border-primary pl-4">
-      <dt className="font-semibold">{title}</dt>
+    <div className="border-t border-border pt-4">
+      <dt className="font-mono text-sm font-medium">{title}</dt>
       <dd className="mt-1.5 leading-7 text-muted-foreground">{children}</dd>
     </div>
   )

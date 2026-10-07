@@ -22,9 +22,9 @@ export default function DownloadPage() {
         {DAEMON_RELEASED ? null : (
           <div
             role="note"
-            className="rounded-xl border-2 border-primary bg-primary/10 p-5 sm:p-6"
+            className="border border-primary bg-primary/10 p-5 sm:p-6"
           >
-            <h2 className="font-heading text-xl font-semibold tracking-tight">
+            <h2 className="font-heading text-lg font-medium tracking-tight">
               Not released yet
             </h2>
             <p className="mt-2 max-w-2xl leading-7">

@@ -47,7 +47,7 @@ export function MarketingFooter() {
         <SiteFooterColumn className="gap-3">
           <Brand className="text-base">
             <HiveMark className="size-6" />
-            <BrandWordmark className="font-semibold">
+            <BrandWordmark className="font-medium">
               {product.name}
             </BrandWordmark>
           </Brand>
@@ -57,7 +57,7 @@ export function MarketingFooter() {
         </SiteFooterColumn>
         {COLUMNS.map((column) => (
           <SiteFooterColumn key={column.heading}>
-            <SiteFooterHeading className="tracking-normal normal-case">
+            <SiteFooterHeading className="font-mono tracking-normal text-foreground normal-case">
               {column.heading}
             </SiteFooterHeading>
             {column.links.map((link) => (

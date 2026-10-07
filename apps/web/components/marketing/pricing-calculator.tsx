@@ -40,20 +40,15 @@ export function PricingCalculator() {
       usd: month.blacksmith,
       ours: false,
     },
-    { label: "HiveWorker, price paid", usd: month.gross, ours: true },
-    {
-      label: "HiveWorker, net of what your machines earn back",
-      usd: month.net,
-      ours: true,
-    },
+    { label: "HiveWorker", usd: month.net, ours: true },
   ]
   const widest = Math.max(...rows.map((row) => row.usd))
 
   return (
-    <div className="grid gap-8 rounded-xl border border-border bg-card p-5 sm:p-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-12">
-      <div className="flex flex-col gap-7">
+    <div className="grid border border-border lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="flex flex-col gap-7 border-b border-border p-5 sm:p-8 lg:border-r lg:border-b-0">
         <div className="flex flex-col gap-3">
-          <label htmlFor={`${id}-minutes`} className="font-medium">
+          <label htmlFor={`${id}-minutes`} className="font-mono text-sm">
             Minutes per month
           </label>
           <Input
@@ -67,7 +62,7 @@ export function PricingCalculator() {
               const next = Math.floor(event.target.valueAsNumber)
               setMinutes(Number.isFinite(next) && next > 0 ? next : 0)
             }}
-            className="h-11 text-lg tabular-nums md:text-lg"
+            className="h-12 rounded-none font-mono text-xl tabular-nums md:text-xl"
           />
           {/* A native range: Base UI's slider needs a CJS shim that Vite cannot
               serve while @base-ui/react is excluded from pre-bundling. */}
@@ -82,18 +77,18 @@ export function PricingCalculator() {
             }
             className="h-6 w-full cursor-pointer accent-primary"
           />
-          <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+          <div className="flex justify-between font-mono text-xs text-muted-foreground tabular-nums">
             <span>{formatCount(MIN_MINUTES)}</span>
             <span>{formatCount(MAX_MINUTES)}</span>
           </div>
         </div>
         <fieldset className="flex flex-col gap-3">
-          <legend className="mb-3 font-medium">Runner size</legend>
+          <legend className="mb-3 font-mono text-sm">Runner size</legend>
           <div className="grid grid-cols-3 gap-2">
             {RUNNER_SIZES.map((size) => (
               <label
                 key={size.label}
-                className="flex cursor-pointer flex-col gap-0.5 rounded-lg border border-border px-3 py-2 text-sm has-checked:border-primary has-checked:bg-primary/10 has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
+                className="flex cursor-pointer flex-col gap-0.5 border border-border px-3 py-2.5 text-sm has-checked:border-primary has-checked:bg-primary/10 has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
               >
                 <input
                   type="radio"
@@ -102,7 +97,7 @@ export function PricingCalculator() {
                   checked={vcpus === size.vcpus}
                   onChange={() => setVcpus(size.vcpus)}
                 />
-                <span className="font-medium">{size.vcpus} vCPU</span>
+                <span className="font-mono font-medium">{size.vcpus} vCPU</span>
                 <code className="font-mono text-xs text-muted-foreground">
                   {size.label}
                 </code>
@@ -111,27 +106,36 @@ export function PricingCalculator() {
           </div>
         </fieldset>
       </div>
-      <div className="flex flex-col gap-5" aria-live="polite">
-        <p className="font-medium">
-          {formatCount(minutes)} minutes a month on {vcpus} vCPU Linux arm64
-        </p>
-        <ul className="flex flex-col gap-4">
+      <div className="flex flex-col gap-6 p-5 sm:p-8" aria-live="polite">
+        <div>
+          <p className="font-mono text-sm text-muted-foreground">
+            {formatCount(minutes)} minutes a month on {vcpus} vCPU Linux arm64
+          </p>
+          <p className="mt-3 font-heading text-4xl font-medium tracking-tight tabular-nums sm:text-5xl">
+            {formatUsd(month.net)}
+          </p>
+          <p className="mt-2 leading-7 text-muted-foreground">
+            On your own Macs, where {COMPETITOR_RATES.github.name} runners would
+            cost {formatUsd(month.github)}.
+          </p>
+        </div>
+        <ul className="flex flex-col gap-4 border-t border-border pt-6">
           {rows.map((row) => (
             <li key={row.label} className="flex flex-col gap-1.5">
               <div className="flex items-baseline justify-between gap-4">
-                <span className="text-sm text-muted-foreground">
+                <span className="font-mono text-xs text-muted-foreground">
                   {row.label}
                 </span>
-                <span className="text-lg font-semibold tabular-nums">
+                <span className="font-mono font-medium tabular-nums">
                   {formatUsd(row.usd)}
                 </span>
               </div>
-              <div className="h-2.5 rounded-full bg-muted">
+              <div className="h-5">
                 <div
                   className={
                     row.ours
-                      ? "h-full min-w-1 rounded-full bg-primary"
-                      : "h-full min-w-1 rounded-full bg-chart-4"
+                      ? "h-full min-w-1 bg-primary transition-[width] duration-200"
+                      : "h-full min-w-1 bg-foreground/25 transition-[width] duration-200"
                   }
                   style={{
                     width: widest > 0 ? `${(row.usd / widest) * 100}%` : 0,
@@ -142,9 +146,9 @@ export function PricingCalculator() {
           ))}
         </ul>
         <p className="text-sm leading-6 text-muted-foreground">
-          USD estimates at reference speed. The net figure applies when every
-          job ran on your own organization's machines and the pool pays the
-          organization's wallet.
+          USD estimates at reference speed, for jobs that run on your own
+          organization's machines with the pool paying the organization's
+          wallet.
         </p>
       </div>
     </div>

@@ -21,21 +21,22 @@ export function Pricing() {
       <p>
         Every job has a price. There is no subscription and no platform fee. The{" "}
         <Link href="/pricing">pricing page</Link> has a calculator; this page
-        explains how a single job is priced.
+        explains how a single job is charged and what comes back.
       </p>
 
       <h2 id="compute-unit">The compute unit</h2>
       <p>
         One compute unit is one vCPU for one minute at reference speed. The
         reference is one core of a standard GitHub-hosted runner. In a private
-        pool a compute unit costs {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)},
-        which is also the lowest price the network accepts.
+        pool a compute unit is charged at{" "}
+        {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)}, which is also the lowest rate
+        the network accepts.
       </p>
 
       <h2 id="formula">The formula</h2>
       <p>
         <strong>
-          Job price = minutes × vCPUs × speed score × price per compute unit
+          Job charge = minutes × vCPUs × speed score × rate per compute unit
         </strong>
       </p>
       <ul>
@@ -56,17 +57,20 @@ export function Pricing() {
       <p>
         Example: a job that runs for {example.seconds / 60} minutes on{" "}
         {example.vcpus} vCPUs at speed score {example.speedScore} is billed for{" "}
-        {exampleJob.units} compute units, which is{" "}
-        {formatRate(microTokensToUsd(exampleJob.amount))}.
+        {exampleJob.units} compute units, a charge of{" "}
+        {formatRate(microTokensToUsd(exampleJob.amount))}. On your own machine{" "}
+        {formatRate(microTokensToUsd(exampleJob.earning))} of that comes back,
+        so the job's price is {formatRate(microTokensToUsd(exampleJob.tax))}.
       </p>
 
-      <h2 id="where-it-goes">Where the payment goes</h2>
+      <h2 id="where-it-goes">Where the charge goes</h2>
       <p>
-        HiveWorker keeps {percent.format(JOB_TAX_RATE)} of each job payment. The
-        rest goes to the machine that ran the job. In a private pool that
+        HiveWorker keeps {percent.format(JOB_TAX_RATE)} of each job's charge.
+        The rest goes to the machine that ran the job. In a private pool that
         machine belongs to your organization, so when the pool pays the
-        organization's wallet, the net cost of a job is the{" "}
-        {percent.format(JOB_TAX_RATE)}.
+        organization's wallet, the price of a job is the{" "}
+        {percent.format(JOB_TAX_RATE)}. That is the price quoted everywhere on
+        this site.
       </p>
 
       <h2 id="receipts">Receipts</h2>

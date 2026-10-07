@@ -24,12 +24,15 @@ export function LabelsAndSizes() {
                 <Code>{size.label}</Code>
               </td>
               <td>{size.vcpus}</td>
-              <td>{formatRate(privatePoolUsdPerMinute(size.vcpus).gross)}</td>
+              <td>{formatRate(privatePoolUsdPerMinute(size.vcpus).net)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p>Prices are US dollar estimates at reference speed.</p>
+      <p>
+        Prices are US dollar estimates at reference speed, for jobs that run on
+        your own organization's machines.
+      </p>
 
       <h2 id="example">In a workflow</h2>
       <CodeBlock title=".github/workflows/ci.yml">{`jobs:

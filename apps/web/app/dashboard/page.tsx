@@ -65,7 +65,7 @@ export default async function DashboardPage({
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             About {formatUsdEstimate(balance)}, or{" "}
-            {Math.floor(balance / 1_000_000 / perMinute.gross).toLocaleString(
+            {Math.floor(balance / 1_000_000 / perMinute.net).toLocaleString(
               "en-US"
             )}{" "}
             minutes on a {RUNNER_SIZES[0].vcpus}-vCPU runner.{" "}

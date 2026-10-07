@@ -18,15 +18,15 @@ export function IsolationDiagram({ className }: { className?: string }) {
         GitHub directly. The daemon talks to the HiveWorker coordinator, which
         assigns jobs and never carries job data.
       </figcaption>
-      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 sm:p-4">
-        <p className="font-medium">A developer's Mac</p>
-        <div className="flex min-h-28 flex-col justify-between gap-3 rounded-lg border-2 border-primary bg-primary/10 p-3">
+      <div className="flex flex-col gap-3 border border-border bg-card p-3 sm:p-4">
+        <p className="font-mono font-medium">A developer's Mac</p>
+        <div className="flex min-h-28 flex-col justify-between gap-3 border-2 border-primary bg-primary/10 p-3">
           <p className="font-medium">Throwaway Linux VM</p>
-          <p className="w-fit rounded-md bg-code px-2.5 py-1.5 text-code-foreground">
+          <p className="w-fit bg-code px-2.5 py-1.5 font-mono text-xs text-code-foreground">
             GitHub's runner, one job, then destroyed
           </p>
         </div>
-        <div className="flex min-h-16 flex-col justify-center rounded-lg border border-dashed border-border p-3">
+        <div className="flex min-h-16 flex-col justify-center border border-dashed border-border p-3">
           <p className="font-medium">HiveWorker daemon</p>
           <p className="text-muted-foreground">
             Runs as your user, not root. No inbound ports.
@@ -76,7 +76,7 @@ function Link({
       />
       <div
         className={cn(
-          "flex-1 rounded-lg border p-3",
+          "flex-1 border p-3",
           solid ? "border-primary" : "border-dashed border-border"
         )}
       >
