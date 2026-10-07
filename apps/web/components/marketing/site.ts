@@ -18,7 +18,7 @@ export const COORDINATOR_ORIGIN =
  * published where it downloads from. Every page that shows the command
  * reads this, so flipping it is the whole of announcing a release.
  */
-export const DAEMON_RELEASED = false
+export const DAEMON_RELEASED = true
 
 /** The oldest macOS the daemon runs on. `install.sh` checks the same. */
 export const DAEMON_MIN_MACOS = 13

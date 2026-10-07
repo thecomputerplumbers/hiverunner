@@ -66,8 +66,12 @@ also run a real Actions job on Apple Silicon. See [running jobs](docs/running-jo
 for setup and current limits. The web app and tunnel coordinator are deployed;
 the new execution path still requires release and coordinator secrets.
 
-Still planned: caches, container jobs, the menu bar item, Keychain
-storage, and on-chain payments.
+The daemon is released for Apple Silicon Macs: `curl -fsSL
+https://get.hiveworkr.thecomputerplumbers.com/install.sh | sh`. Building and
+publishing a release is in [deployment](docs/deployment.md).
+
+Still planned: container jobs, the menu bar item, Keychain storage, and
+on-chain payments.
 
 `AGENTS.md` has the rules for working in this codebase: the two databases,
 package boundaries, auth, and the checks.
