@@ -70,18 +70,18 @@ export const RUNNER_SIZES = [
 ] as const
 
 /**
- * Sizes the coordinator serves that the site does not offer yet: no daemon
- * has been released for the machines that run them. Releasing them is moving
- * them into `RUNNER_SIZES`, and reading every page that lists it.
+ * The x64 sizes, which run on Linux x64 machines. They are listed apart from
+ * `RUNNER_SIZES` because the site's prices, calculator and examples are all
+ * written for arm64, the architecture every Mac in a hive has.
  */
-export const UNRELEASED_RUNNER_SIZES = [
+export const X64_RUNNER_SIZES = [
   { label: "hive-x64", vcpus: 2, arch: "x64" },
   { label: "hive-x64-4cpu", vcpus: 4, arch: "x64" },
   { label: "hive-x64-8cpu", vcpus: 8, arch: "x64" },
 ] as const
 
 /** Every label a job can ask for, released or not. */
-export const ALL_RUNNER_SIZES = [...RUNNER_SIZES, ...UNRELEASED_RUNNER_SIZES]
+export const ALL_RUNNER_SIZES = [...RUNNER_SIZES, ...X64_RUNNER_SIZES]
 
 export type RunnerLabel = (typeof ALL_RUNNER_SIZES)[number]["label"]
 export type RunnerSize = {

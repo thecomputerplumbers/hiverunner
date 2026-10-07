@@ -89,9 +89,10 @@ label is created when the first x64 machine able to serve it comes online.
 Savings on the dashboard compare each job with GitHub's price for its own
 architecture.
 
-What is missing is the machine: there is no released daemon for Linux, and
-these labels are not offered on the site (`UNRELEASED_RUNNER_SIZES` in
-`@workspace/pricing`). The guest image for them builds today:
+The daemon for Linux is released for both architectures, and real jobs have
+run on each. The x64 labels are `X64_RUNNER_SIZES` in `@workspace/pricing`,
+listed apart from `RUNNER_SIZES` because the site's prices and examples are
+written for arm64. The x64 guest image is built with:
 
 ```sh
 GUEST_ARCH=x64 ./daemon/image/build.sh /path/to/image

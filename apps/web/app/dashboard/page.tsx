@@ -145,9 +145,9 @@ function FirstJob({
           <>
             {DAEMON_RELEASED ? (
               <p>
-                On any Apple Silicon Mac, paste this into Terminal and sign in
-                with GitHub when the browser opens. Anyone in {organization}{" "}
-                can. It asks for no password.
+                On any Apple Silicon Mac or Linux machine with KVM, paste this
+                into a terminal and sign in with GitHub when the browser opens.
+                Anyone in {organization} can. It asks for no password.
               </p>
             ) : (
               <p>

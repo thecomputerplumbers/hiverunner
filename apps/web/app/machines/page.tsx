@@ -54,8 +54,9 @@ export default async function MachinesPage() {
         bodyClassName="flex max-w-3xl flex-col gap-3"
       >
         <p className="text-sm text-muted-foreground">
-          On any Apple Silicon Mac, paste this into Terminal and sign in with
-          GitHub when the browser opens. It appears here as soon as it connects.{" "}
+          On any Apple Silicon Mac or Linux machine with KVM, paste this into a
+          terminal and sign in with GitHub when the browser opens. It appears
+          here as soon as it connects.{" "}
           <Link className="text-foreground underline" href="/download">
             What it installs
           </Link>

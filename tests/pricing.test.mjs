@@ -5,7 +5,7 @@ import {
   COMPETITOR_RATES,
   FLOOR_RATE,
   RUNNER_SIZES,
-  UNRELEASED_RUNNER_SIZES,
+  X64_RUNNER_SIZES,
   compareMonthlyUsd,
   competitorUsdPerMinuteForLabel,
   runnerArch,
@@ -70,7 +70,7 @@ test("a label names one size and one architecture", () => {
     ]
   )
   assert.deepEqual(
-    UNRELEASED_RUNNER_SIZES.map((size) => [size.label, size.vcpus, size.arch]),
+    X64_RUNNER_SIZES.map((size) => [size.label, size.vcpus, size.arch]),
     [
       ["hive-x64", 2, "x64"],
       ["hive-x64-4cpu", 4, "x64"],

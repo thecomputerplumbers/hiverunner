@@ -22,16 +22,17 @@ export function Faq() {
 
       <dt>Which jobs can run on it?</dt>
       <dd>
-        Linux arm64 jobs. Linux x64 jobs have{" "}
-        <Link href="/docs/labels-and-sizes#x64">labels of their own</Link>,
-        which are not yet released. macOS, Windows and GPU jobs are not
-        supported in the first release.
+        Linux jobs, arm64 and x64. x64 jobs have{" "}
+        <Link href="/docs/labels-and-sizes#x64">labels of their own</Link> and
+        need a Linux x64 machine in your hive. macOS, Windows and GPU jobs are
+        not supported.
       </dd>
 
       <dt>Which machines can join a hive?</dt>
       <dd>
-        Apple Silicon Macs that belong to members of your organization. Linux
-        machines, arm64 and x64, are not yet released.
+        Apple Silicon Macs and Linux machines with KVM, arm64 or x64, that
+        belong to members of your organization. A cloud VM usually has no KVM; a
+        desk machine, a home server or bare metal does.
       </dd>
 
       <dt>Do I have to move every workflow?</dt>

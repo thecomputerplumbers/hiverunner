@@ -12,7 +12,7 @@ import {
 export const metadata = {
   title: "Download",
   description:
-    "Install the HiveWorker daemon on an Apple Silicon Mac: one command, what it installs, and how to update or remove it.",
+    "Install the HiveWorker daemon on an Apple Silicon Mac or a Linux machine: one command, what it installs, and how to update or remove it.",
 }
 
 export default function DownloadPage() {
@@ -77,7 +77,10 @@ export default function DownloadPage() {
 
       <Band title="What you need">
         <ul className="flex flex-col gap-3 leading-7">
-          <li>A Mac with Apple Silicon. Intel Macs are not supported.</li>
+          <li>
+            A Mac with Apple Silicon, or a Linux machine with KVM. Intel Macs
+            are not supported.
+          </li>
           <li>
             macOS {DAEMON_MIN_MACOS} or later, and about 3 GB of free disk.
           </li>
@@ -128,8 +131,10 @@ export default function DownloadPage() {
 
       <Band title="Other platforms">
         <p className="leading-7 text-muted-foreground">
-          Apple Silicon macOS is the only host platform today. Linux hosts come
-          later. Windows hosts are not part of the plan for now.
+          The same command works on Linux, arm64 or x64, on a machine with KVM.
+          It needs QEMU, virtiofsd and passt, and tells you how to install
+          whichever is missing; it never asks for your password. Windows hosts
+          are not part of the plan for now.
         </p>
       </Band>
     </>

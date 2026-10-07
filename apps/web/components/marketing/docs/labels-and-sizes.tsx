@@ -1,6 +1,6 @@
 import {
   RUNNER_SIZES,
-  UNRELEASED_RUNNER_SIZES,
+  X64_RUNNER_SIZES,
   privatePoolUsdPerMinute,
 } from "@workspace/pricing"
 import { Code, CodeBlock } from "../code"
@@ -38,12 +38,13 @@ export function LabelsAndSizes() {
         your own organization's machines.
       </p>
 
-      <h2 id="x64">Linux x64 labels (not yet released)</h2>
+      <h2 id="x64">Linux x64 labels</h2>
       <p>
-        The labels above run arm64 jobs. Linux x64 jobs get labels of their own,
-        and run only on Linux x64 machines in your hive. Neither is released
-        yet: there is no daemon for Linux machines, and a job sent to one of
-        these labels today waits in GitHub's queue.
+        The labels above run arm64 jobs, on Macs and on arm64 Linux machines.
+        Linux x64 jobs get labels of their own and run only on Linux x64
+        machines in your hive. A job sent to one of these labels waits in
+        GitHub&apos;s queue until your hive has an x64 machine free. They are
+        priced by the same rule: vCPUs, minutes and the machine&apos;s speed.
       </p>
       <table>
         <thead>
@@ -54,7 +55,7 @@ export function LabelsAndSizes() {
           </tr>
         </thead>
         <tbody>
-          {UNRELEASED_RUNNER_SIZES.map((size) => (
+          {X64_RUNNER_SIZES.map((size) => (
             <tr key={size.label}>
               <td>
                 <Code>{size.label}</Code>
