@@ -156,8 +156,26 @@ PLIST
 domain="gui/$(id -u)"
 # Stopping an older daemon first. A job it was running is cancelled and
 # GitHub re-queues nothing by itself, so update when the Mac is idle.
-launchctl bootout "$domain/$LABEL" 2>/dev/null || true
-launchctl bootstrap "$domain" "$AGENT" || fail "could not start the daemon. See $LOG_DIR/hived.log"
+if launchctl print "$domain/$LABEL" >/dev/null 2>&1; then
+  launchctl bootout "$domain/$LABEL" 2>/dev/null || true
+  # The old daemon destroys its VM on the way out, which takes a few
+  # seconds, and the service cannot be started again until it is gone.
+  waited=0
+  while launchctl print "$domain/$LABEL" >/dev/null 2>&1; do
+    [ "$waited" -lt 60 ] || fail "the old daemon did not stop. Run this again in a minute."
+    sleep 1
+    waited=$((waited + 1))
+  done
+fi
+started=""
+for attempt in 1 2 3 4 5; do
+  if launchctl bootstrap "$domain" "$AGENT" 2>/dev/null; then
+    started=yes
+    break
+  fi
+  sleep 2
+done
+[ -n "$started" ] || fail "could not start the daemon. See $LOG_DIR/hived.log"
 
 say ""
 say "Done. This Mac now runs jobs for your pool whenever it is awake."
