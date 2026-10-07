@@ -35,7 +35,12 @@ export async function POST(request: Request) {
   if (!organizationId)
     return Response.json({ error: "No active organization" }, { status: 400 })
 
-  const body = (await request.json().catch(() => ({}))) as { amount?: unknown }
+  const body = (await request.json().catch(() => ({}))) as {
+    amount?: unknown
+    auto?: unknown
+  }
+  // Asked for by the person paying, and never assumed for them.
+  const auto = body.auto === true
   const dollars = TOP_UP_AMOUNTS_USD.find((offered) => offered === body.amount)
   if (!dollars)
     return Response.json(
@@ -102,10 +107,15 @@ export async function POST(request: Request) {
         organization_id: organizationId,
         kind: "top-up",
         amount_usd: String(dollars),
+        ...(auto ? { auto: "1" } : {}),
       },
       extraParams: {
         // Cards only, so a completed Checkout is a completed payment.
         payment_method_types: ["card"],
+        // Saved for later charges only when automatic top-up was asked for.
+        ...(auto
+          ? { payment_intent_data: { setup_future_usage: "off_session" } }
+          : {}),
       },
     })
     return Response.json({ url: checkout.url })

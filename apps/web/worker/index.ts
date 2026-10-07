@@ -1,5 +1,8 @@
 import product from "../config/product.json"
-import { observeRequest } from "../lib/diagnostics"
+import { getDb } from "../db"
+import { logError, observeRequest } from "../lib/diagnostics"
+import { canTakeCards, stripe } from "../lib/stripe"
+import { chargeDueTopUps } from "../operations/top-up"
 import vinextWorker from "vinext/server/app-router-entry"
 
 export { AppDatabase } from "./database"
@@ -48,5 +51,14 @@ export default {
       if (path.startsWith("/.well-known/")) return auth.handler(request)
       return vinextWorker.fetch(request, env, ctx)
     })
+  },
+  /** Every few minutes: charge the saved cards whose balance has run low. */
+  async scheduled(_controller, _env, ctx) {
+    if (!canTakeCards()) return
+    ctx.waitUntil(
+      chargeDueTopUps(getDb(), stripe()).catch((error) =>
+        logError(error, "top-up.sweep")
+      )
+    )
   },
 } satisfies ExportedHandler<CloudflareEnv>

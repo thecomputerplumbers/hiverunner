@@ -12,7 +12,12 @@ import {
   reconcileSubscription,
 } from "@workspace/stripe/store"
 
-import { creditTopUp } from "@workspace/db/ledger"
+import {
+  handleIntentFailed,
+  handleIntentSucceeded,
+  handlePaidCheckout,
+  type PaymentIntent,
+} from "@/operations/top-up"
 
 import { getDb } from "@/db"
 import { stripe } from "@/lib/stripe"
@@ -71,7 +76,21 @@ export async function POST(request: Request) {
 
         // A card top-up is credited here and nowhere else, once however
         // many times Stripe delivers the event.
-        await creditTopUp(db, checkout)
+        await handlePaidCheckout(db, stripe(), checkout)
+      },
+
+      // Automatic top-ups charge a saved card with no Checkout involved.
+      "payment_intent.succeeded": async (event) => {
+        await handleIntentSucceeded(
+          db,
+          event.data.object as unknown as PaymentIntent
+        )
+      },
+      "payment_intent.payment_failed": async (event) => {
+        await handleIntentFailed(
+          db,
+          event.data.object as unknown as PaymentIntent
+        )
       },
 
       "customer.subscription.created": syncSubscriptionEvent,

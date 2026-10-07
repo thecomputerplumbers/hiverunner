@@ -243,6 +243,34 @@ export const ledgerEntry = sqliteTable(
   ]
 )
 
+/**
+ * An organization's card on file and its standing instruction to keep the
+ * balance up. One row per organization, created the first time it pays by
+ * card.
+ */
+export const autoTopUp = sqliteTable("auto_top_up", {
+  organizationId: text("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  /** Off unless an owner or admin asked for it. Turned off by a failure. */
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  /** What is charged each time, in cents. */
+  amountCents: integer("amount_cents").notNull(),
+  /** The card processor's id for the saved card. Not a card number. */
+  paymentMethodId: text("payment_method_id"),
+  /** For "Visa ending 4242": what an owner needs to recognise the card. */
+  cardBrand: text("card_brand"),
+  cardLast4: text("card_last4"),
+  /**
+   * Set while a charge is in flight, so the next sweep does not start a
+   * second. Cleared when the charge is credited or fails.
+   */
+  pendingSince: integer("pending_since", { mode: "timestamp_ms" }),
+  /** Why the last automatic charge failed, in words an owner can act on. */
+  lastError: text("last_error"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+})
+
 /** GitHub redelivers. The delivery id makes handling a webhook idempotent. */
 export const webhookDelivery = sqliteTable("webhook_delivery", {
   id: text("id").primaryKey(),

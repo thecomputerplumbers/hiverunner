@@ -37,6 +37,12 @@ export const TRIAL_GRANT_WITH_CARD_USD = 10
 export const TOP_UP_AMOUNTS_USD = [10, 25, 50, 100] as const
 
 /**
+ * Automatic top-up charges the saved card when the balance falls below this,
+ * in USD: enough left that jobs keep running while the charge goes through.
+ */
+export const AUTO_TOP_UP_BELOW_USD = 5
+
+/**
  * Job sizes. Each label is its own scale set, because a scale set is one
  * queue and a runner cannot be chosen by size within it.
  */
