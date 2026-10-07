@@ -249,6 +249,38 @@ await redirectsTo(
   "/dashboard"
 )
 const organizationId = "gh-501"
+// The console's snapshot is for members, and a teammate's invite link asks
+// only for their Mac: no pool is revealed to someone outside the organization.
+const snapshot = await json(await member("/api/pool/live"))
+assert.equal(snapshot.balance, 5_000_000)
+assert.deepEqual(snapshot.machines, [])
+assert.equal(snapshot.hours.length, 14 * 24)
+assert.equal(
+  (await outsider(`/api/pool/live?organization=${organizationId}`)).status,
+  403
+)
+assert.equal((await anonymous("/api/pool/live")).status, 401)
+const joining = await page(member, "/join/acme")
+assert.ok(joining.includes("has a cell waiting for your Mac"))
+assert.ok(joining.includes("install.sh"))
+const refused = await page(outsider, "/join/acme")
+assert.ok(refused.includes("We can") && !refused.includes("install.sh"))
+assert.equal(
+  await page(outsider, "/join/no-such-org").then((html) =>
+    html.includes("install.sh")
+  ),
+  false
+)
+await redirectsTo(
+  await anonymous("/join/acme"),
+  "/sign-in?next=%2Fjoin%2Facme",
+  307
+)
+assert.ok(
+  (await page(anonymous, "/sign-in?next=%2Fjoin%2Facme")).includes(
+    "Add your Mac to acme"
+  )
+)
 const settings = (request, change = {}) =>
   request("/api/pool/settings", {
     organizationId,

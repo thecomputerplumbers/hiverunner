@@ -31,16 +31,23 @@ export default async function SignInPage({
   const local = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(
     env.APP_URL ?? ""
   )
+  // Someone following a teammate's invite is not here to set anything up.
+  const invited = /^\/join\/([A-Za-z0-9-]{1,39})$/.exec(next)?.[1]
   const github = Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in to {product.name}</CardTitle>
+          <CardTitle>
+            {invited
+              ? `Add your Mac to ${invited}`
+              : `Sign in to ${product.name}`}
+          </CardTitle>
           <CardDescription>
-            Your GitHub organizations decide which pools you can join. There is
-            nothing else to set up.
+            {invited
+              ? `You were asked to lend ${invited}'s CI your spare cores. Sign in with GitHub so we know you are in ${invited}; there is no account to create and no card.`
+              : "Your GitHub organizations decide which pools you can join. There is nothing else to set up."}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

@@ -30,7 +30,6 @@ export function AccountForm({ name }: { name: string }) {
   return (
     <>
       <form className="flex flex-col gap-4" onSubmit={submit}>
-        <h2 className="text-lg font-semibold">Profile</h2>
         <Field>
           <FieldLabel htmlFor="name">Name</FieldLabel>
           <Input

@@ -1,28 +1,18 @@
+import { env } from "cloudflare:workers"
 import Link from "next/link"
-import {
-  RUNNER_SIZES,
-  TRIAL_GRANT_USD,
-  privatePoolUsdPerMinute,
-} from "@workspace/pricing"
-import { listJobs } from "@workspace/db/jobs"
-import { getBalance } from "@workspace/db/ledger"
-import { listMachines } from "@workspace/db/machines"
+import { RUNNER_SIZES, TRIAL_GRANT_USD } from "@workspace/pricing"
+import { getLiveSnapshot } from "@workspace/db/live"
+import { getPoolSettings } from "@workspace/db/settings"
 import { roleAtLeast } from "@workspace/auth"
 import { Button } from "@workspace/ui/components/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@workspace/ui/components/card"
 
 import { AccountPage } from "@/components/account-page"
+import { Notice, Panel, Snippet } from "@/components/console/panel"
 import { RouteLink } from "@/components/route-link"
 import { getDb } from "@/db"
-import { formatMoney } from "@/lib/format"
 import { DAEMON_RELEASED, INSTALL_COMMAND } from "@/components/marketing/site"
 import { getPool } from "@/lib/session"
+import { LiveDashboard } from "./live-dashboard"
 
 export const metadata = { title: "Dashboard" }
 
@@ -37,122 +27,79 @@ export default async function DashboardPage({
   const { installed } = await searchParams
   const { organizationId, installation, membership } = pool
   const db = getDb()
-  const [balance, machines, jobs] = await Promise.all([
-    getBalance(db, { accountType: "organization", accountId: organizationId }),
-    listMachines(db, organizationId),
-    listJobs(db, organizationId, 1),
+  const [live, settings] = await Promise.all([
+    getLiveSnapshot(db, organizationId),
+    getPoolSettings(db, organizationId),
   ])
-  const online = machines.filter((m) => m.presence === "online").length
-  // Set up means a job has run here. Until then the page is a checklist.
-  const ready = jobs.length > 0
+  const online = live.machines.filter(
+    (machine) => machine.presence === "online" || machine.presence === "busy"
+  ).length
+  // Set up means a job has run here. Until then the page leads with a checklist.
+  const ready = live.recent.length > 0
   const owner = roleAtLeast(membership.role, "owner")
-  const perMinute = privatePoolUsdPerMinute(RUNNER_SIZES[0].vcpus)
 
   return (
-    <AccountPage title={installation.accountLogin}>
+    <AccountPage title={installation.accountLogin} live={live}>
       {installed && (
-        <p role="status" className="rounded-lg border p-4">
+        <Notice>
           HiveWorker is installed on{" "}
           <strong>{installation.accountLogin}</strong>, with ${TRIAL_GRANT_USD}{" "}
           of credit to start. Two steps to your first job.
-        </p>
+        </Notice>
       )}
       {installation.status !== "active" && (
-        <p role="alert" className="rounded-lg border border-destructive p-4">
+        <Notice tone="alert">
           {installation.status === "suspended"
             ? "The GitHub App is suspended on this organization. Jobs will not be picked up until an owner unsuspends it on GitHub."
             : "The GitHub App was uninstalled from this organization. Reinstall it to run jobs; your balance and history are kept."}
-        </p>
+        </Notice>
+      )}
+      {live.balance <= 0 && (
+        <Notice tone="alert">
+          The balance has run out, so new jobs are waiting in GitHub&apos;s
+          queue.{" "}
+          <Link className="underline" href="/wallet">
+            Add funds
+          </Link>{" "}
+          to start it moving again.
+        </Notice>
       )}
 
       {!ready && (
         <FirstJob
-          machines={machines.length}
+          machines={live.machines.length}
           online={online}
-          jobs={jobs.length}
+          jobs={live.recent.length}
           organization={installation.accountLogin}
         />
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardDescription>Balance</CardDescription>
-            <CardTitle className="text-3xl tabular-nums">
-              {formatMoney(balance)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            About{" "}
-            {Math.max(
-              0,
-              Math.floor(balance / 1_000_000 / perMinute.net)
-            ).toLocaleString("en-US")}{" "}
-            minutes on a {RUNNER_SIZES[0].vcpus}-vCPU runner.{" "}
-            <Link className="underline" href="/wallet">
-              {balance > 0 ? "Billing" : "Add funds"}
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Machines</CardDescription>
-            <CardTitle className="text-3xl tabular-nums">
-              {machines.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {machines.length ? (
-              <>
-                {online} ready for jobs,{" "}
-                {machines.filter((m) => m.presence === "busy").length} running
-                one.{" "}
-                <Link className="underline" href="/machines">
-                  See the pool
-                </Link>
-              </>
-            ) : (
-              <>No Macs in this pool yet. Adding one is step 2 above.</>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <LiveDashboard
+        invite={{
+          organization: installation.accountLogin,
+          url: `${env.APP_URL}/join/${installation.accountLogin}`,
+          teams: settings?.allowedTeams ?? [],
+        }}
+      />
 
-      {ready && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold">Use it in a workflow</h2>
-          <p className="text-muted-foreground">
-            Change one line. Jobs wait in GitHub&apos;s queue until a machine in
-            your pool is free.
+      <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+        {installation.repositorySelection === "selected" && (
+          <p>
+            The App is installed on selected repositories only. Workflows in
+            other repositories will not reach this pool.
           </p>
-          <pre className="overflow-x-auto rounded-lg border bg-muted p-4 text-sm">
-            <code>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</code>
-          </pre>
-          <ul className="text-sm text-muted-foreground">
-            {RUNNER_SIZES.map((size) => (
-              <li key={size.label}>
-                <code>{size.label}</code>: {size.vcpus} vCPUs
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {installation.repositorySelection === "selected" && (
-        <p className="text-sm text-muted-foreground">
-          The App is installed on selected repositories only. Workflows in other
-          repositories will not reach this pool.
-        </p>
-      )}
-
-      {owner && (
-        <p className="text-sm text-muted-foreground">
-          Any member of {installation.accountLogin} on GitHub can add a machine.{" "}
-          <Link className="underline" href="/settings">
-            Narrow it to teams
-          </Link>
-          .
-        </p>
-      )}
+        )}
+        {owner && (
+          <p>
+            Any member of {installation.accountLogin} on GitHub can add a
+            machine.{" "}
+            <Link className="text-foreground underline" href="/settings">
+              Narrow it to teams
+            </Link>
+            .
+          </p>
+        )}
+      </div>
     </AccountPage>
   )
 }
@@ -208,9 +155,7 @@ function FirstJob({
                 add a Mac, and it does not work today.
               </p>
             )}
-            <pre className="overflow-x-auto rounded-lg border bg-muted p-3 text-sm">
-              <code>{INSTALL_COMMAND}</code>
-            </pre>
+            <Snippet prompt>{INSTALL_COMMAND}</Snippet>
             <p>
               <Link className="underline" href="/download">
                 {DAEMON_RELEASED
@@ -226,9 +171,7 @@ function FirstJob({
       title: "Change one line in a workflow",
       body: (
         <>
-          <pre className="overflow-x-auto rounded-lg border bg-muted p-3 text-sm">
-            <code>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</code>
-          </pre>
+          <Snippet>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</Snippet>
           <p>
             Push it, and the job runs on your Mac. This page updates when it
             does.
@@ -237,20 +180,26 @@ function FirstJob({
       ),
     },
   ]
+  const done = steps.filter((step) => step.done).length
   return (
-    <section className="rounded-lg border">
-      <h2 className="border-b p-4 text-lg font-semibold">
-        Get your first job running
-      </h2>
-      <ol className="divide-y">
+    <Panel
+      title="Get your first job running"
+      aside={
+        <span className="tabular-nums">
+          {done} of {steps.length} done
+        </span>
+      }
+      bodyClassName="p-0"
+    >
+      <ol className="divide-y divide-border">
         {steps.map((step, index) => (
           <li key={step.title} className="flex gap-3 p-4">
             <span
               aria-hidden="true"
               className={
                 step.done
-                  ? "flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground"
-                  : "flex size-6 shrink-0 items-center justify-center rounded-full border text-sm text-muted-foreground"
+                  ? "flex size-6 shrink-0 items-center justify-center bg-primary font-mono text-xs font-semibold text-primary-foreground"
+                  : "flex size-6 shrink-0 items-center justify-center border border-border font-mono text-xs text-muted-foreground"
               }
             >
               {step.done ? "✓" : index + 1}
@@ -265,7 +214,7 @@ function FirstJob({
                 {step.title}
               </p>
               {step.body && (!step.done || (index === 1 && online === 0)) ? (
-                <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+                <div className="flex max-w-2xl flex-col gap-2 text-sm text-muted-foreground">
                   {step.body}
                 </div>
               ) : null}
@@ -273,14 +222,14 @@ function FirstJob({
           </li>
         ))}
       </ol>
-    </section>
+    </Panel>
   )
 }
 
 function NoPool() {
   return (
     <AccountPage title="No pool yet">
-      <p className="text-muted-foreground">
+      <p className="max-w-2xl text-muted-foreground">
         A pool belongs to a GitHub organization. Install HiveWorker on yours, or
         ask an owner to: once it is installed, every member can sign in and add
         a machine.

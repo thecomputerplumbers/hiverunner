@@ -2,6 +2,7 @@ import { roleAtLeast } from "@workspace/auth"
 import { getPoolSettings } from "@workspace/db/settings"
 
 import { AccountPage } from "@/components/account-page"
+import { Panel } from "@/components/console/panel"
 import { getDb } from "@/db"
 import { requirePool } from "@/lib/session"
 import { SettingsForm } from "./settings-form"
@@ -13,21 +14,23 @@ export default async function SettingsPage() {
   const settings = await getPoolSettings(getDb(), organizationId)
   const owner = roleAtLeast(membership.role, "owner")
   return (
-    <AccountPage title="Pool settings">
-      <p className="text-muted-foreground">
+    <AccountPage title="settings">
+      <p className="max-w-3xl text-sm text-muted-foreground">
         Membership comes from GitHub. Anyone who leaves{" "}
         {installation.accountLogin} loses access here and their machines stop
         taking jobs.
       </p>
       {settings && (
-        <SettingsForm
-          organizationId={organizationId}
-          login={installation.accountLogin}
-          allowedTeams={settings.allowedTeams}
-          earningsDestination={settings.earningsDestination}
-          version={settings.version}
-          editable={owner}
-        />
+        <Panel title="who can join, and who gets paid" className="max-w-3xl">
+          <SettingsForm
+            organizationId={organizationId}
+            login={installation.accountLogin}
+            allowedTeams={settings.allowedTeams}
+            earningsDestination={settings.earningsDestination}
+            version={settings.version}
+            editable={owner}
+          />
+        </Panel>
       )}
     </AccountPage>
   )
