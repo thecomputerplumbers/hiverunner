@@ -31,6 +31,12 @@ export const TRIAL_GRANT_USD = 5
 export const TRIAL_GRANT_WITH_CARD_USD = 10
 
 /**
+ * What an organization can add to its balance in one card payment, in USD.
+ * The browser names one of these; it never names an amount of its own.
+ */
+export const TOP_UP_AMOUNTS_USD = [10, 25, 50, 100] as const
+
+/**
  * Job sizes. Each label is its own scale set, because a scale set is one
  * queue and a runner cannot be chosen by size within it.
  */

@@ -1,5 +1,10 @@
 import Link from "next/link"
-import { RUNNER_SIZES, privatePoolUsdPerMinute } from "@workspace/pricing"
+import {
+  RUNNER_SIZES,
+  TRIAL_GRANT_USD,
+  privatePoolUsdPerMinute,
+} from "@workspace/pricing"
+import { listJobs } from "@workspace/db/jobs"
 import { getBalance } from "@workspace/db/ledger"
 import { listMachines } from "@workspace/db/machines"
 import { roleAtLeast } from "@workspace/auth"
@@ -15,7 +20,8 @@ import {
 import { AccountPage } from "@/components/account-page"
 import { RouteLink } from "@/components/route-link"
 import { getDb } from "@/db"
-import { formatTokens, formatUsdEstimate } from "@/lib/format"
+import { formatMoney } from "@/lib/format"
+import { INSTALL_COMMAND } from "@/components/marketing/site"
 import { getPool } from "@/lib/session"
 
 export const metadata = { title: "Dashboard" }
@@ -31,10 +37,14 @@ export default async function DashboardPage({
   const { installed } = await searchParams
   const { organizationId, installation, membership } = pool
   const db = getDb()
-  const [balance, machines] = await Promise.all([
+  const [balance, machines, jobs] = await Promise.all([
     getBalance(db, { accountType: "organization", accountId: organizationId }),
     listMachines(db, organizationId),
+    listJobs(db, organizationId, 1),
   ])
+  const online = machines.filter((m) => m.presence === "online").length
+  // Set up means a job has run here. Until then the page is a checklist.
+  const ready = jobs.length > 0
   const owner = roleAtLeast(membership.role, "owner")
   const perMinute = privatePoolUsdPerMinute(RUNNER_SIZES[0].vcpus)
 
@@ -43,8 +53,8 @@ export default async function DashboardPage({
       {installed && (
         <p role="status" className="rounded-lg border p-4">
           HiveWorker is installed on{" "}
-          <strong>{installation.accountLogin}</strong>. Add a machine to start
-          running jobs.
+          <strong>{installation.accountLogin}</strong>, with ${TRIAL_GRANT_USD}{" "}
+          of credit to start. Two steps to your first job.
         </p>
       )}
       {installation.status !== "active" && (
@@ -55,22 +65,32 @@ export default async function DashboardPage({
         </p>
       )}
 
+      {!ready && (
+        <FirstJob
+          machines={machines.length}
+          online={online}
+          jobs={jobs.length}
+          organization={installation.accountLogin}
+        />
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader>
             <CardDescription>Balance</CardDescription>
             <CardTitle className="text-3xl tabular-nums">
-              {formatTokens(balance)}
+              {formatMoney(balance)}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            About {formatUsdEstimate(balance)}, or{" "}
-            {Math.floor(balance / 1_000_000 / perMinute.net).toLocaleString(
-              "en-US"
-            )}{" "}
+            About{" "}
+            {Math.max(
+              0,
+              Math.floor(balance / 1_000_000 / perMinute.net)
+            ).toLocaleString("en-US")}{" "}
             minutes on a {RUNNER_SIZES[0].vcpus}-vCPU runner.{" "}
             <Link className="underline" href="/wallet">
-              Wallet
+              {balance > 0 ? "Billing" : "Add funds"}
             </Link>
           </CardContent>
         </Card>
@@ -84,49 +104,45 @@ export default async function DashboardPage({
           <CardContent className="text-sm text-muted-foreground">
             {machines.length ? (
               <>
-                {machines.filter((m) => m.presence === "online").length} ready
-                for jobs, {machines.filter((m) => m.presence === "busy").length}{" "}
-                running one.{" "}
+                {online} ready for jobs,{" "}
+                {machines.filter((m) => m.presence === "busy").length} running
+                one.{" "}
                 <Link className="underline" href="/machines">
                   See the pool
                 </Link>
               </>
             ) : (
-              <>
-                No machines in this pool yet.{" "}
-                <Link className="underline" href="/download">
-                  Install the daemon
-                </Link>{" "}
-                on an Apple Silicon Mac and sign in with GitHub.
-              </>
+              <>No Macs in this pool yet. Adding one is step 2 above.</>
             )}
           </CardContent>
         </Card>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Use it in a workflow</h2>
-        <p className="text-muted-foreground">
-          Change one line. Jobs wait in GitHub&apos;s queue until a machine in
-          your pool is free.
-        </p>
-        <pre className="overflow-x-auto rounded-lg border bg-muted p-4 text-sm">
-          <code>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</code>
-        </pre>
-        <ul className="text-sm text-muted-foreground">
-          {RUNNER_SIZES.map((size) => (
-            <li key={size.label}>
-              <code>{size.label}</code>: {size.vcpus} vCPUs
-            </li>
-          ))}
-        </ul>
-        {installation.repositorySelection === "selected" && (
-          <p className="text-sm text-muted-foreground">
-            The App is installed on selected repositories only. Workflows in
-            other repositories will not reach this pool.
+      {ready && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Use it in a workflow</h2>
+          <p className="text-muted-foreground">
+            Change one line. Jobs wait in GitHub&apos;s queue until a machine in
+            your pool is free.
           </p>
-        )}
-      </section>
+          <pre className="overflow-x-auto rounded-lg border bg-muted p-4 text-sm">
+            <code>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</code>
+          </pre>
+          <ul className="text-sm text-muted-foreground">
+            {RUNNER_SIZES.map((size) => (
+              <li key={size.label}>
+                <code>{size.label}</code>: {size.vcpus} vCPUs
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {installation.repositorySelection === "selected" && (
+        <p className="text-sm text-muted-foreground">
+          The App is installed on selected repositories only. Workflows in other
+          repositories will not reach this pool.
+        </p>
+      )}
 
       {owner && (
         <p className="text-sm text-muted-foreground">
@@ -138,6 +154,111 @@ export default async function DashboardPage({
         </p>
       )}
     </AccountPage>
+  )
+}
+
+/**
+ * The path to a first job, with each step ticked as it actually happens.
+ * It is the whole page's purpose until a job has run, and gone after.
+ */
+function FirstJob({
+  machines,
+  online,
+  jobs,
+  organization,
+}: {
+  machines: number
+  online: number
+  jobs: number
+  organization: string
+}) {
+  const steps = [
+    {
+      done: true,
+      title: `HiveWorker is installed on ${organization}, with $${TRIAL_GRANT_USD} of credit and no card needed`,
+      body: null,
+    },
+    {
+      done: machines > 0,
+      title:
+        machines > 0
+          ? online > 0
+            ? `${machines === 1 ? "A Mac is" : `${machines} Macs are`} in the pool`
+            : "A Mac is in the pool, but not connected right now"
+          : "Add a Mac",
+      body:
+        machines > 0 ? (
+          online > 0 ? null : (
+            <p>
+              Start it with <code>hived run</code>, or open its lid. Jobs wait
+              until a Mac is connected.
+            </p>
+          )
+        ) : (
+          <>
+            <p>
+              On any Apple Silicon Mac, run this and sign in with GitHub when
+              the browser opens. Anyone in {organization} can.
+            </p>
+            <pre className="overflow-x-auto rounded-lg border bg-muted p-3 text-sm">
+              <code>{INSTALL_COMMAND}</code>
+            </pre>
+          </>
+        ),
+    },
+    {
+      done: jobs > 0,
+      title: "Change one line in a workflow",
+      body: (
+        <>
+          <pre className="overflow-x-auto rounded-lg border bg-muted p-3 text-sm">
+            <code>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</code>
+          </pre>
+          <p>
+            Push it, and the job runs on your Mac. This page updates when it
+            does.
+          </p>
+        </>
+      ),
+    },
+  ]
+  return (
+    <section className="rounded-lg border">
+      <h2 className="border-b p-4 text-lg font-semibold">
+        Get your first job running
+      </h2>
+      <ol className="divide-y">
+        {steps.map((step, index) => (
+          <li key={step.title} className="flex gap-3 p-4">
+            <span
+              aria-hidden="true"
+              className={
+                step.done
+                  ? "flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground"
+                  : "flex size-6 shrink-0 items-center justify-center rounded-full border text-sm text-muted-foreground"
+              }
+            >
+              {step.done ? "✓" : index + 1}
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <p
+                className={step.done ? "text-muted-foreground" : "font-medium"}
+              >
+                <span className="sr-only">
+                  {step.done ? "Done: " : "To do: "}
+                </span>
+                {step.title}
+              </p>
+              {step.body && (!step.done || (index === 1 && online === 0)) ? (
+                <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+                  {step.body}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }
 

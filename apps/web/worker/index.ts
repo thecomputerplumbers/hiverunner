@@ -28,7 +28,10 @@ export default {
             path === "/connections" ||
             path === "/api/connections")) ||
         (!product.features.billing &&
-          (path === "/billing" || path.startsWith("/api/stripe/")))
+          (path === "/billing" ||
+            (path.startsWith("/api/stripe/") &&
+              // Card top-ups arrive on the same webhook as subscriptions.
+              !(product.features.funding && path === "/api/stripe/webhook"))))
       )
         return new Response("Not found", { status: 404 })
       // Pools and their members come from GitHub. Better Auth's organization

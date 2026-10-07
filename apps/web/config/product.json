@@ -5,6 +5,7 @@
   "supportEmail": "auth@thecomputerplumbers.com",
   "features": {
     "billing": false,
+    "funding": true,
     "mcp": false,
     "projects": false
   },
@@ -26,7 +27,7 @@
     },
     {
       "href": "/wallet",
-      "label": "Wallet",
+      "label": "Billing",
       "icon": "billing"
     },
     {

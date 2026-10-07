@@ -11,6 +11,8 @@ import {
   reconcileSubscription,
 } from "@workspace/stripe/store"
 
+import { creditTopUp } from "@workspace/db/ledger"
+
 import { getDb } from "@/db"
 import { stripe } from "@/lib/stripe"
 
@@ -58,8 +60,9 @@ export async function POST(request: Request) {
           })
         }
 
-        // Additional handlers must be idempotent too: use unique business
-        // keys or an atomic database batch for one-time entitlements.
+        // A card top-up is credited here and nowhere else, once however
+        // many times Stripe delivers the event.
+        await creditTopUp(db, checkout)
       },
 
       "customer.subscription.created": syncSubscriptionEvent,

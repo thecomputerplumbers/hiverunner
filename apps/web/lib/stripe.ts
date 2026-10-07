@@ -38,6 +38,18 @@ export function priceFor(plan: Plan) {
   return price
 }
 
+/**
+ * Whether this deployment can take a card payment. Without both secrets the
+ * wallet shows a balance and no way to add to it.
+ */
+export function canTakeCards() {
+  return Boolean(
+    product.features.funding &&
+    env.STRIPE_SECRET_KEY &&
+    env.STRIPE_WEBHOOK_SECRET
+  )
+}
+
 /** Where Stripe should send people back to. */
 export function appOrigin(request: Request) {
   return env.APP_URL || new URL(request.url).origin

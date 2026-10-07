@@ -3,7 +3,7 @@ import { listJobs } from "@workspace/db/jobs"
 
 import { AccountPage } from "@/components/account-page"
 import { getDb } from "@/db"
-import { formatTokens, formatUsdEstimate } from "@/lib/format"
+import { formatMoney } from "@/lib/format"
 import { requirePool } from "@/lib/session"
 
 export const metadata = { title: "Jobs" }
@@ -42,10 +42,7 @@ export default async function JobsPage() {
               </div>
               {job.amount !== null && (
                 <p className="text-right tabular-nums">
-                  {formatTokens(job.amount)}
-                  <span className="block text-sm text-muted-foreground">
-                    {formatUsdEstimate(job.amount)}
-                  </span>
+                  {formatMoney(job.amount, "fine")}
                 </p>
               )}
             </Link>

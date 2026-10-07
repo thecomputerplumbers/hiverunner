@@ -3,7 +3,7 @@ import { getJob } from "@workspace/db/jobs"
 
 import { AccountPage } from "@/components/account-page"
 import { getDb } from "@/db"
-import { formatTokens, formatUsdEstimate } from "@/lib/format"
+import { formatMoney } from "@/lib/format"
 import { requirePool } from "@/lib/session"
 
 export const metadata = { title: "Job receipt" }
@@ -30,12 +30,9 @@ export default async function JobPage({
   if (job.amount !== null && job.computeUnits !== null)
     rows.push(
       ["Compute units", job.computeUnits.toFixed(2)],
-      [
-        "Charged",
-        `${formatTokens(job.amount)} (${formatUsdEstimate(job.amount)})`,
-      ],
-      ["Paid to the machine's owner", formatTokens(job.earning ?? 0)],
-      ["Network tax", formatTokens(job.tax ?? 0)]
+      ["Charged", formatMoney(job.amount, "fine")],
+      ["Paid to the machine's owner", formatMoney(job.earning ?? 0, "fine")],
+      ["HiveWorker fee", formatMoney(job.tax ?? 0, "fine")]
     )
 
   return (

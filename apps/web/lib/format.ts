@@ -1,22 +1,25 @@
-import { MICRO, microTokensToUsd } from "@workspace/pricing"
+import { microTokensToUsd } from "@workspace/pricing"
 
-const tokens = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
+const whole = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
 })
-const usd = new Intl.NumberFormat("en-US", {
+const fine = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 4,
 })
 
-/** Ledger amounts are micro-tokens; people read tokens. */
-export function formatTokens(amount: number) {
-  return tokens.format(amount / MICRO)
-}
-
-/** The estimate shown beside a token amount. Never a quote. */
-export function formatUsdEstimate(amount: number) {
-  return usd.format(microTokensToUsd(amount))
+/**
+ * A ledger amount as the dollars a person thinks in. Balances and payments
+ * show cents; a single job can cost a fraction of one, so `fine` keeps up to
+ * four decimals rather than showing a real charge as $0.00.
+ */
+export function formatMoney(
+  amount: number,
+  precision: "cents" | "fine" = "cents"
+) {
+  const usd = microTokensToUsd(amount)
+  return (precision === "fine" ? fine : whole).format(usd)
 }

@@ -219,11 +219,21 @@ await redirectsTo(
 let dashboard = await page(owner, "/dashboard?installed=1")
 assert.ok(dashboard.includes("acme"))
 assert.ok(dashboard.includes("runs-on: hive"))
+// A new organization is walked to its first job, and told what it has.
+assert.ok(dashboard.includes("Get your first job running"))
+assert.ok(dashboard.includes("Add a Mac"))
+assert.ok(dashboard.includes("$5.00"))
 // The page text also appears in its RSC payload, so count relative to now.
-const grants = (html) => html.split("Trial grant").length - 1
+const grants = (html) => html.split("Trial credit").length - 1
 const grantsAtInstall = grants(await page(owner, "/wallet"))
 assert.ok(grantsAtInstall > 0)
 assert.ok((await page(outsider, "/dashboard")).includes("No pool yet"))
+// Money is dollars, and with no card processor configured nobody is offered
+// a payment that could not be taken.
+const billing = await page(owner, "/wallet")
+assert.ok(billing.includes("$5.00") && !billing.includes("HiveWorker tokens"))
+assert.ok(billing.includes("Card payments are not open yet"))
+assert.equal((await owner("/api/wallet/top-up", { amount: 25 })).status, 503)
 await redirectsTo(await outsider("/wallet"), "/dashboard", 307)
 console.log(
   "Installation claim check, personal accounts and non-members passed."
