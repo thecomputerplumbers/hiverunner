@@ -28,7 +28,8 @@ const ROUTED_WORKFLOW = `jobs:
     runs-on: \${{ needs.route.outputs.runner }}
     steps:
       - uses: actions/checkout@v7
-      - run: make test`
+      - uses: oven-sh/setup-bun@v2
+      - run: bun test`
 
 export function Quickstart() {
   return (
