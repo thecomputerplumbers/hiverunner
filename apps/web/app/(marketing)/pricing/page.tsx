@@ -24,7 +24,7 @@ import { Container } from "@workspace/ui-shell/components/page-header"
 export const metadata = {
   title: "Pricing",
   description:
-    "What a month of GitHub Actions minutes costs on GitHub-hosted runners, Blacksmith and a HiveWorker private pool.",
+    "What a month of GitHub Actions minutes costs on GitHub-hosted runners, Blacksmith and a HiveWorker hive.",
 }
 
 const percent = new Intl.NumberFormat("en-US", { style: "percent" })
@@ -36,7 +36,7 @@ export default function PricingPage() {
     <>
       <PageIntro title="You pay per job, by the minute, and nothing else.">
         No subscription, no seats and no platform fee. Put in your minutes to
-        see a month on a private pool beside the same month on hosted runners.
+        see a month on your hive beside the same month on hosted runners.
       </PageIntro>
       <Container className="pb-14 sm:pb-20">
         <PricingCalculator />
@@ -101,7 +101,7 @@ export default function PricingPage() {
             Blacksmith's pricing page
           </a>
           . Free minutes and plan allowances are left out. HiveWorker prices are
-          at reference speed in a private pool whose machines are your own.
+          at reference speed in a hive whose machines are your own.
         </p>
       </Band>
 
@@ -112,8 +112,8 @@ export default function PricingPage() {
           the rest goes to the machine that ran the job.
         </p>
         <p className="leading-7 text-muted-foreground">
-          In a private pool that machine belongs to your organization. When the
-          pool is set to pay the organization's wallet, the{" "}
+          In your hive that machine belongs to your organization. When the hive
+          is set to pay the organization's wallet, the{" "}
           {percent.format(1 - JOB_TAX_RATE)} comes straight back and can pay for
           the next job. The price is what is left: {formatRate(base.net)} for a{" "}
           {RUNNER_SIZES[0].vcpus} vCPU minute.
@@ -124,8 +124,8 @@ export default function PricingPage() {
         <p className="leading-7">
           One compute unit is one vCPU for one minute at reference speed. The
           reference is one core of a standard GitHub-hosted runner. A compute
-          unit is charged at {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)} in a
-          private pool, before the machine's share comes back.
+          unit is charged at {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)} in your
+          hive, before the machine's share comes back.
         </p>
         <p className="border border-border px-4 py-3 font-mono text-sm">
           Job charge = minutes × vCPUs × speed score × rate per compute unit

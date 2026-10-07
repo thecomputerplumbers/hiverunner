@@ -179,7 +179,7 @@ await redirectsTo(
   `/sign-in?next=${encodeURIComponent("/github/setup?installation_id=9001&setup_action=install")}`
 )
 const owner = await signIn("owner")
-assert.ok((await page(owner, "/dashboard")).includes("No pool yet"))
+assert.ok((await page(owner, "/dashboard")).includes("No hive yet"))
 await redirectsTo(
   await owner("/github/setup?installation_id=7777"),
   "/github/status?state=denied"
@@ -227,7 +227,7 @@ assert.ok(dashboard.includes("$5.00"))
 const grants = (html) => html.split("Trial credit").length - 1
 const grantsAtInstall = grants(await page(owner, "/wallet"))
 assert.ok(grantsAtInstall > 0)
-assert.ok((await page(outsider, "/dashboard")).includes("No pool yet"))
+assert.ok((await page(outsider, "/dashboard")).includes("No hive yet"))
 // Money is dollars, and with no card processor configured nobody is offered
 // a payment that could not be taken.
 const billing = await page(owner, "/wallet")
@@ -243,7 +243,7 @@ console.log(
 const member = await signIn("member")
 await redirectsTo(await member("/github/sync"), "/dashboard")
 assert.ok((await page(member, "/dashboard")).includes("acme"))
-assert.ok((await page(member, "/pools")).includes("acme"))
+assert.ok((await page(member, "/hives")).includes("acme"))
 await redirectsTo(
   await member("/github/sync?next=https://evil.example"),
   "/dashboard"
@@ -260,6 +260,9 @@ assert.equal(
   403
 )
 assert.equal((await anonymous("/api/pool/live")).status, 401)
+assert.ok(
+  (await page(member, "/leaderboard")).includes("No jobs in this window")
+)
 const joining = await page(member, "/join/acme")
 assert.ok(joining.includes("has a cell waiting for your Mac"))
 assert.ok(joining.includes("install.sh"))
@@ -479,7 +482,7 @@ assert.equal(
   ).outcome,
   "member-removed"
 )
-assert.ok((await page(member, "/dashboard")).includes("No pool yet"))
+assert.ok((await page(member, "/dashboard")).includes("No hive yet"))
 assert.equal((await settings(member, { version: 2 })).status, 403)
 // Their machine left with them; the owner's is untouched.
 const remaining = await page(owner, "/machines")
@@ -492,7 +495,7 @@ assert.ok(!(await page(owner, "/machines")).includes("Mac15,9"))
 // And a sync agrees with the webhook once GitHub's own answer changes.
 await tellGitHub({ roles: { "acme/owner": "admin" } })
 await redirectsTo(await member("/github/sync"), "/dashboard")
-assert.ok((await page(member, "/dashboard")).includes("No pool yet"))
+assert.ok((await page(member, "/dashboard")).includes("No hive yet"))
 console.log("GitHub outage tolerance and member removal passed.")
 
 // The installation's own lifecycle.
@@ -542,7 +545,14 @@ const another = await signIn("owner")
 const current = await json(await another("/api/auth/get-session"))
 await json(await owner("/api/account/sessions", { id: current.session.id }))
 assert.equal(await json(await another("/api/auth/get-session")), null)
-for (const path of ["/account", "/settings", "/wallet", "/jobs", "/machines"])
+for (const path of [
+  "/account",
+  "/settings",
+  "/wallet",
+  "/jobs",
+  "/machines",
+  "/leaderboard",
+])
   assert.equal((await owner(path)).status, 200, path)
 assert.equal((await owner("/jobs/gh-999%3A1")).status, 404)
 await redirectsTo(await anonymous("/dashboard"), "/sign-in", 307)

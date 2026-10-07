@@ -113,7 +113,7 @@ async function authorizePool(
     return {
       code: "FORBIDDEN",
       message:
-        "You cannot add machines to this pool. Ask an owner whether it is limited to certain teams.",
+        "You cannot add machines to this hive. Ask an owner whether it is limited to certain teams.",
     }
   const mine = await db
     .select({ id: machine.id })
@@ -133,7 +133,7 @@ async function authorizePool(
   )
     return {
       code: "CONFLICT",
-      message: `You already have ${MAX_MACHINES_PER_PERSON} machines in this pool. Remove one first.`,
+      message: `You already have ${MAX_MACHINES_PER_PERSON} machines in this hive. Remove one first.`,
     }
   return null
 }
@@ -162,7 +162,7 @@ export async function enrollMachine(
     }
   const requested = [...new Set(input.organizationIds)]
   if (!requested.length || requested.length > 25)
-    return { ok: false, code: "INVALID_INPUT", message: "Choose a pool" }
+    return { ok: false, code: "INVALID_INPUT", message: "Choose a hive" }
 
   const joined: string[] = []
   const refused: Array<{ organizationId: string; message: string }> = []

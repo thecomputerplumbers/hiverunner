@@ -5,7 +5,7 @@ import { getDb } from "@/db"
 import { requireServerSession } from "@/lib/session"
 import { SelectOrganization } from "./select-organization"
 
-export const metadata = { title: "Switch pool" }
+export const metadata = { title: "Switch hive" }
 
 export default async function PoolsPage() {
   const session = await requireServerSession()

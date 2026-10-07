@@ -26,13 +26,13 @@ export function Faq() {
         first release.
       </dd>
 
-      <dt>Which machines can join a pool?</dt>
+      <dt>Which machines can join a hive?</dt>
       <dd>Apple Silicon Macs that belong to members of your organization.</dd>
 
       <dt>Do I have to move every workflow?</dt>
       <dd>
         No. Only jobs whose <Code>runs-on</Code> is a <Code>hive</Code> label
-        run on your pool. Change the label back and the job returns to its
+        run on your hive. Change the label back and the job returns to its
         previous runner.
       </dd>
 

@@ -8,7 +8,7 @@ import { APP_EVENTS, APP_PERMISSIONS } from "@/components/marketing/site"
 export const metadata = {
   title: "Security",
   description:
-    "How HiveWorker isolates jobs, what its GitHub App can access, who can add machines to a pool, and what the coordinator does not see.",
+    "How HiveWorker isolates jobs, what its GitHub App can access, who can add machines to a hive, and what the coordinator does not see.",
 }
 
 export default function SecurityPage() {
@@ -92,9 +92,9 @@ export default function SecurityPage() {
       <Band title="Who can run your jobs">
         <Facts>
           <Fact title="Your organization's machines only">
-            A private pool contains machines added by members of the GitHub
-            organization that installed the App. Nobody outside it can join, and
-            admins can narrow the pool to specific GitHub teams.
+            A hive contains machines added by members of the GitHub organization
+            that installed the App. Nobody outside it can join, and admins can
+            narrow the hive to specific GitHub teams.
           </Fact>
           <Fact title="GitHub decides membership">
             There are no invite codes and no separate user list. When someone is
@@ -105,7 +105,7 @@ export default function SecurityPage() {
             group, which GitHub does not offer to public repositories unless you
             change that.
           </Fact>
-          <Fact title="The public pool comes later">
+          <Fact title="The public hive comes later">
             Running jobs on machines outside your organization is not part of
             the first release. When it arrives it is opt-in per repository and
             limited to jobs that use no secrets.

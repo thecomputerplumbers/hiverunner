@@ -15,11 +15,11 @@ export async function GET(request: Request) {
     const organizationId =
       new URL(request.url).searchParams.get("organization") ??
       session.activeOrganizationId
-    if (!organizationId) throw new AppError("NOT_FOUND", "No pool selected")
+    if (!organizationId) throw new AppError("NOT_FOUND", "No hive selected")
     const db = getDb()
     // From the database, not the session: see `requireMembership`.
     if (!(await getMembership(db, { organizationId, userId: user.id })))
-      throw new AppError("FORBIDDEN", "You are not a member of this pool")
+      throw new AppError("FORBIDDEN", "You are not a member of this hive")
     return Response.json(await getLiveSnapshot(db, organizationId), {
       headers: { "Cache-Control": "no-store" },
     })

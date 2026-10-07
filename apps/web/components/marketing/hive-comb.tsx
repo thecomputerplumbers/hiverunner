@@ -103,7 +103,7 @@ export function HiveComb({ className }: { className?: string }) {
       <svg
         viewBox={`0 0 ${VIEW_WIDTH.toFixed(1)} ${VIEW_HEIGHT.toFixed(1)}`}
         role="img"
-        aria-label="A pool of thirty Macs drawn as honeycomb. A few cells are running jobs, most hold a booted VM waiting for one, and two are asleep."
+        aria-label="A hive of thirty Macs drawn as honeycomb. A few cells are running jobs, most hold a booted VM waiting for one, and two are asleep."
         className="w-full"
       >
         {CELLS.map((cell, index) => {

@@ -86,7 +86,7 @@ export default async function DashboardPage({
         {installation.repositorySelection === "selected" && (
           <p>
             The App is installed on selected repositories only. Workflows in
-            other repositories will not reach this pool.
+            other repositories will not reach this hive.
           </p>
         )}
         {owner && (
@@ -130,8 +130,8 @@ function FirstJob({
       title:
         machines > 0
           ? online > 0
-            ? `${machines === 1 ? "A Mac is" : `${machines} Macs are`} in the pool`
-            : "A Mac is in the pool, but not connected right now"
+            ? `${machines === 1 ? "A Mac is" : `${machines} Macs are`} in the hive`
+            : "A Mac is in the hive, but not connected right now"
           : "Add a Mac",
       body:
         machines > 0 ? (
@@ -228,9 +228,9 @@ function FirstJob({
 
 function NoPool() {
   return (
-    <AccountPage title="No pool yet">
+    <AccountPage title="No hive yet">
       <p className="max-w-2xl text-muted-foreground">
-        A pool belongs to a GitHub organization. Install HiveWorker on yours, or
+        A hive belongs to a GitHub organization. Install HiveWorker on yours, or
         ask an owner to: once it is installed, every member can sign in and add
         a machine.
       </p>

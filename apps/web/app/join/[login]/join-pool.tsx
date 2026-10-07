@@ -56,7 +56,7 @@ export function JoinPool({
 
       <div className="grid gap-4 lg:grid-cols-5">
         <Panel
-          title={`${login} pool`}
+          title={`${login} hive`}
           aside={
             <span className="flex items-center gap-1.5">
               <span
@@ -113,7 +113,7 @@ export function JoinPool({
               want the whole machine back.
             </p>
             <div>
-              <Button render={<Link href="/dashboard" />}>See the pool</Button>
+              <Button render={<Link href="/dashboard" />}>See the hive</Button>
             </div>
           </Panel>
         ) : (

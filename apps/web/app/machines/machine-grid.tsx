@@ -119,7 +119,7 @@ export function MachineGrid({
                 </p>
                 {(owner || machine.userId === userId) && (
                   <ActionButton
-                    label="Remove from this pool"
+                    label="Remove from this hive"
                     path="/api/machines/revoke"
                     body={{ machineId: machine.id, organizationId }}
                   />

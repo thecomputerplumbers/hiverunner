@@ -147,7 +147,7 @@ export function PricingCalculator() {
         </ul>
         <p className="text-sm leading-6 text-muted-foreground">
           USD estimates at reference speed, for jobs that run on your own
-          organization's machines with the pool paying the organization's
+          organization's machines with the hive paying the organization's
           wallet.
         </p>
       </div>

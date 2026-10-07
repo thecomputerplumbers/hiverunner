@@ -97,7 +97,7 @@ func status() error {
 	fmt.Print(indent(screen.Box("This Mac",
 		field("Name", facts.Name+screen.Dim("  "+facts.Model)),
 		field("Hardware", fmt.Sprintf("%d cores, %d GB", facts.Cores, facts.MemoryBytes/gib)),
-		field("Pools", pools),
+		field("Hives", pools),
 		field("Daemon", screen.Dot(daemonUp)+" "+daemon),
 		field("Jobs", state),
 	)))

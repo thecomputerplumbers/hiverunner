@@ -56,7 +56,7 @@ export function LiveDashboard({
 
       <div className="grid gap-6 lg:grid-cols-5">
         <Panel
-          title="pool"
+          title="hive"
           aside={
             <Link href="/machines" className="hover:text-foreground">
               {machines.length} {machines.length === 1 ? "Mac" : "Macs"}
@@ -129,7 +129,7 @@ function Savings({
   const saved = Math.max(0, lifetime.githubUsd - spent)
   const bars: Array<[string, number, string]> = [
     ["GitHub-hosted", lifetime.githubUsd, "bg-foreground/25"],
-    ["this pool", spent, "bg-primary"],
+    ["this hive", spent, "bg-primary"],
   ]
   return (
     <section
@@ -190,7 +190,7 @@ function Workflow() {
         <Snippet>{`jobs:\n  test:\n    runs-on: ${size.label}`}</Snippet>
         <p className="text-sm text-muted-foreground">
           Change one line. Jobs wait in GitHub&apos;s queue until a Mac in your
-          pool is free.
+          hive is free.
         </p>
       </div>
       <table className="h-fit w-full font-mono text-xs">

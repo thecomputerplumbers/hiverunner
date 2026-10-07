@@ -47,7 +47,7 @@ export default async function SignInPage({
           <CardDescription>
             {invited
               ? `You were asked to lend ${invited}'s CI your spare cores. Sign in with GitHub so we know you are in ${invited}; there is no account to create and no card.`
-              : "Your GitHub organizations decide which pools you can join. There is nothing else to set up."}
+              : "Your GitHub organizations decide which hives you can join. There is nothing else to set up."}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

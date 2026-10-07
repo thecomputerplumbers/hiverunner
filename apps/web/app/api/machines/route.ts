@@ -34,8 +34,8 @@ export async function POST(request: Request) {
         return Response.json(
           {
             error: pools.length
-              ? "Choose which pools this machine should serve"
-              : "You are not a member of any pool",
+              ? "Choose which hives this machine should serve"
+              : "You are not a member of any hive",
             code: pools.length ? "CHOOSE_POOL" : "FORBIDDEN",
             pools: pools.map(({ id, name }) => ({ id, name })),
           },

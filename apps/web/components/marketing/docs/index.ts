@@ -31,8 +31,8 @@ export const DOCS = [
     Body: Daemon,
   },
   {
-    slug: "pools",
-    title: "Pools",
+    slug: "hives",
+    title: "Hives",
     description: "Who can add machines, and what happens when none is free.",
     Body: Pools,
   },

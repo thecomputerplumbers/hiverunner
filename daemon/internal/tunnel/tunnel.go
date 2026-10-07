@@ -23,7 +23,7 @@ import (
 var (
 	// ErrRevoked ends this pool's tunnel, not the daemon: the machine may
 	// still serve other pools.
-	ErrRevoked     = errors.New("this machine no longer serves this pool")
+	ErrRevoked     = errors.New("this machine no longer serves this hive")
 	ErrReplaced    = errors.New("another daemon connected as this machine; only one can run at a time")
 	ErrUnsupported = errors.New("this daemon is too old for the coordinator; update HiveWorker")
 )

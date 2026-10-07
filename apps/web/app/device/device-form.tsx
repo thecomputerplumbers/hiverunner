@@ -65,7 +65,7 @@ export function DeviceForm({
   return (
     <div className="flex flex-col gap-5">
       <p className="text-muted-foreground">
-        A HiveWorker daemon is asking to add this machine to your pool as{" "}
+        A HiveWorker daemon is asking to add this machine to your hive as{" "}
         <strong className="text-foreground">{name}</strong>. Approve only if
         this code matches the one it is showing.
       </p>

@@ -50,7 +50,7 @@ type Pool struct {
 // them this machine should serve.
 type ChoosePoolError struct{ Pools []Pool }
 
-func (e *ChoosePoolError) Error() string { return "choose a pool" }
+func (e *ChoosePoolError) Error() string { return "choose a hive" }
 
 // Error is a refusal from the server, in its own words.
 type Error struct {

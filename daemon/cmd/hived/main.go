@@ -109,7 +109,9 @@ func server() string {
 
 func login(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("login", flag.ExitOnError)
-	pool := flags.String("pool", "", "pool ids to serve, separated by commas, if you belong to several")
+	hive := flags.String("hive", "", "hive ids to serve, separated by commas, if you belong to several")
+	// The name this flag had before a pool was called a hive.
+	flags.StringVar(hive, "pool", "", "the same as --hive")
 	noBrowser := flags.Bool("no-browser", false, "print the sign-in link instead of opening it")
 	_ = flags.Parse(args)
 
@@ -145,8 +147,8 @@ func login(ctx context.Context, args []string) error {
 		DaemonVersion: version,
 		SpeedScore:    score,
 	}
-	if *pool != "" {
-		machine.OrganizationIDs = strings.Split(*pool, ",")
+	if *hive != "" {
+		machine.OrganizationIDs = strings.Split(*hive, ",")
 	}
 	enrollment, err := client.Enroll(ctx, token, machine)
 	var choose *api.ChoosePoolError
@@ -182,14 +184,14 @@ func login(ctx context.Context, args []string) error {
 // askPools lets someone in several organizations choose which of them this
 // machine should serve. It can serve all of them at once.
 func askPools(pools []api.Pool) ([]string, error) {
-	fmt.Println("\nYou belong to more than one pool. Which should this machine serve?")
+	fmt.Println("\nYou belong to more than one hive. Which should this machine serve?")
 	for i, pool := range pools {
 		fmt.Printf("  %d. %s\n", i+1, pool.Name)
 	}
 	fmt.Print("Numbers separated by commas, or \"all\": ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		return nil, errors.New("no pool chosen; run again with --pool")
+		return nil, errors.New("no hive chosen; run again with --hive")
 	}
 	answer := strings.TrimSpace(line)
 	var chosen []string
@@ -202,7 +204,7 @@ func askPools(pools []api.Pool) ([]string, error) {
 	for _, part := range strings.Split(answer, ",") {
 		choice, err := strconv.Atoi(strings.TrimSpace(part))
 		if err != nil || choice < 1 || choice > len(pools) {
-			return nil, errors.New("that is not one of the pools listed")
+			return nil, errors.New("that is not one of the hives listed")
 		}
 		chosen = append(chosen, pools[choice-1].ID)
 	}

@@ -81,7 +81,7 @@ export default function HomePage() {
             </p>
             <WorkflowDiff className="border-0 text-sm leading-9 sm:text-base sm:leading-10" />
             <p className="border-y border-border px-4 py-2.5 font-mono text-xs text-muted-foreground">
-              Your organization's pool, one cell for each Mac
+              Your organization's hive, one cell for each Mac
             </p>
             <HiveComb className="p-4 sm:p-5" />
           </div>
@@ -92,7 +92,7 @@ export default function HomePage() {
         <Container>
           <SectionHeading title="One runner-minute, drawn to scale.">
             A {base.vcpus} vCPU Linux arm64 minute at each provider's list
-            price, beside the same minute in a private pool of your own Macs.{" "}
+            price, beside the same minute in a hive of your own Macs.{" "}
             <Link href="/pricing" className={textLink}>
               Work out your month
             </Link>
@@ -166,8 +166,8 @@ export default function HomePage() {
             <Step number={1} title="Install the GitHub App">
               <p>
                 An organization owner installs HiveWorker on the organization.
-                That creates the runner labels, a private pool, and a wallet
-                holding a trial grant.
+                That creates the runner labels, a hive, and a wallet holding a
+                trial grant.
               </p>
               <ul className="flex flex-wrap gap-2">
                 {RUNNER_SIZES.map((size) => (
@@ -181,7 +181,7 @@ export default function HomePage() {
               <p>
                 Each developer installs the daemon and signs in with GitHub.
                 Belonging to your GitHub organization is what lets a machine
-                join the pool.
+                join the hive.
               </p>
               <CodeBlock title="Terminal" wrap>
                 {INSTALL_COMMAND}
@@ -199,7 +199,7 @@ export default function HomePage() {
             </Step>
             <Step number={3} title="Change one line">
               <p>
-                Jobs with a <Code>hive</Code> label run on your pool. Switching
+                Jobs with a <Code>hive</Code> label run on your hive. Switching
                 back is the same one line.
               </p>
               <WorkflowDiff />

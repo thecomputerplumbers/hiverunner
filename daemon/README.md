@@ -1,14 +1,14 @@
 # hived
 
 The HiveWorker daemon. One static Go binary that enrolls a Mac in its
-organization's pool and holds the single outbound tunnel jobs arrive through.
+organization's hive and holds the single outbound tunnel jobs arrive through.
 
 ```sh
 ./image/build.sh    # once: builds the guest image (needs Docker)
 ./build.sh          # builds ./hived, signed so macOS lets it create VMs
 ./hived selftest    # boots a throwaway VM and reports what it finds
 ./hived login       # sign in with GitHub in the browser, enroll this machine
-./hived run         # connect to every pool it serves and wait for jobs
+./hived run         # connect to every hive it serves and wait for jobs
 ./hived status      # what this Mac lends, and whether it is lending
 ./hived config      # the owner's settings, below
 ./hived pause       # stop taking jobs; ./hived resume to undo
@@ -26,9 +26,9 @@ development) and `HIVE_CONFIG` at another machine file.
 
 A machine belongs to its owner, not to a pool. At `hived login` someone in
 several organizations chooses which of them the machine serves, and can add or
-remove pools later from the dashboard without touching the machine: the
+remove hives later from the dashboard without touching the machine: the
 running daemon asks the server every minute and opens or closes a tunnel per
-pool to match. Its job slots, one unless its owner allows more, are one
+hive to match. Its job slots, one unless its owner allows more, are one
 budget across all of them.
 
 ## Installing and removing
@@ -70,14 +70,14 @@ The settings live in `settings.json` beside the machine file and can be edited
 by hand. A running daemon reads the file again when it changes, so nothing
 needs restarting; a file it cannot read is reported and the last good settings
 stay in force. Outside its hours, on battery with `battery` off, or paused, the
-machine reports `paused` and the pool offers it nothing. The limits on job
-size and job count are sent to the pool in `hello`, so the pool neither offers
+machine reports `paused` and the hive offers it nothing. The limits on job
+size and job count are sent to the hive in `hello`, so the hive neither offers
 past them nor counts the machine as capacity it does not have; changing one
 reconnects the tunnel once the machine is idle.
 
 Jobs running at once share the Mac: together they never take the last two
 cores, and each gets its own VM, memory and disk. A machine serving several
-pools is the judge of its own limits, because one pool cannot see another's
+hives is the judge of its own limits, because one hive cannot see another's
 jobs: an offer that would not fit is declined. The speed score was measured
 on an idle machine, so several jobs at once may each run slower than it says.
 The warm VM is only kept while no job is running.
@@ -100,7 +100,7 @@ disk, and nothing counts against GitHub's cache quota.
 **Whose cache.** One cache per repository, inside one pool. A job proves
 which repository it is with the token GitHub gives it, and hived checks that
 token's signature against GitHub's published keys before believing it. The
-pool is not taken from the job at all: it is the pool whose job hived put in
+hive is not taken from the job at all: it is the hive whose job hived put in
 that VM. So a job cannot reach another repository's cache, and a machine
 serving two organizations keeps their caches apart. Within a repository,
 caches are scoped by branch as GitHub scopes them: a job reads its own
@@ -135,7 +135,7 @@ backups skip. Losing any of it is a cache miss and nothing more.
 
 One file, `~/Library/Application Support/HiveWorker/machine.json`, readable
 by its owner only: the server, the machine id and the machine token. Which
-pools it serves is not stored; the server is asked. The GitHub sign-in is
+hives it serves is not stored; the server is asked. The GitHub sign-in is
 used once to obtain that token and is not kept. Moving the token to the
 Keychain is planned.
 
@@ -181,7 +181,7 @@ taking the job, which stays queued. Measured on 2026-10-04:
 | 2.335.0      | 2026-06-08 | Refused. The runner exited in five seconds with no job |
 
 The daemon recognises the refusal (the runner exits 7). It logs that the image
-must be rebuilt, reports the machine as paused so the pool stops offering it
+must be rebuilt, reports the machine as paused so the hive stops offering it
 jobs, and declines any offer with that reason. It stays that way until it is
 restarted on a new image: bump `RUNNER_VERSION` and its hash in
 `image/build.sh`, run it, and restart `hived`.

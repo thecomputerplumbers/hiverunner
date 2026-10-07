@@ -14,7 +14,7 @@ export function LabelsAndSizes() {
           <tr>
             <th>Label</th>
             <th>vCPUs</th>
-            <th>Per minute, private pool</th>
+            <th>Per minute, your hive</th>
           </tr>
         </thead>
         <tbody>
@@ -66,7 +66,7 @@ export function LabelsAndSizes() {
       <p>
         The labels are created in your organization's default runner group.
         GitHub does not offer that group to public repositories unless you
-        change the group's settings, which suits a private pool.
+        change the group's settings, which suits a hive of your own.
       </p>
     </>
   )

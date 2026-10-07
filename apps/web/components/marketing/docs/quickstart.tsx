@@ -65,7 +65,7 @@ export function Quickstart() {
             </span>
           ))}
         </li>
-        <li>A private pool</li>
+        <li>A hive</li>
         <li>A balance, starting with a trial credit</li>
       </ul>
 

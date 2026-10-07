@@ -72,7 +72,7 @@ export function InvitePanel({
   const typical = Math.max(2, Math.round(now / count))
   const lonely = count === 1
   const empty = Math.max(1, 5 - count)
-  const message = `Add your Mac to the ${organization} runner pool. It runs our CI in a VM on your spare cores. One command, sign in with GitHub, about two minutes: ${url}`
+  const message = `Add your Mac to the ${organization} hive. It runs our CI in a VM on your spare cores. One command, sign in with GitHub, about two minutes: ${url}`
 
   if (count >= 5)
     return (
@@ -133,7 +133,7 @@ export function InvitePanel({
         <p className="max-w-2xl text-base">
           {lonely ? (
             <>
-              <strong>{machines[0]!.name}</strong> is the whole pool. When its
+              <strong>{machines[0]!.name}</strong> is the whole hive. When its
               lid closes, every job waits. Each teammate who joins keeps the
               queue moving and adds jobs that run side by side.
             </>

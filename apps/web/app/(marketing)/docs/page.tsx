@@ -5,7 +5,7 @@ import { EarlyAccessNote } from "@/components/marketing/early-access"
 export const metadata = {
   title: "Docs",
   description:
-    "How to set up HiveWorker and how it works: quickstart, labels and sizes, the daemon, pools, pricing and FAQ.",
+    "How to set up HiveWorker and how it works: quickstart, labels and sizes, the daemon, hives, pricing and FAQ.",
 }
 
 export default function DocsIndexPage() {

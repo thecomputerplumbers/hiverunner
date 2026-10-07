@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     if (!membership || !roleAtLeast(membership.role, "owner"))
       throw new AppError(
         "FORBIDDEN",
-        "Only owners of the GitHub organization can change pool settings"
+        "Only owners of the GitHub organization can change hive settings"
       )
     const settings = {
       allowedTeams: input.allowedTeams.map((team) => team.trim().toLowerCase()),

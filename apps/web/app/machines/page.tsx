@@ -34,8 +34,8 @@ export default async function MachinesPage() {
   return (
     <AccountPage title="machines" live={live}>
       <p className="max-w-3xl text-sm text-muted-foreground">
-        Computers serving the {installation.accountLogin} pool. Each belongs to
-        the person who enrolled it and leaves this pool when they leave the
+        Computers serving the {installation.accountLogin} hive. Each belongs to
+        the person who enrolled it and leaves this hive when they leave the
         organization. One machine can serve several organizations.
       </p>
       <MachineGrid
@@ -69,7 +69,7 @@ export default async function MachinesPage() {
         >
           <p className="max-w-3xl text-sm text-muted-foreground">
             These already run HiveWorker for another organization. Adding one
-            here needs nothing installed; its daemon picks this pool up within a
+            here needs nothing installed; its daemon picks this hive up within a
             minute.
           </p>
           <ul className="divide-y divide-border border-y border-border">

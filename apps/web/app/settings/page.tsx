@@ -7,7 +7,7 @@ import { getDb } from "@/db"
 import { requirePool } from "@/lib/session"
 import { SettingsForm } from "./settings-form"
 
-export const metadata = { title: "Pool settings" }
+export const metadata = { title: "Hive settings" }
 
 export default async function SettingsPage() {
   const { organizationId, installation, membership } = await requirePool()

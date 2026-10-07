@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs the HiveWorker daemon on this Mac and adds it to your pool.
+# Installs the HiveWorker daemon on this Mac and adds it to your hive.
 #
 #   curl -fsSL https://get.hiveworkr.thecomputerplumbers.com/install.sh | sh
 #
@@ -112,7 +112,7 @@ if [ "${HIVE_NO_START:-}" = "1" ]; then
   exit 0
 fi
 
-step "Adding this Mac to your pool"
+step "Adding this Mac to your hive"
 if "$BIN_DIR/hived" status >/dev/null 2>&1; then
   say "This Mac is already signed in."
 else
@@ -178,7 +178,7 @@ done
 [ -n "$started" ] || fail "could not start the daemon. See $LOG_DIR/hived.log"
 
 say ""
-say "Done. This Mac now runs jobs for your pool whenever it is awake."
+say "Done. This Mac now runs jobs for your hive whenever it is awake."
 say ""
 say "  hived status     what this Mac lends, and whether it is lending"
 say "  hived pause      stop taking jobs"

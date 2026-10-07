@@ -14,7 +14,7 @@ export function RouteDiagram({ className }: { className?: string }) {
     >
       <figcaption className="sr-only">
         The route job checks for a free machine for up to 15 seconds. If one is
-        free, the job runs on your pool. If none is, it runs on the
+        free, the job runs on your hive. If none is, it runs on the
         GitHub-hosted runner.
       </figcaption>
       <div className="flex flex-col justify-center gap-1 border border-border bg-card p-3 sm:p-4">
@@ -24,7 +24,7 @@ export function RouteDiagram({ className }: { className?: string }) {
         </span>
       </div>
       <div className="flex flex-col gap-3">
-        <Outcome when="Yes" runner="hive" where="Your pool" solid />
+        <Outcome when="Yes" runner="hive" where="Your hive" solid />
         <Outcome
           when="No"
           runner="ubuntu-latest"

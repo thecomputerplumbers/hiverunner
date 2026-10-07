@@ -24,7 +24,7 @@ const states: Record<string, { title: string; body: string; retry?: boolean }> =
     },
     "not-member": {
       title: "You are not a member of that organization",
-      body: "The App is installed, but GitHub says you are not an active member of the organization, so you cannot join its pool.",
+      body: "The App is installed, but GitHub says you are not an active member of the organization, so you cannot join its hive.",
     },
     "github-required": {
       title: "Sign in with GitHub",

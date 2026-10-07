@@ -92,7 +92,7 @@ func Run(ctx context.Context, options Options) error {
 			switch {
 			case errors.Is(done.err, tunnel.ErrRevoked):
 				// Dropped from one pool. Ask the server what is left.
-				options.Log.Info("no longer serving a pool", "pool", done.pool)
+				options.Log.Info("no longer serving a hive", "pool", done.pool)
 				refresh.Reset(0)
 			case done.err != nil:
 				return done.err
@@ -107,7 +107,7 @@ func Run(ctx context.Context, options Options) error {
 			if err != nil {
 				// The server being unreachable changes nothing: tunnels
 				// already open stay open.
-				options.Log.Warn("could not refresh the pool list", "error", err)
+				options.Log.Warn("could not refresh the hive list", "error", err)
 				continue
 			}
 			wanted := map[string]api.Pool{}
@@ -119,12 +119,12 @@ func Run(ctx context.Context, options Options) error {
 					// The server no longer lists it. Say so here too: this
 					// can win the race with the coordinator closing the
 					// tunnel, and the owner should see why either way.
-					options.Log.Info("no longer serving a pool", "pool", id)
+					options.Log.Info("no longer serving a hive", "pool", id)
 					stop()
 				}
 			}
 			if len(wanted) == 0 && len(running) == 0 {
-				options.Log.Warn("this machine serves no pools; add it to one from the dashboard")
+				options.Log.Warn("this machine serves no hives; add it to one from the dashboard")
 			}
 			for id, pool := range wanted {
 				if _, ok := running[id]; ok {
@@ -136,7 +136,7 @@ func Run(ctx context.Context, options Options) error {
 				}
 				poolCtx, stop := context.WithCancel(ctx)
 				running[id] = stop
-				options.Log.Info("serving a pool", "pool", pool.Name)
+				options.Log.Info("serving a hive", "pool", pool.Name)
 				go func() {
 					err := tunnel.Run(poolCtx, tunnel.Options{
 						URL:           address,

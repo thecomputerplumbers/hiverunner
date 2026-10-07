@@ -84,7 +84,7 @@ export function PoolComb({
       <svg
         viewBox={`0 0 ${width.toFixed(1)} ${height.toFixed(1)}`}
         role="img"
-        aria-label={`${machines.length} Macs in this pool, ${load.size} running jobs.`}
+        aria-label={`${machines.length} Macs in this hive, ${load.size} running jobs.`}
         className="mx-auto w-full"
         style={{ maxWidth: width * 1.25 }}
       >

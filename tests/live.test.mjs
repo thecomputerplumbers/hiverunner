@@ -7,6 +7,7 @@ import {
   provisionInstallation,
 } from "../packages/db/src/installations.ts"
 import { settleJob, startJob } from "../packages/db/src/jobs.ts"
+import { getLeaderboard } from "../packages/db/src/leaderboard.ts"
 import { getBalanceHistory, getLiveSnapshot } from "../packages/db/src/live.ts"
 import { createReceiptSigner } from "../packages/db/src/receipts.ts"
 import { updatePoolSettings } from "../packages/db/src/settings.ts"
@@ -134,5 +135,50 @@ test("balance history walks back from today through the ledger", async (t) => {
   assert.deepEqual(
     history.map((day) => day.balance),
     [5_000_000, 5_000_000 - 3750, 5_000_000 - 7500]
+  )
+})
+
+test("the leaderboard credits whoever's Mac ran the job, by window", async (t) => {
+  const { db, sqlite } = await pool(t)
+  sqlite
+    .prepare(
+      "insert into user (id,name,email,email_verified,created_at,updated_at) values ('bo','Bo','bo@example.test',1,0,0)"
+    )
+    .run()
+  sqlite
+    .prepare(
+      "insert into machine (id,user_id,name,model,os,arch,cores,memory_bytes,speed_score,daemon_version,token_hash,created_at) values ('idle','bo','Idle','Mac15,9','darwin','arm64',8,1,1,'0.1.0','i',0)"
+    )
+    .run()
+  sqlite
+    .prepare(
+      "insert into machine_pool (machine_id,organization_id,created_at) values ('idle',?,0)"
+    )
+    .run(orgId)
+  await run(db, 1, at("2026-10-07T11:05:00Z"), 10)
+  await run(db, 2, at("2026-09-20T11:05:00Z"), 10)
+  await run(db, 3, at("2026-08-01T11:05:00Z"), 10)
+  await run(db, 4, at("2026-10-07T12:20:00Z"), null)
+
+  const board = await getLeaderboard(db, orgId, now)
+  const ada = board.people.find((person) => person.userId === "ada")
+  assert.deepEqual(
+    [ada.scores.week, ada.scores.month, ada.scores.all].map((score) => [
+      score.jobs,
+      score.seconds,
+      Math.round(score.githubUsd * 1000),
+    ]),
+    [
+      [1, 600, 50],
+      [2, 1200, 100],
+      [3, 1800, 150],
+    ]
+  )
+  // A Mac that has joined and run nothing is still on the board, at zero.
+  const bo = board.people.find((person) => person.userId === "bo")
+  assert.deepEqual([bo.machines, bo.scores.all.jobs], [1, 0])
+  assert.deepEqual(
+    board.machines.map((mac) => [mac.name, mac.scores.all.jobs]),
+    [["Mac", 3]]
   )
 })

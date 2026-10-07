@@ -18,7 +18,7 @@ export const metadata = {
 export default function DownloadPage() {
   return (
     <>
-      <PageIntro title="Add your Mac to the pool">
+      <PageIntro title="Add your Mac to the hive">
         One command installs the daemon, signs this Mac in with GitHub and
         starts it. From then on the Mac runs your organization&apos;s jobs in
         throwaway VMs whenever it is awake.
@@ -121,7 +121,7 @@ export default function DownloadPage() {
           remove everything it installed, run <Code>hived uninstall</Code>.
         </p>
         <p className="leading-7 text-muted-foreground">
-          Removing the daemon leaves the Mac listed in your pool as offline.
+          Removing the daemon leaves the Mac listed in your hive as offline.
           Remove it from Machines in the dashboard.
         </p>
       </Band>

@@ -26,6 +26,11 @@
       "icon": "jobs"
     },
     {
+      "href": "/leaderboard",
+      "label": "Leaderboard",
+      "icon": "jobs"
+    },
+    {
       "href": "/wallet",
       "label": "Billing",
       "icon": "billing"
@@ -41,8 +46,8 @@
       "icon": "account"
     },
     {
-      "href": "/pools",
-      "label": "Switch pool",
+      "href": "/hives",
+      "label": "Switch hive",
       "icon": "organization"
     }
   ],

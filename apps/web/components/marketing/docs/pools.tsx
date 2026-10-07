@@ -5,8 +5,8 @@ export function Pools() {
   return (
     <>
       <p>
-        A pool is the set of machines that can run an organization's jobs.
-        Installing the GitHub App creates one private pool for the organization.
+        A hive is the set of machines that can run an organization's jobs.
+        Installing the GitHub App creates one hive for the organization.
       </p>
 
       <h2 id="who-can-join">Who can add machines</h2>
@@ -42,9 +42,9 @@ export function Pools() {
         interrupted.
       </p>
 
-      <h2 id="public-pool">The public pool</h2>
+      <h2 id="public-hive">The public hive</h2>
       <p>
-        Private pools are the product today. A public pool, where jobs can
+        Your own hive is the product today. A public hive, where jobs can
         overflow to machines outside your organization, comes later. It will be
         opt-in per repository and limited to jobs that use no secrets. See{" "}
         <Link href="/security">Security</Link> for the trust model.

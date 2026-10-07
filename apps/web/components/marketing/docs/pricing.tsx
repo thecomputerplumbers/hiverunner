@@ -27,10 +27,9 @@ export function Pricing() {
       <h2 id="compute-unit">The compute unit</h2>
       <p>
         One compute unit is one vCPU for one minute at reference speed. The
-        reference is one core of a standard GitHub-hosted runner. In a private
-        pool a compute unit is charged at{" "}
-        {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)}, which is also the lowest rate
-        the network accepts.
+        reference is one core of a standard GitHub-hosted runner. In your hive a
+        compute unit is charged at {formatRate(FLOOR_USD_PER_COMPUTE_UNIT)},
+        which is also the lowest rate the network accepts.
       </p>
 
       <h2 id="formula">The formula</h2>
@@ -66,11 +65,10 @@ export function Pricing() {
       <h2 id="where-it-goes">Where the charge goes</h2>
       <p>
         HiveWorker keeps {percent.format(JOB_TAX_RATE)} of each job's charge.
-        The rest goes to the machine that ran the job. In a private pool that
-        machine belongs to your organization, so when the pool pays the
-        organization's wallet, the price of a job is the{" "}
-        {percent.format(JOB_TAX_RATE)}. That is the price quoted everywhere on
-        this site.
+        The rest goes to the machine that ran the job. In your hive that machine
+        belongs to your organization, so when the hive pays the organization's
+        wallet, the price of a job is the {percent.format(JOB_TAX_RATE)}. That
+        is the price quoted everywhere on this site.
       </p>
 
       <h2 id="receipts">Receipts</h2>

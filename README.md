@@ -35,7 +35,7 @@ mise run format      # Format the workspace with oxfmt
 pnpm test:worker     # Install, tunnels, job dispatch and signed settlement on local Workers
 pnpm test:daemon     # The real daemon against both local Workers (macOS)
 pnpm run doctor      # Check local setup; also accepts staging or production
-pnpm db:seed         # Repeatable local pools and users
+pnpm db:seed         # Repeatable local hives and users
 pnpm db:reset --yes  # Reset local state; stop the dev server first
 pnpm cf:typegen      # Regenerate Cloudflare binding and runtime types
 ```
@@ -50,14 +50,14 @@ pnpm cf:typegen      # Regenerate Cloudflare binding and runtime types
 | `packages/db`                                       | HiveWorker's D1 tables and the operations on them                   |
 | `packages/github`                                   | GitHub App over `fetch` and WebCrypto                               |
 | `packages/pricing`                                  | Compute-unit math, the floor, comparison rates. Every price is here |
-| `packages/auth`                                     | Better Auth on D1: GitHub sign-in, sessions, pool membership        |
+| `packages/auth`                                     | Better Auth on D1: GitHub sign-in, sessions, hive membership        |
 | `packages/ui*`                                      | Primitives, app chrome, data display, forms                         |
 | `packages/stripe`, `packages/mcp`, `packages/email` | From the starter; switched off until needed                         |
 
 ## Status
 
 Working end to end locally, with tests: GitHub App installation, GitHub
-sign-in and membership, pool settings, the ledger and trial grant, daemon
+sign-in and membership, hive settings, the ledger and trial grant, daemon
 sign-in and enrollment, the tunnel, presence, and revocation.
 
 The scale-set listener, offer/accept/JIT dispatch, isolated VM runner and

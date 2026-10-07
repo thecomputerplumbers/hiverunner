@@ -42,7 +42,7 @@ export function SelectOrganization({
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Choose a pool</CardTitle>
+        <CardTitle>Choose a hive</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {organizations.map((organization) => (

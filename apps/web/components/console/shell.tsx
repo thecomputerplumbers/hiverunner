@@ -2,11 +2,13 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { UserRound } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
 import { useActiveOrganization } from "@workspace/auth/client"
 import { SignOutButton } from "@workspace/auth/react/sign-out-button"
 import { ThemeToggle } from "@workspace/ui-shell/components/theme-toggle"
+import { Button } from "@workspace/ui/components/button"
 import { cn } from "@workspace/ui/lib/utils"
 
 import product from "@/config/product.json"
@@ -22,8 +24,11 @@ const nav = (
   }>
 ).filter(
   (item) =>
-    // Switching pools sits beside the pool's name, not among its pages.
-    item.href !== "/pools" && (!item.feature || product.features[item.feature])
+    // Switching hives sits beside the hive's name, not among its pages.
+    // The account is the person's, not the hive's: it sits with sign-out.
+    item.href !== "/hives" &&
+    item.href !== "/account" &&
+    (!item.feature || product.features[item.feature])
 )
 
 /** Cores a Mac keeps for the person using it, as the coordinator does. */
@@ -36,7 +41,7 @@ const typing = (target: EventTarget | null) =>
 
 /**
  * The signed-in frame: a bar of numbered tabs across the top, the page, and
- * a status line pinned to the bottom that says what the pool is doing right
+ * a status line pinned to the bottom that says what the hive is doing right
  * now, whichever page is open.
  */
 export function ConsoleShell({
@@ -76,7 +81,7 @@ export function ConsoleShell({
               </span>
             </Link>
             <Link
-              href="/pools"
+              href="/hives"
               className="shrink-0 border border-border px-1.5 py-0.5 text-[0.65rem] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
               switch
@@ -95,7 +100,7 @@ export function ConsoleShell({
                   href={item.href}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "-mb-px flex flex-1 shrink-0 items-center justify-center gap-1.5 border-b-2 px-1.5 font-mono text-xs whitespace-nowrap outline-none focus-visible:bg-muted md:flex-none md:px-3",
+                    "-mb-px flex flex-1 shrink-0 items-center justify-center gap-1.5 border-b-2 px-1.5 font-mono text-[0.68rem] whitespace-nowrap outline-none focus-visible:bg-muted sm:text-xs md:flex-none md:px-3",
                     active
                       ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -117,6 +122,14 @@ export function ConsoleShell({
           </nav>
           <div className="flex shrink-0 items-center gap-1">
             <ThemeToggle />
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Your account"
+              render={<Link href="/account" />}
+            >
+              <UserRound />
+            </Button>
             <SignOutButton
               size="icon-sm"
               aria-label="Sign out"

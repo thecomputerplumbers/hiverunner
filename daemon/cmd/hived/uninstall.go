@@ -83,6 +83,6 @@ func uninstall(args []string) error {
 	if len(failed) > 0 {
 		return fmt.Errorf("could not remove: %s", strings.Join(failed, ", "))
 	}
-	fmt.Println("\nRemoved. This Mac still appears in your pool as offline; remove it from the dashboard under Machines.")
+	fmt.Println("\nRemoved. This Mac still appears in your hive as offline; remove it from the dashboard under Machines.")
 	return nil
 }

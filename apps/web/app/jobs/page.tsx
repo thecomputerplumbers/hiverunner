@@ -19,7 +19,7 @@ export default async function JobsPage() {
   return (
     <AccountPage title="jobs" live={live}>
       <p className="max-w-3xl text-sm text-muted-foreground">
-        Jobs that ran in the {installation.accountLogin} pool. Logs stay on
+        Jobs that ran in the {installation.accountLogin} hive. Logs stay on
         GitHub; each job here has a signed receipt.
       </p>
       {jobs.length > 0 && (

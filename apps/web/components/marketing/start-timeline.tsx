@@ -15,7 +15,7 @@ export function StartTimeline({ className }: { className?: string }) {
           Your job
         </Segment>
       </Track>
-      <Track label="A Mac in your pool">
+      <Track label="A Mac in your hive">
         <Segment className="sm:flex-2">Queued</Segment>
         <Segment className="sm:flex-5" job>
           Your job

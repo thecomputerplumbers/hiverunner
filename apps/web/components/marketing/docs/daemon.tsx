@@ -6,7 +6,7 @@ export function Daemon() {
     <>
       <p>
         The daemon is the program on a developer's Mac that takes jobs from the
-        pool and runs them. It is a single signed binary, and it runs as a
+        hive and runs them. It is a single signed binary, and it runs as a
         per-user agent, not as root. A menu bar item is planned.
       </p>
 
