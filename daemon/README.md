@@ -9,7 +9,9 @@ organization's pool and holds the single outbound tunnel jobs arrive through.
 ./hived selftest    # boots a throwaway VM and reports what it finds
 ./hived login       # sign in with GitHub in the browser, enroll this machine
 ./hived run         # connect to every pool it serves and wait for jobs
-./hived status
+./hived status      # what this Mac lends, and whether it is lending
+./hived config      # the owner's settings, below
+./hived pause       # stop taking jobs; ./hived resume to undo
 ./hived benchmark
 ```
 
@@ -27,6 +29,30 @@ several organizations chooses which of them the machine serves, and can add or
 remove pools later from the dashboard without touching the machine: the
 running daemon asks the server every minute and opens or closes a tunnel per
 pool to match. It runs one job at a time across all of them.
+
+## The owner's settings
+
+The machine's owner decides what it lends. `hived config` shows the settings
+and `hived config set <name> <value>` changes one:
+
+| Setting     | Values                | What it does                                     |
+| ----------- | --------------------- | ------------------------------------------------ |
+| `max-vcpus` | `2`, `4`, `8`, `auto` | The largest job this Mac takes                   |
+| `warm`      | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner |
+| `battery`   | `on`, `off`           | Take jobs while unplugged                        |
+| `hours`     | `22:00-07:00`, `any`  | When jobs may start, in local time               |
+
+`hived pause` and `hived resume` stop and restart lending altogether. A job
+already running always finishes.
+
+The settings live in `settings.json` beside the machine file and can be edited
+by hand. A running daemon reads the file again when it changes, so nothing
+needs restarting; a file it cannot read is reported and the last good settings
+stay in force. Outside its hours, on battery with `battery` off, or paused, the
+machine reports `paused` and the pool offers it nothing. The job-size limit is
+sent to the pool in `hello`, so the pool neither offers larger jobs nor counts
+the machine as capacity for them; changing it reconnects the tunnel once the
+machine is idle.
 
 ## What it keeps
 

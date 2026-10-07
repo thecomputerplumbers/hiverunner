@@ -35,3 +35,15 @@ test("a job never takes a machine's last cores from its owner", () => {
     "studio"
   )
 })
+
+test("a job never exceeds the limit a machine's owner set", () => {
+  const studio = machine("studio", { cores: 24, maxVcpus: 4 })
+  assert.equal(pickMachine([studio], 8), null)
+  assert.equal(pickMachine([studio], 4).machineId, "studio")
+  // A faster machine with a limit loses the job to one that may take it.
+  const pool = [
+    machine("fast", { cores: 24, speedScore: 2, maxVcpus: 2 }),
+    machine("slow", { cores: 24, speedScore: 1 }),
+  ]
+  assert.equal(pickMachine(pool, 8).machineId, "slow")
+})

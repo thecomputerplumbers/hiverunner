@@ -42,3 +42,19 @@ func LockWorkDir(dir string) (release func(), err error) {
 		file.Close()
 	}, nil
 }
+
+// WorkDirInUse reports whether a hived process holds this work directory:
+// in practice, whether the daemon is running. It creates nothing, and gives
+// the lock straight back if it happens to get it.
+func WorkDirInUse(dir string) bool {
+	file, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		return errors.Is(err, unix.EWOULDBLOCK)
+	}
+	_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
+	return false
+}

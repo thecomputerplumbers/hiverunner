@@ -46,6 +46,7 @@ type Unusable interface {
 const (
 	ReasonBusy     = "this machine is running a job for another pool"
 	ReasonNoRunner = "this machine cannot run jobs: no runner image is installed"
+	ReasonTooLarge = "this job is larger than this machine's owner allows"
 )
 
 type phase int
@@ -73,6 +74,8 @@ type Manager struct {
 	runner       Runner
 	startTimeout time.Duration
 	log          *slog.Logger
+	// takes is the owner's limit on job size. Nil takes any size.
+	takes func(vcpus int) bool
 
 	mu      sync.Mutex
 	current *slot
@@ -91,6 +94,12 @@ func New(runner Runner, log *slog.Logger) *Manager {
 		log:          log,
 		exits:        map[string]chan protocol.JobExited{},
 	}
+}
+
+// Limit sets the owner's limit on job size. It is asked on every offer, so
+// it may change while the daemon runs. Call it before the first offer.
+func (m *Manager) Limit(takes func(vcpus int) bool) {
+	m.takes = takes
 }
 
 // Busy reports whether a job holds the slot.
@@ -131,6 +140,11 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 			return ""
 		}
 		return ReasonBusy
+	}
+	// The pool is told the limit and should not offer past it. This is for
+	// the offer made before it heard, or by a coordinator too old to listen.
+	if m.takes != nil && !m.takes(offer.VCPUs) {
+		return ReasonTooLarge
 	}
 	held := &slot{
 		pool:         pool,

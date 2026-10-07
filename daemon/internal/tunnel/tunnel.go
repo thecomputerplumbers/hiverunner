@@ -28,6 +28,10 @@ var (
 	ErrUnsupported = errors.New("this daemon is too old for the coordinator; update HiveWorker")
 )
 
+// errLimitChanged ends a session so the next one can tell the pool the
+// owner's new limit on job size.
+var errLimitChanged = errors.New("the job-size limit changed")
+
 type Options struct {
 	// URL is this pool's tunnel, including its `pool` query parameter.
 	URL string
@@ -39,6 +43,9 @@ type Options struct {
 	// Presence is asked whenever the daemon needs to say what state the
 	// machine is in. It must be cheap; it is called on a timer.
 	Presence func() protocol.Presence
+	// MaxVCPUs is the owner's limit on job size, or 0 for none. The pool is
+	// told it in hello, so a change reconnects the tunnel. Nil means none.
+	MaxVCPUs func() int
 	// PresenceEvery is how often Presence is re-read. Defaults to 5s.
 	PresenceEvery time.Duration
 	// PingEvery is the keepalive period. Defaults to 30s.
@@ -64,6 +71,9 @@ func Run(ctx context.Context, options Options) error {
 	}
 	if options.Jobs == nil {
 		options.Jobs = jobs.New(nil, options.Log)
+	}
+	if options.MaxVCPUs == nil {
+		options.MaxVCPUs = func() int { return 0 }
 	}
 	if options.JobContext == nil {
 		options.JobContext = ctx
@@ -148,6 +158,7 @@ func session(ctx context.Context, options Options) (bool, error) {
 	}
 
 	presence := options.Presence()
+	limit := options.MaxVCPUs()
 	// Results wait until after hello: nil blocks this case until then.
 	pending := options.Jobs.Exits(options.PoolID)
 	var exits chan protocol.JobExited
@@ -192,7 +203,9 @@ func session(ctx context.Context, options Options) (bool, error) {
 				// Saying which job is in hand lets the pool pick up where a
 				// dropped connection left off.
 				holding := options.Jobs.Current(options.PoolID)
-				if err := send(protocol.NewHello(options.DaemonVersion, presence, holding)); err != nil {
+				hello := protocol.NewHello(options.DaemonVersion, presence, holding)
+				hello.MaxVCPUs = limit
+				if err := send(hello); err != nil {
 					return welcomed, err
 				}
 				welcomed = true
@@ -248,6 +261,12 @@ func session(ctx context.Context, options Options) (bool, error) {
 		case <-presenceTick.C:
 			if !welcomed {
 				continue
+			}
+			// The limit is only said in hello. Say hello again, but not
+			// while this pool's job is in hand: that can wait for it.
+			if options.MaxVCPUs() != limit && options.Jobs.Current(options.PoolID) == "" {
+				_ = connection.Close(websocket.StatusNormalClosure, "settings changed")
+				return welcomed, errLimitChanged
 			}
 			if next := options.Presence(); next != presence {
 				presence = next

@@ -49,6 +49,11 @@ export type DaemonMessage =
        * of offering a machine that is already at work.
        */
       assignmentId?: string
+      /**
+       * The largest job the machine's owner lets it take. Absent means as
+       * large as the machine allows.
+       */
+      maxVcpus?: number
     }
   | { type: "presence"; presence: Presence }
   /** The machine has reserved its one job slot for this offer. */
@@ -125,7 +130,13 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         !Number.isInteger(value.protocol) ||
         !isString(value.daemonVersion, 40) ||
         !isPresence(value.presence) ||
-        (value.assignmentId !== undefined && !isString(value.assignmentId))
+        (value.assignmentId !== undefined && !isString(value.assignmentId)) ||
+        (value.maxVcpus !== undefined &&
+          !(
+            Number.isInteger(value.maxVcpus) &&
+            (value.maxVcpus as number) >= 1 &&
+            (value.maxVcpus as number) <= 256
+          ))
       )
         return null
       return {
@@ -136,6 +147,9 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         ...(value.assignmentId === undefined
           ? {}
           : { assignmentId: value.assignmentId }),
+        ...(value.maxVcpus === undefined
+          ? {}
+          : { maxVcpus: value.maxVcpus as number }),
       }
     case "presence":
       return isPresence(value.presence)

@@ -13,7 +13,7 @@ import {
   type Presence,
 } from "@workspace/protocol"
 
-import { pickMachine, type Candidate } from "./schedule"
+import { fits, pickMachine, type Candidate } from "./schedule"
 
 /** Rides along with each socket, and survives the object hibernating. */
 type Attachment = Candidate & {
@@ -117,6 +117,8 @@ export class Pool extends DurableObject<CoordinatorEnv> {
           })
         }
       }
+      // Said again on every connection, so lifting a limit clears it here.
+      state.maxVcpus = message.maxVcpus
       await this.db
         .update(machine)
         .set({ daemonVersion: message.daemonVersion })
@@ -260,7 +262,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       const state = this.attachment(socket)
       return (
         state.greeted &&
-        state.cores >= vcpus + 2 &&
+        fits(state, vcpus) &&
         ((state.presence === "online" && !state.assignmentId) ||
           state.label === label)
       )
@@ -317,7 +319,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
             state.greeted &&
             state.presence === "online" &&
             !state.assignmentId &&
-            state.cores >= vcpus + 2 &&
+            fits(state, vcpus) &&
             active.has(state.machineId) &&
             !occupied.has(state.machineId)
           )
@@ -336,7 +338,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     )
       return
     for (const size of RUNNER_SIZES) {
-      if (state.cores < size.vcpus + 2) continue
+      if (!fits(state, size.vcpus)) continue
       await this.env.LISTENER.getByName(
         `${state.organizationId}:${size.label}`
       ).activate(state.organizationId, size.label)

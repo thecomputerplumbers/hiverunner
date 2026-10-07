@@ -278,3 +278,17 @@ func TestAnUnusableRunnerDeclinesWithItsReason(t *testing.T) {
 		t.Fatal("an unusable runner reserved the slot")
 	}
 }
+
+func TestAnOfferPastTheOwnersLimitIsDeclined(t *testing.T) {
+	manager := New(newFake(), quiet)
+	manager.Limit(func(vcpus int) bool { return vcpus <= 4 })
+	if reason := manager.Offer("p", &protocol.JobAssign{AssignmentID: "big", VCPUs: 8}); reason != ReasonTooLarge {
+		t.Fatalf("an 8 vCPU offer under a limit of 4: %q", reason)
+	}
+	if manager.Busy() {
+		t.Fatal("a declined offer took the slot")
+	}
+	if reason := manager.Offer("p", &protocol.JobAssign{AssignmentID: "fits", VCPUs: 4}); reason != "" {
+		t.Fatalf("a 4 vCPU offer under a limit of 4 was declined: %q", reason)
+	}
+}

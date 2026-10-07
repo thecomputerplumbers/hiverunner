@@ -253,3 +253,45 @@ func TestAJobSurvivesAReconnect(t *testing.T) {
 		t.Fatal("the job's result never arrived after the reconnect")
 	}
 }
+
+// The owner's limit travels in hello, so changing it must reach the pool
+// without anyone restarting the daemon.
+func TestChangingTheJobSizeLimitSaysHelloAgain(t *testing.T) {
+	var presence atomic.Value
+	presence.Store(protocol.Online)
+	var limit atomic.Int32
+	limit.Store(4)
+	done := make(chan struct{})
+	url := coordinator(t, func(ctx context.Context, c *websocket.Conn, attempt int) {
+		write(ctx, c, `{"type":"welcome","machineId":"m","protocol":2}`)
+		hello := read(ctx, t, c)
+		switch attempt {
+		case 1:
+			if hello["maxVcpus"] != float64(4) {
+				t.Errorf("first hello = %v", hello)
+			}
+			limit.Store(0)
+			// The daemon hangs up to reconnect; wait for it.
+			_, _, _ = c.Read(ctx)
+		case 2:
+			if _, limited := hello["maxVcpus"]; limited {
+				t.Errorf("hello after the limit was lifted = %v", hello)
+			}
+			close(done)
+		}
+	})
+	o := options(url, "hwm_good", &presence)
+	o.MaxVCPUs = func() int { return int(limit.Load()) }
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan error, 1)
+	go func() { finished <- Run(ctx, o) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the daemon did not say hello again")
+	}
+	cancel()
+	if err := <-finished; err != nil {
+		t.Fatalf("Run() after cancel = %v", err)
+	}
+}

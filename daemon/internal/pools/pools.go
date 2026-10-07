@@ -22,6 +22,9 @@ type Options struct {
 	DaemonVersion string
 	// Available says whether the machine's owner would mind a job right now.
 	Available func() bool
+	// MaxVCPUs is the owner's limit on job size, or 0 for none. It may
+	// change while the daemon runs. Nil means none.
+	MaxVCPUs func() int
 	// Runner runs jobs. Nil means the machine connects and reports presence
 	// but declines every job.
 	Runner jobs.Runner
@@ -49,6 +52,12 @@ func Run(ctx context.Context, options Options) error {
 	defer cancel()
 
 	slot := jobs.New(options.Runner, options.Log)
+	if options.MaxVCPUs != nil {
+		slot.Limit(func(vcpus int) bool {
+			limit := options.MaxVCPUs()
+			return limit == 0 || vcpus <= limit
+		})
+	}
 	presence := func() protocol.Presence {
 		switch {
 		case slot.Busy():
@@ -138,6 +147,7 @@ func Run(ctx context.Context, options Options) error {
 						Token:         options.Token,
 						DaemonVersion: options.DaemonVersion,
 						Presence:      presence,
+						MaxVCPUs:      options.MaxVCPUs,
 						PresenceEvery: options.PresenceEvery,
 						PingEvery:     options.PingEvery,
 						Jobs:          slot,

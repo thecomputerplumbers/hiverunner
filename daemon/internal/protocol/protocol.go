@@ -49,6 +49,9 @@ type Hello struct {
 	// daemon that reconnects mid-job says so, so the pool restores busy
 	// instead of offering a machine that is already at work.
 	AssignmentID string `json:"assignmentId,omitempty"`
+	// MaxVCPUs is the largest job the machine's owner lets it take. Absent
+	// means as large as the machine allows.
+	MaxVCPUs int `json:"maxVcpus,omitempty"`
 }
 
 // PresenceUpdate reports a change of state.

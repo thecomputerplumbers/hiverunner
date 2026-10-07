@@ -25,6 +25,7 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/pools"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/settings"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/vm"
 )
 
@@ -37,7 +38,10 @@ const usage = `hived, the HiveWorker daemon
 
   hived login       Sign in with GitHub and add this machine to your pool
   hived run         Connect to the pool and wait for jobs
-  hived status      Show what this machine is enrolled as
+  hived status      Show what this machine lends, and whether it is lending
+  hived config      Show or change this machine's settings
+  hived pause       Stop taking jobs until you say otherwise
+  hived resume      Take jobs again
   hived logout      Forget this machine's token
   hived selftest    Boot a throwaway VM and report what it finds
   hived benchmark   Measure this machine's speed score
@@ -62,6 +66,12 @@ func main() {
 		err = run(ctx)
 	case "status":
 		err = status()
+	case "config":
+		err = configure(os.Args[2:])
+	case "pause":
+		err = pause(true)
+	case "resume":
+		err = pause(false)
 	case "logout":
 		err = config.Remove()
 	case "selftest":
@@ -200,6 +210,16 @@ func run(ctx context.Context) error {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	log.Info("starting", "version", version, "machine", machine.MachineID)
+	live, err := settings.Watch()
+	if err != nil {
+		return err
+	}
+	live.OnError = func(err error) {
+		log.Warn("keeping the last settings that could be read", "error", err)
+	}
+	// Whether the owner would mind a job right now: their settings, then
+	// what the machine itself is doing.
+	holding := func() string { return live.Get().Holding(host.ReadPower(), time.Now()) }
 	refresh := time.Minute
 	if seconds, err := strconv.Atoi(os.Getenv("HIVE_REFRESH_SECONDS")); err == nil && seconds > 0 {
 		refresh = time.Duration(seconds) * time.Second
@@ -242,13 +262,15 @@ func run(ctx context.Context) error {
 			log.Info("cleared what a previous run left behind", "directories", swept)
 		}
 		// One VM of the default size stays booted while the machine is
-		// available, so a job skips the boot. HIVE_WARM=0 turns it off.
+		// available, so a job skips the boot. The owner's `warm` setting
+		// turns it off and on while running; HIVE_WARM=0 turns it off for
+		// good.
 		if os.Getenv("HIVE_WARM") != "0" {
 			vmRunner.WarmVCPUs = 2
 			tended = make(chan struct{})
 			go func() {
 				defer close(tended)
-				vmRunner.Tend(ctx, func() bool { return host.ReadPower().Available() })
+				vmRunner.Tend(ctx, func() bool { return live.Get().Warm && holding() == "" })
 			}()
 		}
 		log.Info("ready to run jobs", "runner", vmRunner.Image.RunnerVersion, "image", vmRunner.Image.ImageVersion, "warm", vmRunner.WarmVCPUs)
@@ -266,8 +288,9 @@ func run(ctx context.Context) error {
 			if unusable, ok := runner.(jobs.Unusable); ok && unusable.Unusable() != "" {
 				return false
 			}
-			return host.ReadPower().Available()
+			return holding() == ""
 		},
+		MaxVCPUs: func() int { return live.Get().MaxVCPUs },
 	})
 }
 
@@ -354,33 +377,6 @@ func devJob(ctx context.Context, args []string) error {
 	}
 	if code != 0 {
 		return fmt.Errorf("the runner exited %d", code)
-	}
-	return nil
-}
-
-func status() error {
-	machine, err := config.Load()
-	if err != nil {
-		return err
-	}
-	power := host.ReadPower()
-	fmt.Printf("Machine:  %s\nServer:   %s\n", machine.MachineID, machine.Server)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if assignment, err := api.New(machine.Server).Me(ctx, machine.Token); err != nil {
-		fmt.Printf("Pools:    unknown (%v)\n", err)
-	} else {
-		names := make([]string, len(assignment.Pools))
-		for i, pool := range assignment.Pools {
-			names[i] = pool.Name
-		}
-		fmt.Printf("Pools:    %s\n", strings.Join(names, ", "))
-	}
-	switch {
-	case power.LidClosed:
-		fmt.Println("Jobs:     paused (lid closed)")
-	default:
-		fmt.Println("Jobs:     would accept")
 	}
 	return nil
 }

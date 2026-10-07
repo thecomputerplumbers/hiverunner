@@ -12,6 +12,13 @@
     "presence": "busy",
     "assignmentId": "a-1"
   },
+  {
+    "type": "hello",
+    "protocol": 2,
+    "daemonVersion": "0.1.0",
+    "presence": "online",
+    "maxVcpus": 4
+  },
   { "type": "presence", "presence": "paused" },
   { "type": "presence", "presence": "draining" },
   { "type": "job.accepted", "assignmentId": "a-1" },

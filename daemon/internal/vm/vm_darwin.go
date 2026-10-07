@@ -402,12 +402,8 @@ func (r *Runner) configure(vcpus int, disk, share, console string, mac *vz.MACAd
 	if host := runtime.NumCPU(); vcpus > host {
 		vcpus = host
 	}
-	// 2 GiB a core, at least 4: what a hosted runner of the same size has
-	// or a little less, and never more than half the Mac.
-	memory := uint64(max(vcpus*2, 4)) * gib
-	if total, err := unix.SysctlUint64("hw.memsize"); err == nil && memory > total/2 {
-		memory = total / 2 / gib * gib
-	}
+	total, _ := unix.SysctlUint64("hw.memsize")
+	memory := GuestMemoryBytes(vcpus, total)
 
 	boot, err := vz.NewLinuxBootLoader(
 		r.Image.path(r.Image.Kernel),
