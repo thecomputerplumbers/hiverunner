@@ -44,6 +44,7 @@ const usage = `hived, the HiveWorker daemon
   hived pause       Stop taking jobs until you say otherwise
   hived resume      Take jobs again
   hived logout      Forget this machine's token
+  hived uninstall   Remove HiveWorker from this Mac
   hived selftest    Boot a throwaway VM and report what it finds
   hived benchmark   Measure this machine's speed score
   hived version
@@ -77,6 +78,8 @@ func main() {
 		err = pause(false)
 	case "logout":
 		err = config.Remove()
+	case "uninstall":
+		err = uninstall(os.Args[2:])
 	case "selftest":
 		err = selftest(ctx)
 	case "dev-job":

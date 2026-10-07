@@ -21,7 +21,7 @@ import { AccountPage } from "@/components/account-page"
 import { RouteLink } from "@/components/route-link"
 import { getDb } from "@/db"
 import { formatMoney } from "@/lib/format"
-import { INSTALL_COMMAND } from "@/components/marketing/site"
+import { DAEMON_RELEASED, INSTALL_COMMAND } from "@/components/marketing/site"
 import { getPool } from "@/lib/session"
 
 export const metadata = { title: "Dashboard" }
@@ -196,13 +196,28 @@ function FirstJob({
           )
         ) : (
           <>
-            <p>
-              On any Apple Silicon Mac, run this and sign in with GitHub when
-              the browser opens. Anyone in {organization} can.
-            </p>
+            {DAEMON_RELEASED ? (
+              <p>
+                On any Apple Silicon Mac, paste this into Terminal and sign in
+                with GitHub when the browser opens. Anyone in {organization}{" "}
+                can. It asks for no password.
+              </p>
+            ) : (
+              <p>
+                The installer is not released yet. This is the command that will
+                add a Mac, and it does not work today.
+              </p>
+            )}
             <pre className="overflow-x-auto rounded-lg border bg-muted p-3 text-sm">
               <code>{INSTALL_COMMAND}</code>
             </pre>
+            <p>
+              <Link className="underline" href="/download">
+                {DAEMON_RELEASED
+                  ? "What it installs, and what the Mac needs"
+                  : "Status and requirements"}
+              </Link>
+            </p>
           </>
         ),
     },

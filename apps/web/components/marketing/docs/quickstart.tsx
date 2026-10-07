@@ -2,7 +2,7 @@ import Link from "next/link"
 import { RUNNER_SIZES } from "@workspace/pricing"
 import { Code, CodeBlock } from "../code"
 import { RouteDiagram } from "../route-diagram"
-import { COORDINATOR_ORIGIN, INSTALL_COMMAND } from "../site"
+import { COORDINATOR_ORIGIN, DAEMON_RELEASED, INSTALL_COMMAND } from "../site"
 import { RouteLink } from "@/components/route-link"
 
 /**
@@ -66,7 +66,7 @@ export function Quickstart() {
           ))}
         </li>
         <li>A private pool</li>
-        <li>A wallet with a trial grant</li>
+        <li>A balance, starting with a trial credit</li>
       </ul>
 
       <h2 id="add-a-machine">2. Add a machine</h2>
@@ -75,7 +75,11 @@ export function Quickstart() {
         {INSTALL_COMMAND}
       </CodeBlock>
       <p>
-        Not released yet. See <Link href="/download">Download</Link> for status.
+        {DAEMON_RELEASED
+          ? "It installs under your home directory and asks for no password. "
+          : "Not released yet. "}
+        See <Link href="/download">Download</Link> for{" "}
+        {DAEMON_RELEASED ? "what it installs" : "status"}.
       </p>
       <p>
         A browser window opens. Sign in with GitHub and approve the machine. It

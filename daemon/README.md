@@ -31,6 +31,23 @@ running daemon asks the server every minute and opens or closes a tunnel per
 pool to match. Its job slots, one unless its owner allows more, are one
 budget across all of them.
 
+## Installing and removing
+
+Developers install with one command, which is `release/install.sh` served
+from the releases bucket:
+
+```sh
+curl -fsSL https://get.hiveworkr.thecomputerplumbers.com/install.sh | sh
+```
+
+It checks the Mac, downloads the daemon and the guest image and verifies
+both, installs under the home directory, runs `hived login`, and starts a
+per-user launch agent. Running it again updates. `hived uninstall` removes
+the service, the image, the Actions cache, the settings, the sign-in and the
+binary, after asking.
+
+Building and publishing a release is in `docs/deployment.md`.
+
 ## The owner's settings
 
 The machine's owner decides what it lends. `hived config` shows the settings

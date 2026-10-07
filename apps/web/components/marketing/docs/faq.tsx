@@ -1,14 +1,16 @@
 import Link from "next/link"
 import product from "@/config/product.json"
 import { Code } from "../code"
+import { DAEMON_RELEASED } from "../site"
 
 export function Faq() {
   return (
     <dl>
       <dt>Is HiveWorker available now?</dt>
       <dd>
-        Not generally. It is in early access and the daemon has not been
-        released. These docs describe how it is designed to work.
+        {DAEMON_RELEASED
+          ? "It is in early access. The daemon is released for Apple Silicon Macs."
+          : "Not generally. It is in early access and the daemon has not been released. These docs describe how it is designed to work."}
       </dd>
 
       <dt>Can HiveWorker read my code?</dt>

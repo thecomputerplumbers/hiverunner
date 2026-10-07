@@ -13,8 +13,21 @@ export const INSTALL_COMMAND = `curl -fsSL ${INSTALL_SCRIPT_URL} | sh`
 export const COORDINATOR_ORIGIN =
   "https://connect.hiveworkr.thecomputerplumbers.com"
 
-/** No daemon binary has been published. Flip this with the first release. */
+/**
+ * Whether `INSTALL_COMMAND` works: a signed daemon and its image are
+ * published where it downloads from. Every page that shows the command
+ * reads this, so flipping it is the whole of announcing a release.
+ */
 export const DAEMON_RELEASED = false
+
+/** The oldest macOS the daemon runs on. `install.sh` checks the same. */
+export const DAEMON_MIN_MACOS = 13
+
+/**
+ * Whose name macOS shows for the daemon: the Apple developer ID it is
+ * signed and notarized under.
+ */
+export const DAEMON_SIGNER = "Layups AI LLC"
 
 export const MARKETING_NAV = [
   { href: "/pricing", label: "Pricing" },

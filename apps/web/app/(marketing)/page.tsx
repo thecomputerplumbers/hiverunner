@@ -15,7 +15,11 @@ import { HiveComb } from "@/components/marketing/hive-comb"
 import { IsolationDiagram } from "@/components/marketing/isolation-diagram"
 import { textLink } from "@/components/marketing/page-parts"
 import { PriceBars } from "@/components/marketing/price-bars"
-import { APP_PERMISSIONS, INSTALL_COMMAND } from "@/components/marketing/site"
+import {
+  APP_PERMISSIONS,
+  DAEMON_RELEASED,
+  INSTALL_COMMAND,
+} from "@/components/marketing/site"
 import { StartTimeline } from "@/components/marketing/start-timeline"
 import { WorkflowDiff } from "@/components/marketing/workflow-diff"
 import { RouteLink } from "@/components/route-link"
@@ -183,9 +187,13 @@ export default function HomePage() {
                 {INSTALL_COMMAND}
               </CodeBlock>
               <p className="text-sm">
-                The daemon is not released yet.{" "}
+                {DAEMON_RELEASED
+                  ? "One command, no password and nothing system-wide. "
+                  : "The daemon is not released yet. "}
                 <Link href="/download" className={textLink}>
-                  Requirements and status
+                  {DAEMON_RELEASED
+                    ? "What it installs"
+                    : "Requirements and status"}
                 </Link>
               </p>
             </Step>

@@ -80,3 +80,53 @@ unconfigured. This repository's local checks do not certify an actual deployment
 
 References: [Wrangler environments](https://developers.cloudflare.com/workers/wrangler/environments/)
 and [GitHub Actions](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/).
+
+## Releasing the daemon
+
+The daemon and the Linux image jobs run in are published to the R2 bucket
+`hiveworker-releases`, served at `https://get.hiveworkr.thecomputerplumbers.com`.
+`curl -fsSL …/install.sh | sh` is the whole of installing on a developer's Mac.
+
+| Object                                   | What it is                                   |
+| ---------------------------------------- | -------------------------------------------- |
+| `latest.json`                            | The current version, with URLs and checksums |
+| `install.sh`                             | `daemon/release/install.sh`                  |
+| `hived/<version>/hived-darwin-arm64.zip` | The daemon, signed and notarized             |
+| `images/<image>/image.aar`               | The guest image, as an Apple Archive         |
+
+A release is built and published from a clean checkout on an Apple Silicon
+Mac, because signing and notarizing need macOS:
+
+```sh
+# Once per Mac: the notarization credentials, kept in the keychain.
+xcrun notarytool store-credentials hiveworker --key AuthKey_XXXX.p8 --key-id XXXX --issuer XXXX
+
+# Each release: bump daemon/VERSION, commit, then
+HIVE_SIGN_IDENTITY="Developer ID Application: … (TEAMID)" ./daemon/release/publish.sh --upload
+```
+
+It needs a **Developer ID Application** certificate in the keychain. An Apple
+Distribution or Apple Development certificate will not do: those are for the
+App Store and for your own devices. The script refuses to upload a build
+that is not signed with one, and the installer refuses to install a daemon
+whose signing team is not the one named in `latest.json`.
+
+`./daemon/release/publish.sh --out DIR` builds the same tree locally without
+signing or uploading. Serve `DIR` and point the installer at it to try a
+change to either script:
+
+```sh
+HIVE_RELEASES=http://127.0.0.1:8000 HIVE_DEV=1 HIVE_NO_START=1 HOME=/tmp/fresh sh DIR/install.sh
+```
+
+`HIVE_NO_START=1` matters in that test. The background service is named per
+user, not per home directory, so without it the installer would replace the
+service of the daemon really installed on that Mac.
+
+After the first release, set `DAEMON_RELEASED` in
+`apps/web/components/marketing/site.ts` to `true` and release the web app.
+That one constant turns every page from "not released yet" to the working
+instructions. `DAEMON_SIGNER` beside it is the name macOS shows.
+
+The image changes only when `daemon/image` does. `publish.sh` uploads it if
+that version is not in the bucket yet and otherwise leaves it alone.
