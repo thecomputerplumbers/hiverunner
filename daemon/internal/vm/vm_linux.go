@@ -38,6 +38,8 @@ type platformState struct {
 	// unconfined is set once this host's QEMU has refused to confine
 	// itself, so later VMs do not ask again.
 	unconfined bool
+	// complain says once, not for every VM, why there is no cache.
+	complain sync.Once
 }
 
 // The programs a VM is made of on Linux. KVM does the virtualization; QEMU
@@ -72,6 +74,24 @@ func kvmUsable() error {
 	return file.Close()
 }
 
+// vsockUsable reports whether this user may give a VM a socket to the host.
+// The device is often the kvm group's alone, while /dev/kvm itself is also
+// lent to whoever is sitting at the machine; so one can work without the
+// other.
+func vsockUsable() error {
+	file, err := os.OpenFile("/dev/vhost-vsock", os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return errors.New("the vhost_vsock module is not loaded: sudo modprobe vhost_vsock")
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return errors.New("your user cannot open /dev/vhost-vsock: run `sudo usermod -aG kvm $USER`, then log out and back in")
+	}
+	if err != nil {
+		return fmt.Errorf("/dev/vhost-vsock: %w", err)
+	}
+	return file.Close()
+}
+
 func findTools() (tools, error) {
 	system := map[string]string{"arm64": "qemu-system-aarch64", "amd64": "qemu-system-x86_64"}[runtime.GOARCH]
 	if system == "" {
@@ -86,20 +106,29 @@ func findTools() (tools, error) {
 					*into = name
 					return
 				}
+			} else if name == "" {
+				continue
 			} else if resolved, err := exec.LookPath(name); err == nil {
 				*into = resolved
 				return
 			}
 		}
-		missing = append(missing, names[0])
+		missing = append(missing, filepath.Base(names[len(names)-1]))
 	}
 	look(&found.qemu, system)
 	look(&found.qemuImg, "qemu-img")
-	// Distributions keep virtiofsd out of PATH.
-	look(&found.virtiofsd, "virtiofsd", "/usr/libexec/virtiofsd", "/usr/lib/qemu/virtiofsd", "/usr/lib/virtiofsd")
+	// The installer's own copy first: it is there only on a system that
+	// packages no virtiofsd able to run without root. Otherwise the
+	// system's, which distributions keep out of PATH. Not /usr/lib/qemu:
+	// what lives there is the older one from inside QEMU, which must be root.
+	bundled := ""
+	if dir, err := os.UserConfigDir(); err == nil {
+		bundled = filepath.Join(dir, "HiveWorker", "bin", "virtiofsd")
+	}
+	look(&found.virtiofsd, bundled, "virtiofsd", "/usr/libexec/virtiofsd", "/usr/lib/virtiofsd")
 	look(&found.passt, "passt")
 	if len(missing) > 0 {
-		return tools{}, fmt.Errorf("missing %s. On Debian or Ubuntu: sudo apt install qemu-system qemu-utils virtiofsd passt", strings.Join(missing, ", "))
+		return tools{}, fmt.Errorf("missing %s. On Debian or Ubuntu: sudo apt install qemu-system qemu-utils passt; run the installer again for virtiofsd", strings.Join(missing, ", "))
 	}
 	return found, nil
 }
@@ -128,8 +157,10 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) error {
 	// without it still runs jobs; they use GitHub's cache.
 	offered := false
 	if r.Guest != nil {
-		if err := r.listen(); err != nil {
-			r.Log.Warn("this VM cannot reach the cache", "error", err)
+		if err := vsockUsable(); err != nil {
+			r.platform.complain.Do(func() { r.Log.Warn("VMs on this machine cannot reach the cache", "error", err) })
+		} else if err := r.listen(); err != nil {
+			r.platform.complain.Do(func() { r.Log.Warn("VMs on this machine cannot reach the cache", "error", err) })
 		} else {
 			offered = true
 		}
@@ -256,7 +287,9 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 		"-drive", "if=none,id=disk,format=qcow2,cache=unsafe,discard=unmap,file=" + disk,
 		"-device", "virtio-blk-pci,drive=disk",
 		"-netdev", "stream,id=net,server=off,addr.type=unix,addr.path=" + networkSocket,
-		"-device", "virtio-net-pci,netdev=net,mac=" + mac.String(),
+		// No option ROM: the kernel is booted directly, never from the
+		// network, and the ROM is a separate package some systems lack.
+		"-device", "virtio-net-pci,netdev=net,romfile=,mac=" + mac.String(),
 		"-chardev", "socket,id=share,path=" + shareSocket,
 		"-device", "vhost-user-fs-pci,chardev=share,tag=" + shareTag,
 		// The guest's console goes to a file, for diagnosis. Nothing is

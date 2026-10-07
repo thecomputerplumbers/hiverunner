@@ -68,9 +68,14 @@ programs stand around it, all running as the daemon's own user:
 - **passt** is the guest's network: out through the user's own sockets,
   nothing in, and no address that reaches the host's loopback.
 
-The installer does not install these and never asks for a password. It says
-what is missing and how to get it (`sudo apt install qemu-system qemu-utils
-virtiofsd passt` on Debian or Ubuntu) and the user must be able to open
+The installer does not install QEMU or passt and never asks for a password.
+It says what is missing and how to get it (`sudo apt install qemu-system
+qemu-utils passt` on Debian, Ubuntu or Raspberry Pi OS). virtiofsd is the
+exception: Debian 12 and Raspberry Pi OS 12 package only the older one that
+came inside QEMU and must be root, so where the system has no virtiofsd that
+runs as an ordinary user the installer downloads HiveWorker's own static
+build of it (`release/virtiofsd.sh`) into `~/.config/HiveWorker/bin`, and the
+daemon looks there first. The user must be able to open
 `/dev/kvm`, which usually means being in the `kvm` group. A cloud VM has no
 KVM unless its provider offers nested virtualization; bare metal and home
 servers do.
@@ -78,8 +83,9 @@ servers do.
 The guest reaches the Actions cache over `vhost-vsock`. Every VM on a Linux
 host dials the same host socket, so the daemon tells them apart by the
 address the kernel assigned each VM, which a guest cannot choose, and refuses
-any caller it did not start. That needs the `vhost_vsock` module; without it
-jobs run and use GitHub's cache.
+any caller it did not start. That needs the `vhost_vsock` module and a user who may open `/dev/vhost-vsock`,
+which is often the `kvm` group's alone even where `/dev/kvm` is lent to
+whoever is logged in. Without either, jobs run and use GitHub's cache.
 
 A machine with a battery follows the same rules as a Mac: jobs on battery
 unless the owner says otherwise, none with the lid shut. A machine with

@@ -11,6 +11,7 @@
 #   hived/<version>/hived-darwin-arm64.zip    signed and notarized
 #   images/<image>/image.aar                  the Linux image, as an Apple Archive
 #   linux-<arch>.txt                          what install.sh reads on Linux
+#   tools/virtiofsd-<version>-linux-<arch>-<sum>  for systems without their own
 #   hived/<version>/hived-linux-<arch>.tar.gz
 #   images/<image>/image-<arch>-<sum>.tar.gz.aa, .ab, …  the same image, as a tarball in pieces
 #
@@ -137,6 +138,21 @@ linux() { # arch image-directory
   split -b 200m "$packing" "$out/$image_key."
   rm "$packing"
   image_parts=$(cd "$out/images/$this_image" && ls "$(basename "$image_key")".* | sed 's/.*\.//' | tr '\n' ' ' | sed 's/ $//')
+  # The program that shares a job's directory with its VM, for systems that
+  # do not package the one that runs without root. Built once per version
+  # and kept, because the build takes minutes and need not be repeated.
+  virtiofsd_version=$(sed -n 's/^VIRTIOFSD_VERSION="${VIRTIOFSD_VERSION:-\(.*\)}"/\1/p' release/virtiofsd.sh)
+  kept="${HIVE_TOOLS:-$HOME/Library/Caches/HiveWorker/tools}/virtiofsd-$virtiofsd_version-linux-$arch"
+  if [ ! -f "$kept" ]; then
+    echo "   building virtiofsd $virtiofsd_version for $arch, once"
+    mkdir -p "$(dirname "$kept")"
+    ./release/virtiofsd.sh "$arch" "$kept"
+  fi
+  virtiofsd_sha=$(shasum -a 256 "$kept" | cut -d' ' -f1)
+  virtiofsd_key="tools/virtiofsd-$virtiofsd_version-linux-$arch-$(printf %.12s "$virtiofsd_sha")"
+  mkdir -p "$out/tools"
+  cp "$kept" "$out/$virtiofsd_key"
+  cp release/virtiofsd.NOTICE.txt "$out/tools/virtiofsd.NOTICE.txt"
   cat > "$out/linux-$arch.txt" <<MANIFEST
 version=$version
 commit=$(git rev-parse HEAD)
@@ -147,6 +163,9 @@ image_url=$BASE/$image_key
 image_parts=$image_parts
 image_sha256=$image_tar_sha
 image_megabytes=$image_megabytes
+virtiofsd_version=$virtiofsd_version
+virtiofsd_url=$BASE/$virtiofsd_key
+virtiofsd_sha256=$virtiofsd_sha
 MANIFEST
   linux_arches="$linux_arches $arch"
   echo "   $arch: daemon and image $this_image, $image_megabytes MB"
@@ -217,8 +236,13 @@ for arch in $linux_arches; do
       put "$image_key.$part" "$out/$image_key.$part" application/octet-stream "public, max-age=31536000, immutable"
     fi
   done
+  virtiofsd_key=$(sed -n "s|^virtiofsd_url=$BASE/||p" "$out/linux-$arch.txt")
+  if ! published "$virtiofsd_key"; then
+    put "$virtiofsd_key" "$out/$virtiofsd_key" application/octet-stream "public, max-age=31536000, immutable"
+  fi
   put "hived/$version/hived-linux-$arch.tar.gz" "$out/hived/$version/hived-linux-$arch.tar.gz" application/gzip "public, max-age=31536000, immutable"
 done
+[ -z "$linux_arches" ] || put "tools/virtiofsd.NOTICE.txt" "$out/tools/virtiofsd.NOTICE.txt" "text/plain; charset=utf-8" "public, max-age=3600"
 put "install.sh" "$out/install.sh" "text/x-shellscript; charset=utf-8" "public, max-age=60"
 put "latest.json" "$out/latest.json" application/json "public, max-age=60"
 for arch in $linux_arches; do

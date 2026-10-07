@@ -1,0 +1,27 @@
+virtiofsd, as distributed with HiveWorker
+
+This is an unmodified build of virtiofsd, the vhost-user virtio-fs device
+backend, from https://gitlab.com/virtio-fs/virtiofsd. HiveWorker's installer
+downloads it only on systems that do not package a virtiofsd that runs
+without root.
+
+virtiofsd is licensed under Apache-2.0 AND BSD-3-Clause. Its source, and the
+full text of both licenses, are at the address above and in the crate
+published at https://crates.io/crates/virtiofsd.
+
+The binary is statically linked with:
+
+  musl libc     MIT              https://musl.libc.org
+  libseccomp    LGPL-2.1-only    https://github.com/seccomp/libseccomp
+  libcap-ng     LGPL-2.1-or-later https://github.com/stevegrubb/libcap-ng
+
+and with the Rust crates named in virtiofsd's Cargo.lock, under their own
+licenses (mostly MIT or Apache-2.0).
+
+To rebuild it yourself, with your own copies of the libraries above, run the
+script HiveWorker builds it with, which needs only Docker:
+
+  https://github.com/thecomputerplumbers/hiveworker/blob/main/daemon/release/virtiofsd.sh
+
+You may use your distribution's virtiofsd instead: put it on your PATH and
+remove HiveWorker's copy from its configuration directory.

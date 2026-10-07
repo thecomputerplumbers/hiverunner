@@ -44,11 +44,12 @@ Current exceptions:
 These are distributed, not just run by us, so their licenses bind us directly.
 Check each when it is added.
 
-| Component                     | License           | Obligation                                                                                                         |
-| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
-| GitHub Actions runner (in VM) | MIT               | Keep the notice in the image                                                                                       |
-| Linux guest image             | Mixed             | Publish the package manifest and offer source for GPL parts                                                        |
-| Go modules in the daemon      | ISC, BSD-3-Clause | `coder/websocket`, `golang.org/x/sys`, `Code-Hex/vz` (MIT). Ship a third-party notices file with the signed binary |
+| Component                     | License                                                                                             | Obligation                                                                                                                                                                                                                   |
+| ----------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub Actions runner (in VM) | MIT                                                                                                 | Keep the notice in the image                                                                                                                                                                                                 |
+| Linux guest image             | Mixed                                                                                               | Publish the package manifest and offer source for GPL parts                                                                                                                                                                  |
+| virtiofsd (Linux hosts)       | Apache-2.0 AND BSD-3-Clause, statically linked with musl (MIT), libseccomp and libcap-ng (LGPL-2.1) | Unmodified build, downloaded only where the system packages none that runs without root. `virtiofsd.NOTICE.txt` goes with it and names the source and the script that rebuilds it against other copies of the LGPL libraries |
+| Go modules in the daemon      | ISC, BSD-3-Clause                                                                                   | `coder/websocket`, `golang.org/x/sys`, `Code-Hex/vz` (MIT). Ship a third-party notices file with the signed binary                                                                                                           |
 
 ## Before going public
 

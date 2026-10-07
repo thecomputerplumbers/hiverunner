@@ -121,6 +121,12 @@ against the checksum in the manifest it fetched over HTTPS, as it does on a
 Mac. Linux reads `linux-<arch>.txt`, lines of `name=value`, because a JSON
 parser is not on every box.
 
+The Linux manifests also name a static build of virtiofsd for each
+architecture, for systems that package none that runs without root. It is
+built once per virtiofsd version by `daemon/release/virtiofsd.sh` (Docker;
+the x86-64 build is emulated on a Mac and takes several minutes) and kept in
+`~/Library/Caches/HiveWorker/tools`.
+
 A version is published once: its files are cached for a year under their
 names, so the script refuses to publish a version the bucket already has.
 Bump `daemon/VERSION` instead.

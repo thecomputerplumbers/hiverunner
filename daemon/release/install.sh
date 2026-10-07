@@ -223,20 +223,26 @@ missing=""
 command -v "$qemu" >/dev/null 2>&1 || missing="$missing $qemu"
 command -v qemu-img >/dev/null 2>&1 || missing="$missing qemu-img"
 command -v passt >/dev/null 2>&1 || missing="$missing passt"
+# The program that shares a job's directory with its VM. It must be the one
+# that runs without root, which says "virtiofsd 1.x" for its version; the
+# older one that came inside QEMU does not, and is no use here. A system
+# without it is given a copy further down, so it is never "missing".
 virtiofsd=""
-for candidate in "$(command -v virtiofsd 2>/dev/null || true)" /usr/libexec/virtiofsd /usr/lib/qemu/virtiofsd /usr/lib/virtiofsd; do
-  [ -n "$candidate" ] && [ -x "$candidate" ] && virtiofsd="$candidate" && break
+for candidate in "$(command -v virtiofsd 2>/dev/null || true)" /usr/libexec/virtiofsd /usr/lib/virtiofsd; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ] && "$candidate" --version 2>/dev/null | grep -q '^virtiofsd [0-9]'; then
+    virtiofsd="$candidate"
+    break
+  fi
 done
-[ -n "$virtiofsd" ] || missing="$missing virtiofsd"
 command -v curl >/dev/null 2>&1 || missing="$missing curl"
 command -v sha256sum >/dev/null 2>&1 || missing="$missing sha256sum"
 if [ -n "$missing" ]; then
   say "Missing:$missing"
   say ""
   say "Install them, then run this again. This script never asks for your password."
-  say "  Debian, Ubuntu:  sudo apt install qemu-system qemu-utils virtiofsd passt curl"
-  say "  Fedora:          sudo dnf install qemu-kvm qemu-img virtiofsd passt curl"
-  say "  Arch:            sudo pacman -S qemu-base virtiofsd passt curl"
+  say "  Debian, Ubuntu, Raspberry Pi OS:  sudo apt install qemu-system qemu-utils passt curl"
+  say "  Fedora:                           sudo dnf install qemu-kvm qemu-img passt curl"
+  say "  Arch:                             sudo pacman -S qemu-base passt curl"
   exit 1
 fi
 [ -e /dev/kvm ] || fail "there is no /dev/kvm. Virtualization is switched off in this machine's firmware, or this is a cloud VM without nested virtualization."
@@ -245,7 +251,7 @@ if ! [ -r /dev/kvm ] || ! [ -w /dev/kvm ]; then
   say "  sudo usermod -aG kvm $(id -un)"
   exit 1
 fi
-say "KVM, QEMU, virtiofsd and passt are here."
+say "KVM, QEMU and passt are here."
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -285,6 +291,22 @@ tar -xzf "$work/hived.tar.gz" -C "$work/daemon"
 mkdir -p "$BIN_DIR"
 install -m 0755 "$work/daemon/hived" "$BIN_DIR/hived"
 say "Installed $BIN_DIR/hived"
+
+if [ -z "$virtiofsd" ]; then
+  # This system packages no virtiofsd that runs without root. HiveWorker's
+  # own build of it goes beside the image, where the daemon looks first.
+  virtiofsd_url=$(field virtiofsd_url)
+  virtiofsd_sha=$(field virtiofsd_sha256)
+  [ -n "$virtiofsd_url" ] && [ -n "$virtiofsd_sha" ] || fail "this system has no virtiofsd that runs without root, and this release carries none. Install your distribution's virtiofsd package if it has one."
+  if [ "$(sha256sum "$DATA_DIR/bin/virtiofsd" 2>/dev/null | cut -d' ' -f1)" != "$virtiofsd_sha" ]; then
+    fetch -sS -o "$work/virtiofsd" "$virtiofsd_url"
+    check "$work/virtiofsd" "$virtiofsd_sha"
+    mkdir -p "$DATA_DIR/bin"
+    install -m 0755 "$work/virtiofsd" "$DATA_DIR/bin/virtiofsd"
+    fetch -sS -o "$DATA_DIR/bin/virtiofsd.NOTICE.txt" "$BASE/tools/virtiofsd.NOTICE.txt" || true
+  fi
+  say "Installed virtiofsd $(field virtiofsd_version), which this system does not package"
+fi
 
 step "Installing the Linux image jobs run in"
 image_dir="$DATA_DIR/image"
@@ -368,6 +390,11 @@ if ! [ -e /dev/vhost-vsock ]; then
   say ""
   say "Jobs will run, but without this machine's own Actions cache. To turn it on:"
   say "  echo vhost_vsock | sudo tee /etc/modules-load.d/hiveworker.conf && sudo modprobe vhost_vsock"
+elif ! [ -r /dev/vhost-vsock ] || ! [ -w /dev/vhost-vsock ]; then
+  say ""
+  say "Jobs will run, but without this machine's own Actions cache. To turn it on,"
+  say "join the kvm group, then log out and back in:"
+  say "  sudo usermod -aG kvm $(id -un)"
 fi
 
 # The service belongs to this user's systemd, which took its groups when it
