@@ -1,7 +1,8 @@
 # hived
 
-The HiveWorker daemon. One static Go binary that enrolls a Mac in its
+The HiveWorker daemon. One static Go binary that enrolls a machine in its
 organization's hive and holds the single outbound tunnel jobs arrive through.
+It runs on Apple Silicon Macs and on arm64 Linux with KVM.
 
 ```sh
 ./image/build.sh    # once: builds the guest image (needs Docker)
@@ -9,15 +10,15 @@ organization's hive and holds the single outbound tunnel jobs arrive through.
 ./hived selftest    # boots a throwaway VM and reports what it finds
 ./hived login       # sign in with GitHub in the browser, enroll this machine
 ./hived run         # connect to every hive it serves and wait for jobs
-./hived status      # what this Mac lends, and whether it is lending
+./hived status      # what this machine lends, and whether it is lending
 ./hived config      # the owner's settings, below
 ./hived pause       # stop taking jobs; ./hived resume to undo
 ./hived benchmark
 ```
 
-Use `./build.sh`, not a bare `go build`: creating a virtual machine needs the
-`com.apple.security.virtualization` entitlement, and an unsigned binary is
-refused by macOS.
+On a Mac use `./build.sh`, not a bare `go build`: creating a virtual machine
+needs the `com.apple.security.virtualization` entitlement, and an unsigned
+binary is refused by macOS. On Linux a plain `go build ./cmd/hived` will do.
 
 `HIVE_SERVER` points it at another server (`http://localhost:3000` for local
 development) and `HIVE_CONFIG` at another machine file.
@@ -40,13 +41,49 @@ from the releases bucket:
 curl -fsSL https://get.hiveworkr.thecomputerplumbers.com/install.sh | sh
 ```
 
-It checks the Mac, downloads the daemon and the guest image and verifies
+It checks the machine, downloads the daemon and the guest image and verifies
 both, installs under the home directory, runs `hived login`, and starts a
-per-user launch agent. Running it again updates. `hived uninstall` removes
+per-user service: a launch agent on a Mac, a systemd user unit on Linux.
+Running it again updates. `hived uninstall` removes
 the service, the image, the Actions cache, the settings, the sign-in and the
 binary, after asking.
 
 Building and publishing a release is in `docs/deployment.md`.
+
+## On Linux
+
+The same daemon, the same guest image and the same jobs. What differs is
+what a VM is made of. KVM does the virtualization, and three ordinary
+programs stand around it, all running as the daemon's own user:
+
+- **QEMU** is the machine. It boots the image's kernel directly, on a qcow2
+  overlay of the image's disk: instant on any filesystem, holding only what
+  the job writes, deleted with the job.
+- **virtiofsd** serves the job's one directory to the guest, from inside a
+  namespace that contains nothing else.
+- **passt** is the guest's network: out through the user's own sockets,
+  nothing in, and no address that reaches the host's loopback.
+
+The installer does not install these and never asks for a password. It says
+what is missing and how to get it (`sudo apt install qemu-system qemu-utils
+virtiofsd passt` on Debian or Ubuntu) and the user must be able to open
+`/dev/kvm`, which usually means being in the `kvm` group. A cloud VM has no
+KVM unless its provider offers nested virtualization; bare metal and home
+servers do.
+
+The guest reaches the Actions cache over `vhost-vsock`. Every VM on a Linux
+host dials the same host socket, so the daemon tells them apart by the
+address the kernel assigned each VM, which a guest cannot choose, and refuses
+any caller it did not start. That needs the `vhost_vsock` module; without it
+jobs run and use GitHub's cache.
+
+A machine with a battery follows the same rules as a Mac: jobs on battery
+unless the owner says otherwise, none with the lid shut. A machine with
+neither is always available.
+
+Files are where Linux keeps them: `~/.config/HiveWorker` for the image, the
+settings and the sign-in, `~/.cache/HiveWorker` for the Actions cache, and
+the journal for the log (`journalctl --user -u hiveworker`).
 
 ## The owner's settings
 
@@ -133,7 +170,8 @@ backups skip. Losing any of it is a cache miss and nothing more.
 
 ## What it keeps
 
-One file, `~/Library/Application Support/HiveWorker/machine.json`, readable
+One file, `~/Library/Application Support/HiveWorker/machine.json` (on Linux,
+`~/.config/HiveWorker/machine.json`), readable
 by its owner only: the server, the machine id and the machine token. Which
 hives it serves is not stored; the server is asked. The GitHub sign-in is
 used once to obtain that token and is not kept. Moving the token to the
@@ -141,13 +179,15 @@ Keychain is planned.
 
 ## How a job runs
 
-Each job gets its own Linux virtual machine under Apple's
-Virtualization.framework, and the machine is destroyed when the job ends.
+Each job gets its own Linux virtual machine, under Apple's
+Virtualization.framework on a Mac and under KVM on Linux, and the machine is
+destroyed when the job ends.
 
 1. The coordinator offers a job (`job.assign`). The daemon takes a free job
    slot and accepts, or declines if it has none or not the cores.
 2. The coordinator sends GitHub's one-time runner configuration (`job.start`).
-3. The daemon clones the guest disk (copy-on-write, instant on APFS), creates
+3. The daemon clones the guest disk (copy-on-write, instant on APFS; an
+   overlay on Linux), creates
    an empty directory for the job, writes the configuration into it, and boots
    the VM by direct kernel boot. Boot to running is about three seconds.
 4. The guest's agent reads the configuration, deletes it, and runs GitHub's
@@ -156,7 +196,7 @@ Virtualization.framework, and the machine is destroyed when the job ends.
    and the directory and reports `job.exited`.
 
 What the guest can reach: the internet, outbound, through NAT. What it can see
-of the Mac: that one directory. Nothing listens in the guest and nothing can
+of the host: that one directory. Nothing listens in the guest and nothing can
 log in to it. A released job, or one past its timeout, has its VM stopped at
 once.
 
@@ -224,6 +264,8 @@ self-test against its image.
 ## Tests
 
 `go test ./...` runs everywhere, against stand-in servers. `./test-vm.sh`
-boots real VMs and needs the guest image. `pnpm test:daemon`
+boots real VMs and needs the guest image; it runs on a Mac and on Linux with
+KVM. A Linux host that is itself a VM boots guests several times slower, and
+`HIVE_VM_TEST_PATIENCE=4` stretches the tests' time limits to allow for it. `pnpm test:daemon`
 from the repository root runs the built binary against the real web and
 coordinator Workers on a fresh local database (macOS only).

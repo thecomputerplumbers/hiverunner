@@ -68,9 +68,11 @@ export function validateMachineFacts(facts: MachineFacts) {
   if (!text(facts.model, 120)) fields.model = "Missing hardware model"
   if (!text(facts.daemonVersion, 40))
     fields.daemonVersion = "Missing daemon version"
-  // v1 hosts. Widening this is a product decision, not a validation tweak.
-  if (facts.os !== "darwin" || facts.arch !== "arm64")
-    fields.os = "HiveWorker runs on Apple Silicon Macs for now"
+  // The hosts the daemon is built and tested for. Every job is arm64 Linux
+  // today, so every host is arm64. Widening this is a product decision, not
+  // a validation tweak.
+  if (facts.arch !== "arm64" || (facts.os !== "darwin" && facts.os !== "linux"))
+    fields.os = "HiveWorker runs on Apple Silicon Macs and arm64 Linux for now"
   if (!Number.isInteger(facts.cores) || facts.cores < 1 || facts.cores > 512)
     fields.cores = "Invalid core count"
   if (!Number.isSafeInteger(facts.memoryBytes) || facts.memoryBytes < 2 ** 30)

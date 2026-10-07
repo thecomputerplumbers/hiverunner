@@ -5,20 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/cache"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/config"
 )
 
-// serviceLabel is the launch agent install.sh creates.
-const serviceLabel = "com.thecomputerplumbers.hiveworker"
-
 // uninstall removes everything the installer and the daemon put on this
-// Mac: the background service, the guest image, the Actions cache, the
+// machine: the background service, the guest image, the Actions cache, the
 // settings, this machine's token and the daemon itself. It asks first.
 //
 // The machine's row on the server is not removed here. It shows as offline,
@@ -34,17 +29,18 @@ func uninstall(args []string) error {
 	}
 	data := filepath.Dir(machineFile)
 	cacheDir, _ := cache.DefaultDir()
-	agent := filepath.Join(home, "Library", "LaunchAgents", serviceLabel+".plist")
-	logs := filepath.Join(home, "Library", "Logs", "HiveWorker")
+	agent, logs := servicePaths(home)
 	self, _ := os.Executable()
 
-	fmt.Println("This removes HiveWorker from this Mac:")
+	fmt.Println("This removes HiveWorker from " + thisMachine + ":")
 	fmt.Println("  the background service, so it stops taking jobs")
-	fmt.Println("  " + data + " (the Linux image, your settings and this Mac's sign-in)")
+	fmt.Println("  " + data + " (the Linux image, your settings and " + thisMachine + "'s sign-in)")
 	if cacheDir != "" {
 		fmt.Println("  " + filepath.Dir(cacheDir) + " (the Actions cache)")
 	}
-	fmt.Println("  " + logs)
+	if logs != "" {
+		fmt.Println("  " + logs)
+	}
 	if self != "" {
 		fmt.Println("  " + self)
 	}
@@ -61,7 +57,7 @@ func uninstall(args []string) error {
 	// the user, not to a home directory, so a copy of hived run from
 	// somewhere else must not stop the one that is really installed.
 	if _, err := os.Stat(agent); err == nil {
-		_ = exec.Command("/bin/launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+serviceLabel).Run()
+		stopService()
 	}
 	var failed []string
 	remove := func(path string) {
@@ -73,6 +69,7 @@ func uninstall(args []string) error {
 		}
 	}
 	remove(agent)
+	forgetService()
 	remove(data)
 	if cacheDir != "" {
 		remove(filepath.Dir(cacheDir))
@@ -83,6 +80,6 @@ func uninstall(args []string) error {
 	if len(failed) > 0 {
 		return fmt.Errorf("could not remove: %s", strings.Join(failed, ", "))
 	}
-	fmt.Println("\nRemoved. This Mac still appears in your hive as offline; remove it from the dashboard under Machines.")
+	fmt.Println("\nRemoved. " + strings.ToUpper(thisMachine[:1]) + thisMachine[1:] + " still appears in your hive as offline; remove it from the dashboard under Machines.")
 	return nil
 }

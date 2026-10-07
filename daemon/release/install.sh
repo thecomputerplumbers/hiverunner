@@ -1,5 +1,6 @@
 #!/bin/sh
-# Installs the HiveWorker daemon on this Mac and adds it to your hive.
+# Installs the HiveWorker daemon on this machine and adds it to your hive.
+# It runs on Apple Silicon Macs and on Linux with KVM (arm64 or x86-64).
 #
 #   curl -fsSL https://get.hiveworkr.thecomputerplumbers.com/install.sh | sh
 #
@@ -26,7 +27,11 @@ fail() {
   exit 1
 }
 
-[ "$(uname -s)" = "Darwin" ] || fail "the daemon runs on macOS, and this is $(uname -s)."
+# Linux is installed by its own half of this script, at the end; what is in
+# between is the Mac.
+[ "$(uname -s)" = "Linux" ] && LINUX=1 || LINUX=""
+if [ -z "$LINUX" ]; then
+[ "$(uname -s)" = "Darwin" ] || fail "the daemon runs on macOS and Linux, and this is $(uname -s)."
 [ "$(uname -m)" = "arm64" ] || fail "the daemon needs a Mac with Apple Silicon. Intel Macs are not supported."
 macos=$(sw_vers -productVersion)
 [ "${macos%%.*}" -ge 13 ] || fail "the daemon needs macOS 13 or later. This Mac has $macos."
@@ -179,6 +184,170 @@ done
 
 say ""
 say "Done. This Mac now runs jobs for your hive whenever it is awake."
+exit 0
+fi
+
+# ---------------------------------------------------------------- Linux ----
+#
+# The same thing, with the pieces Linux has instead: KVM for the VMs, a
+# tarball for the daemon, and a systemd user service to keep it running.
+
+case "$(uname -m)" in
+  aarch64 | arm64) arch=arm64 qemu=qemu-system-aarch64 ;;
+  x86_64 | amd64) arch=amd64 qemu=qemu-system-x86_64 ;;
+  *) fail "the daemon runs on arm64 and x86-64, and this is $(uname -m)." ;;
+esac
+DATA_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/HiveWorker"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+UNIT="hiveworker.service"
+
+step "Checking this machine can run VMs"
+missing=""
+command -v "$qemu" >/dev/null 2>&1 || missing="$missing $qemu"
+command -v qemu-img >/dev/null 2>&1 || missing="$missing qemu-img"
+command -v passt >/dev/null 2>&1 || missing="$missing passt"
+virtiofsd=""
+for candidate in "$(command -v virtiofsd 2>/dev/null || true)" /usr/libexec/virtiofsd /usr/lib/qemu/virtiofsd /usr/lib/virtiofsd; do
+  [ -n "$candidate" ] && [ -x "$candidate" ] && virtiofsd="$candidate" && break
+done
+[ -n "$virtiofsd" ] || missing="$missing virtiofsd"
+command -v curl >/dev/null 2>&1 || missing="$missing curl"
+command -v sha256sum >/dev/null 2>&1 || missing="$missing sha256sum"
+if [ -n "$missing" ]; then
+  say "Missing:$missing"
+  say ""
+  say "Install them, then run this again. This script never asks for your password."
+  say "  Debian, Ubuntu:  sudo apt install qemu-system qemu-utils virtiofsd passt curl"
+  say "  Fedora:          sudo dnf install qemu-kvm qemu-img virtiofsd passt curl"
+  say "  Arch:            sudo pacman -S qemu-base virtiofsd passt curl"
+  exit 1
+fi
+[ -e /dev/kvm ] || fail "there is no /dev/kvm. Virtualization is switched off in this machine's firmware, or this is a cloud VM without nested virtualization."
+if ! [ -r /dev/kvm ] || ! [ -w /dev/kvm ]; then
+  say "Your user cannot use /dev/kvm yet. Run this, log out and back in, then run this script again:"
+  say "  sudo usermod -aG kvm $(id -un)"
+  exit 1
+fi
+say "KVM, QEMU, virtiofsd and passt are here."
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+fetch() {
+  case "$BASE" in
+    https://*) curl -fL --proto '=https' --tlsv1.2 --retry 3 "$@" ;;
+    *) curl -fL --retry 3 "$@" ;;
+  esac
+}
+# The Linux manifest is lines of name=value: no JSON parser is on every box.
+field() { sed -n "s/^$1=//p" "$work/latest" | head -1; }
+check() {
+  actual=$(sha256sum "$1" | cut -d' ' -f1)
+  [ "$actual" = "$2" ] || fail "$(basename "$1") does not match its published checksum. Nothing was installed."
+}
+
+step "Finding the current release"
+fetch -sS -o "$work/latest" "$BASE/linux-$arch.txt" || fail "there is no release for Linux on $arch yet, or $BASE could not be reached."
+version=$(field version)
+daemon_url=$(field daemon_url)
+daemon_sha=$(field daemon_sha256)
+image_version=$(field image_version)
+image_url=$(field image_url)
+image_sha=$(field image_sha256)
+image_mb=$(field image_megabytes)
+[ -n "$version" ] && [ -n "$daemon_url" ] && [ -n "$daemon_sha" ] && [ -n "$image_url" ] && [ -n "$image_sha" ] ||
+  fail "the release manifest is incomplete. Try again in a few minutes."
+say "HiveWorker $version"
+
+step "Installing the daemon"
+fetch -sS -o "$work/hived.tar.gz" "$daemon_url"
+check "$work/hived.tar.gz" "$daemon_sha"
+mkdir "$work/daemon"
+tar -xzf "$work/hived.tar.gz" -C "$work/daemon"
+[ -f "$work/daemon/hived" ] || fail "the download did not contain the daemon."
+mkdir -p "$BIN_DIR"
+install -m 0755 "$work/daemon/hived" "$BIN_DIR/hived"
+say "Installed $BIN_DIR/hived"
+
+step "Installing the Linux image jobs run in"
+image_dir="$DATA_DIR/image"
+have=""
+if [ -f "$image_dir/manifest.json" ]; then
+  number() { sed -n "s/.*\"$1\": *\"\{0,1\}\([^\",]*\).*/\1/p" "$image_dir/manifest.json" | head -1; }
+  have="$(number imageVersion)-$(number runnerVersion)"
+fi
+if [ "$have" = "$image_version" ]; then
+  say "Already up to date ($image_version)."
+else
+  say "Downloading ${image_mb:-about 300} MB. This is the slow part."
+  fetch -# -o "$work/image.tar.gz" "$image_url"
+  check "$work/image.tar.gz" "$image_sha"
+  mkdir -p "$DATA_DIR"
+  rm -rf "$DATA_DIR/image.new"
+  mkdir "$DATA_DIR/image.new"
+  # Sparse, so the disk takes the room its contents do and no more.
+  tar -xzSf "$work/image.tar.gz" -C "$DATA_DIR/image.new" || fail "could not unpack the image."
+  [ -f "$DATA_DIR/image.new/manifest.json" ] || fail "the image download is incomplete."
+  rm -rf "$DATA_DIR/image.old"
+  [ -d "$image_dir" ] && mv "$image_dir" "$DATA_DIR/image.old"
+  mv "$DATA_DIR/image.new" "$image_dir"
+  rm -rf "$DATA_DIR/image.old"
+  say "Installed image $image_version"
+fi
+
+if [ "${HIVE_NO_START:-}" = "1" ]; then
+  say ""
+  say "Installed. Not signing in or starting the daemon, as asked."
+  exit 0
+fi
+
+step "Adding this machine to your hive"
+if "$BIN_DIR/hived" status >/dev/null 2>&1; then
+  say "This machine is already signed in."
+else
+  "$BIN_DIR/hived" login </dev/tty || fail "sign-in did not finish. Run this again to retry."
+fi
+
+step "Starting the daemon"
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+  say "This login has no systemd user session, so no service was set up."
+  say "Start the daemon yourself, and keep it running however you keep things running:"
+  say "  $BIN_DIR/hived run"
+  exit 0
+fi
+mkdir -p "$UNIT_DIR"
+cat >"$UNIT_DIR/$UNIT" <<SERVICE
+[Unit]
+Description=HiveWorker daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=$BIN_DIR/hived run
+Restart=on-failure
+RestartSec=30
+# Long enough for a job's VM to be destroyed and its files removed.
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
+SERVICE
+systemctl --user daemon-reload
+systemctl --user enable "$UNIT" >/dev/null 2>&1 || true
+# Restart, not start: an older daemon is replaced. A job it was running is
+# cancelled and GitHub re-queues nothing by itself, so update when idle.
+systemctl --user restart "$UNIT" || fail "could not start the daemon. See: journalctl --user -u hiveworker"
+# Without this the service stops when you log out.
+if ! loginctl enable-linger "$(id -un)" >/dev/null 2>&1; then
+  say "To keep it running after you log out:  sudo loginctl enable-linger $(id -un)"
+fi
+if ! [ -e /dev/vhost-vsock ]; then
+  say ""
+  say "Jobs will run, but without this machine's own Actions cache. To turn it on:"
+  say "  echo vhost_vsock | sudo tee /etc/modules-load.d/hiveworker.conf && sudo modprobe vhost_vsock"
+fi
+
+say ""
+say "Done. This machine now runs jobs for your hive. Logs: journalctl --user -u hiveworker"
 say ""
 say "  hived status     what this Mac lends, and whether it is lending"
 say "  hived pause      stop taking jobs"

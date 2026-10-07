@@ -10,6 +10,13 @@
 #   install.sh
 #   hived/<version>/hived-darwin-arm64.zip    signed and notarized
 #   images/<image>/image.aar                  the Linux image, as an Apple Archive
+#   linux-<arch>.txt                          what install.sh reads on Linux
+#   hived/<version>/hived-linux-<arch>.tar.gz
+#   images/<image>/image-<arch>.tar.gz        the same image, as a tarball
+#
+# Linux on arm64 runs the image the Mac does. Linux on x86-64 needs its own,
+# built with `./image/build.sh --arch amd64 DIR`; name that directory in
+# HIVE_IMAGE_AMD64 to publish it, or x86-64 is left out of the release.
 #
 # Signing needs a "Developer ID Application" certificate in the keychain, and
 # notarizing needs credentials stored once with:
@@ -96,6 +103,51 @@ image_sha=$(shasum -a 256 "$image_aar" | cut -d' ' -f1)
 image_mb=$(($(stat -f %z "$image_aar") / 1048576))
 echo "   $image_version, $image_mb MB"
 
+echo "== Linux"
+# Nothing to sign: Linux has no gatekeeper to satisfy, and the installer
+# checks each download against the checksum published beside it.
+linux_arches=""
+linux() { # arch image-directory
+  arch="$1"
+  dir="$2"
+  [ -f "$dir/manifest.json" ] || { echo "No image in $dir" >&2; exit 1; }
+  built_for=$(plutil -extract arch raw -o - "$dir/manifest.json" 2>/dev/null || echo arm64)
+  [ "$built_for" = "$arch" ] || { echo "The image in $dir is for $built_for, not $arch." >&2; exit 1; }
+  this_image="$(plutil -extract imageVersion raw -o - "$dir/manifest.json")-$(plutil -extract runnerVersion raw -o - "$dir/manifest.json")"
+  [ "$this_image" = "$wanted" ] || { echo "The $arch image in $dir is $this_image; this commit builds $wanted." >&2; exit 1; }
+  binary=$(mktemp -d)
+  GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$binary/hived" ./cmd/hived
+  daemon_tar="$out/hived/$version/hived-linux-$arch.tar.gz"
+  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$daemon_tar" -C "$binary" hived
+  rm -rf "$binary"
+  image_tar="$out/images/$this_image/image-$arch.tar.gz"
+  mkdir -p "$out/images/$this_image"
+  if [ ! -f "$image_tar" ]; then
+    COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$image_tar" -C "$dir" manifest.json \
+      "$(plutil -extract kernel raw -o - "$dir/manifest.json")" \
+      "$(plutil -extract initrd raw -o - "$dir/manifest.json")" \
+      "$(plutil -extract disk raw -o - "$dir/manifest.json")"
+  fi
+  cat > "$out/linux-$arch.txt" <<MANIFEST
+version=$version
+commit=$(git rev-parse HEAD)
+daemon_url=$BASE/hived/$version/hived-linux-$arch.tar.gz
+daemon_sha256=$(shasum -a 256 "$daemon_tar" | cut -d' ' -f1)
+image_version=$this_image
+image_url=$BASE/images/$this_image/image-$arch.tar.gz
+image_sha256=$(shasum -a 256 "$image_tar" | cut -d' ' -f1)
+image_megabytes=$(($(stat -f %z "$image_tar") / 1048576))
+MANIFEST
+  linux_arches="$linux_arches $arch"
+  echo "   $arch: daemon and image $this_image, $(($(stat -f %z "$image_tar") / 1048576)) MB"
+}
+linux arm64 "$image_dir"
+if [ -n "${HIVE_IMAGE_AMD64:-}" ]; then
+  linux amd64 "$HIVE_IMAGE_AMD64"
+else
+  echo "   amd64: left out (HIVE_IMAGE_AMD64 is not set)"
+fi
+
 cp release/install.sh "$out/install.sh"
 cat > "$out/latest.json" <<JSON
 {
@@ -132,6 +184,16 @@ if ! curl -fsI "$BASE/images/$image_version/image.aar" >/dev/null 2>&1; then
   put "images/$image_version/image.aar" "$image_aar" application/octet-stream "public, max-age=31536000, immutable"
 fi
 put "hived/$version/hived-darwin-arm64.zip" "$daemon_zip" application/zip "public, max-age=31536000, immutable"
+for arch in $linux_arches; do
+  this_image=$(sed -n 's/^image_version=//p' "$out/linux-$arch.txt")
+  if ! curl -fsI "$BASE/images/$this_image/image-$arch.tar.gz" >/dev/null 2>&1; then
+    put "images/$this_image/image-$arch.tar.gz" "$out/images/$this_image/image-$arch.tar.gz" application/gzip "public, max-age=31536000, immutable"
+  fi
+  put "hived/$version/hived-linux-$arch.tar.gz" "$out/hived/$version/hived-linux-$arch.tar.gz" application/gzip "public, max-age=31536000, immutable"
+done
 put "install.sh" "$out/install.sh" "text/x-shellscript; charset=utf-8" "public, max-age=60"
 put "latest.json" "$out/latest.json" application/json "public, max-age=60"
+for arch in $linux_arches; do
+  put "linux-$arch.txt" "$out/linux-$arch.txt" "text/plain; charset=utf-8" "public, max-age=60"
+done
 echo "== Released $version: curl -fsSL $BASE/install.sh | sh"

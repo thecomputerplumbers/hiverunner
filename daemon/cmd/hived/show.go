@@ -94,7 +94,7 @@ func status() error {
 		screen.Dim(machine.Server),
 	)))
 	fmt.Println()
-	fmt.Print(indent(screen.Box("This Mac",
+	fmt.Print(indent(screen.Box(strings.ToUpper(thisMachine[:1])+thisMachine[1:],
 		field("Name", facts.Name+screen.Dim("  "+facts.Model)),
 		field("Hardware", fmt.Sprintf("%d cores, %d GB", facts.Cores, facts.MemoryBytes/gib)),
 		field("Hives", pools),
@@ -185,11 +185,11 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 	}
 	return []string{
 		row("max-jobs", strconv.Itoa(current.MaxJobs), "how many jobs run at once"),
-		row("max-vcpus", limit, "the largest job this Mac takes"),
+		row("max-vcpus", limit, "the largest job "+thisMachine+" takes"),
 		row("warm", onOff(current.Warm), "keep one VM booted so jobs start sooner"),
 		row("battery", onOff(current.Battery), "take jobs while unplugged"),
 		row("hours", hours, "when jobs may start"),
-		row("cache", onOff(current.Cache), "keep an Actions cache on this Mac"),
+		row("cache", onOff(current.Cache), "keep an Actions cache on "+thisMachine),
 		row("cache-size", cacheSize, "the most disk the cache may use"),
 		row("paused", yesNo(current.Paused), "hived pause, hived resume"),
 	}
@@ -220,11 +220,11 @@ const configUsage = `hived config                    Show this machine's setting
 hived config set <name> <value>  Change one
 
   max-jobs   1 to 8              how many jobs run at once
-  max-vcpus  2, 4, 8 or auto     the largest job this Mac takes
+  max-vcpus  2, 4, 8 or auto     the largest job this machine takes
   warm       on or off           keep one VM booted so jobs start sooner
   battery    on or off           take jobs while unplugged
   hours      22:00-07:00 or any  when jobs may start, in local time
-  cache      on or off           keep an Actions cache on this Mac
+  cache      on or off           keep an Actions cache on this machine
   cache-size 1 to 2000 or auto   the most disk the cache may use, in GB
 `
 

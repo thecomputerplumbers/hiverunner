@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || linux
 
 package vm
 
@@ -42,6 +42,16 @@ func realRunner(t *testing.T) *Runner {
 	return &Runner{Image: image, WorkDir: work, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
+// patient stretches a time limit on a slow host. A VM inside a VM, which is
+// how a Linux host is usually stood in for on a Mac, boots several times
+// slower than one on real hardware; HIVE_VM_TEST_PATIENCE=4 allows for it.
+func patient(limit time.Duration) time.Duration {
+	if factor, err := strconv.Atoi(os.Getenv("HIVE_VM_TEST_PATIENCE")); err == nil && factor > 1 {
+		return limit * time.Duration(factor)
+	}
+	return limit
+}
+
 func leftovers(t *testing.T, r *Runner) int {
 	t.Helper()
 	entries, err := os.ReadDir(r.WorkDir)
@@ -53,7 +63,7 @@ func leftovers(t *testing.T, r *Runner) int {
 
 func TestAVMBootsReportsAndLeavesNothingBehind(t *testing.T) {
 	r := realRunner(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), patient(2*time.Minute))
 	defer cancel()
 	started := time.Now()
 	report, err := r.SelfTest(ctx, 2)
@@ -96,7 +106,7 @@ func TestCancellationDestroysTheVM(t *testing.T) {
 // The guest sees one directory. What the host put there is all there is.
 func TestTheShareHoldsOnlyTheJob(t *testing.T) {
 	r := realRunner(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), patient(2*time.Minute))
 	defer cancel()
 	var names []string
 	_, err := r.run(ctx, "share", "test", 1, "selftest", "1", func(share string) {
@@ -132,7 +142,7 @@ func TestAWarmVMTakesTheJob(t *testing.T) {
 	}
 	waitFor := func(what string, ok func() bool) {
 		t.Helper()
-		for deadline := time.Now().Add(30 * time.Second); !ok(); {
+		for deadline := time.Now().Add(patient(30 * time.Second)); !ok(); {
 			if time.Now().After(deadline) {
 				t.Fatalf("timed out waiting for %s", what)
 			}
@@ -144,7 +154,7 @@ func TestAWarmVMTakesTheJob(t *testing.T) {
 	// Let the guest reach the point where it is waiting for a job.
 	time.Sleep(4 * time.Second)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), patient(2*time.Minute))
 	defer cancel()
 	cold := time.Now()
 	if _, err := (&Runner{Image: r.Image, WorkDir: r.WorkDir, Log: r.Log}).SelfTest(ctx, 2); err != nil {
@@ -209,7 +219,7 @@ func TestNoWarmVMWhenUnavailable(t *testing.T) {
 	}
 	until := func(what string, ok func() bool) {
 		t.Helper()
-		for deadline := time.Now().Add(30 * time.Second); !ok(); {
+		for deadline := time.Now().Add(patient(30 * time.Second)); !ok(); {
 			if time.Now().After(deadline) {
 				t.Fatalf("timed out waiting for %s", what)
 			}
@@ -227,7 +237,7 @@ func TestNoWarmVMWhenUnavailable(t *testing.T) {
 // with a working network, and nothing of any of them is left afterwards.
 func TestSeveralVMsRunAtOnce(t *testing.T) {
 	r := realRunner(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), patient(3*time.Minute))
 	defer cancel()
 	sizes := []int{2, 4, 2}
 	reports := make([]string, len(sizes))
@@ -274,7 +284,7 @@ func TestAVMReachesTheHostsServiceOnItsOwnSocket(t *testing.T) {
 		},
 		Enabled: func() bool { return true },
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), patient(2*time.Minute))
 	defer cancel()
 	report, err := r.SelfTest(ctx, 2)
 	if err != nil {

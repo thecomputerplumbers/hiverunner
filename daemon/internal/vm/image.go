@@ -1,8 +1,9 @@
 // Package vm runs one job in one throwaway virtual machine.
 //
-// The machine is a Linux guest under Apple's Virtualization.framework: its
-// own kernel, its own memory, its own disk. The disk is a copy-on-write clone
-// of the guest image, made for the job and deleted after it. The only thing
+// The machine is a Linux guest with its own kernel, its own memory and its
+// own disk, under Apple's Virtualization.framework on a Mac and under KVM on
+// Linux. The disk is a copy-on-write clone of the guest image, made for the
+// job and deleted after it. The only thing
 // the host shares with the guest is one directory created for that job,
 // holding the job's one-time runner configuration.
 package vm
@@ -25,6 +26,18 @@ type Image struct {
 	Initrd        string `json:"initrd"`
 	Disk          string `json:"disk"`
 	CommandLine   string `json:"commandLine"`
+	// Architecture is Go's name for what the image was built for: arm64 or
+	// amd64. A manifest written before there was a choice says nothing, and
+	// is arm64.
+	Architecture string `json:"arch"`
+}
+
+// Arch is the architecture the image runs on.
+func (i Image) Arch() string {
+	if i.Architecture == "" {
+		return "arm64"
+	}
+	return i.Architecture
 }
 
 // ErrNoImage means the guest image has not been built or installed.

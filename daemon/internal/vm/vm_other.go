@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package vm
 
@@ -10,8 +10,8 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
 )
 
-// Runner is unavailable off macOS. The type exists so the rest of the daemon
-// builds and tests in CI on Linux.
+// Runner is unavailable where there is neither Apple's hypervisor nor KVM.
+// The type exists so the rest of the daemon still builds there.
 type Runner struct {
 	Image     Image
 	WorkDir   string
@@ -20,7 +20,7 @@ type Runner struct {
 	Guest     *GuestService
 }
 
-var errUnsupported = errors.New("the VM runner needs Apple's Virtualization.framework")
+var errUnsupported = errors.New("the VM runner needs macOS or Linux")
 
 func (r *Runner) Run(context.Context, jobs.Job) (int, error) { return -1, errUnsupported }
 
@@ -29,3 +29,6 @@ func (r *Runner) SelfTest(context.Context, int) (string, error) { return "", err
 func (r *Runner) Tend(context.Context, func() bool) {}
 
 func (r *Runner) Unusable() string { return "" }
+
+// Preflight reports why this host cannot run VMs.
+func Preflight() error { return errUnsupported }

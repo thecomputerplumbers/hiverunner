@@ -397,7 +397,7 @@ assert.equal(
   (
     await ownerDaemon.daemon(
       "/api/machines",
-      { ...mac, os: "linux" },
+      { ...mac, os: "windows" },
       ownerToken
     )
   ).status,

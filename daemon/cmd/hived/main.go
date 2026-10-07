@@ -37,14 +37,14 @@ const defaultServer = "https://hiveworkr.thecomputerplumbers.com"
 const usage = `hived, the HiveWorker daemon
 
   hived login       Sign in with GitHub and add this machine to your pool
-  hived run         Connect to the pool and wait for jobs
+  hived run         Connect to your hive and wait for jobs
   hived status      Show what this machine lends, and whether it is lending
   hived config      Show or change this machine's settings
   hived cache       Show or empty this machine's Actions cache
   hived pause       Stop taking jobs until you say otherwise
   hived resume      Take jobs again
   hived logout      Forget this machine's token
-  hived uninstall   Remove HiveWorker from this Mac
+  hived uninstall   Remove HiveWorker from this machine
   hived selftest    Boot a throwaway VM and report what it finds
   hived benchmark   Measure this machine's speed score
   hived version
@@ -316,6 +316,11 @@ func newRunner(log *slog.Logger) (*vm.Runner, error) {
 	}
 	image, err := vm.LoadImage(dir)
 	if err != nil {
+		return nil, err
+	}
+	// Said now, in words the owner can act on, rather than by every job
+	// failing later.
+	if err := vm.Preflight(); err != nil {
 		return nil, err
 	}
 	// Beside the image, so a job's disk is a clone and not a copy, and named

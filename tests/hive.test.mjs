@@ -22,6 +22,7 @@ import {
   authenticateMachine,
   authenticateMachineForPool,
   enrollMachine,
+  validateMachineFacts,
   listMachinePools,
   listMachines,
   removeMachineFromPool,
@@ -432,6 +433,18 @@ test("machines enroll once, authenticate by token, and stop when revoked", async
   })
   assert.equal(bad.code, "INVALID_INPUT")
   assert.ok(bad.fields.os && bad.fields.cores)
+  // An arm64 Linux box is a host like any Mac; other processors are not yet.
+  for (const [os, arch, allowed] of [
+    ["linux", "arm64", true],
+    ["darwin", "arm64", true],
+    ["darwin", "x64", false],
+    ["windows", "arm64", false],
+  ])
+    assert.equal(
+      validateMachineFacts({ ...mac, os, arch }) === null,
+      allowed,
+      `${os}/${arch}`
+    )
 
   const enrolled = await enrollMachine(db, inAcme(), input)
   assert.equal(enrolled.ok, true)
