@@ -56,17 +56,25 @@ export default {
       )
     }
     if (path === "/__test/offer" && request.method === "POST") {
-      const { release, assignmentId = "capacity-fixture" } =
-        await request.json()
+      const {
+        release,
+        assignmentId = "capacity-fixture",
+        label = "hive-4cpu",
+        arch = "arm64",
+      } = await request.json()
       const pool = env.POOL.getByName("gh-501")
       if (release) await pool.release(assignmentId)
-      else
-        await pool.offer({
+      else {
+        const chosen = await pool.offer({
           assignmentId,
-          label: "hive-4cpu",
+          label,
+          arch,
           vcpus: 4,
           timeoutMinutes: 1,
         })
+        // Which machine was offered the job, for tests that ask.
+        return Response.json({ machineId: chosen?.machineId ?? null })
+      }
       return new Response(null, { status: 204 })
     }
     if (

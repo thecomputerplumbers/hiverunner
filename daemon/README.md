@@ -2,7 +2,7 @@
 
 The HiveWorker daemon. One static Go binary that enrolls a machine in its
 organization's hive and holds the single outbound tunnel jobs arrive through.
-It runs on Apple Silicon Macs and on arm64 Linux with KVM.
+It runs on Apple Silicon Macs and on Linux with KVM, arm64 or x86-64.
 
 ```sh
 ./image/build.sh    # once: builds the guest image (needs Docker)
@@ -52,8 +52,12 @@ Building and publishing a release is in `docs/deployment.md`.
 
 ## On Linux
 
-The same daemon, the same guest image and the same jobs. What differs is
-what a VM is made of. KVM does the virtualization, and three ordinary
+The same daemon and the same jobs, on arm64 and on x86-64. An arm64 box runs
+the image a Mac does; an x86-64 box runs one built for it
+(`GUEST_ARCH=x64 ./image/build.sh DIR`), and takes the jobs whose label asks
+for x64. A machine says which it is when it connects, and is only ever
+offered jobs of its own architecture. What differs from a Mac is what a VM is
+made of. KVM does the virtualization, and three ordinary
 programs stand around it, all running as the daemon's own user:
 
 - **QEMU** is the machine. It boots the image's kernel directly, on a qcow2

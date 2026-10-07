@@ -52,17 +52,60 @@ export const AUTO_TOP_UP_MONTHLY_CAP_USD_OPTIONS = [
   50, 100, 250, 500, 1000,
 ] as const
 
+/** The architecture of a job's VM, and so of the machine that runs it. */
+export type RunnerArch = "arm64" | "x64"
+
 /**
- * Job sizes. Each label is its own scale set, because a scale set is one
- * queue and a runner cannot be chosen by size within it.
+ * Job sizes the site offers. Each label is its own scale set, because a
+ * scale set is one queue and a runner cannot be chosen by size within it.
+ *
+ * A label names an architecture as well as a size: a job is only ever given
+ * to a machine of its label's architecture. The plain labels are arm64, as
+ * they have been since before there was a second one.
  */
 export const RUNNER_SIZES = [
-  { label: "hive", vcpus: 2 },
-  { label: "hive-4cpu", vcpus: 4 },
-  { label: "hive-8cpu", vcpus: 8 },
+  { label: "hive", vcpus: 2, arch: "arm64" },
+  { label: "hive-4cpu", vcpus: 4, arch: "arm64" },
+  { label: "hive-8cpu", vcpus: 8, arch: "arm64" },
 ] as const
 
-export type RunnerLabel = (typeof RUNNER_SIZES)[number]["label"]
+/**
+ * Sizes the coordinator serves that the site does not offer yet: no daemon
+ * has been released for the machines that run them. Releasing them is moving
+ * them into `RUNNER_SIZES`, and reading every page that lists it.
+ */
+export const UNRELEASED_RUNNER_SIZES = [
+  { label: "hive-x64", vcpus: 2, arch: "x64" },
+  { label: "hive-x64-4cpu", vcpus: 4, arch: "x64" },
+  { label: "hive-x64-8cpu", vcpus: 8, arch: "x64" },
+] as const
+
+/** Every label a job can ask for, released or not. */
+export const ALL_RUNNER_SIZES = [...RUNNER_SIZES, ...UNRELEASED_RUNNER_SIZES]
+
+export type RunnerLabel = (typeof ALL_RUNNER_SIZES)[number]["label"]
+export type RunnerSize = {
+  label: RunnerLabel
+  vcpus: number
+  arch: RunnerArch
+}
+
+/** The size a `runs-on` label asks for, or undefined if it is not ours. */
+export function runnerSize(label: string | null): RunnerSize | undefined {
+  return ALL_RUNNER_SIZES.find((size) => size.label === label)
+}
+
+/**
+ * How a machine's own word for its architecture reads here, or null for one
+ * no job runs on. Go says `amd64` and Linux `x86_64` for what GitHub, and so
+ * this product, calls `x64`.
+ */
+export function runnerArch(reported: unknown): RunnerArch | null {
+  if (reported === "arm64" || reported === "aarch64") return "arm64"
+  if (reported === "x64" || reported === "amd64" || reported === "x86_64")
+    return "x64"
+  return null
+}
 
 export function usdToMicroTokens(usd: number) {
   return Math.round((usd / REFERENCE_USD_PER_TOKEN) * MICRO)
@@ -122,11 +165,10 @@ export function privatePoolUsdPerMinute(vcpus: number, speedScore = 1) {
  * count, for the comparison on the site. Check `asOf` before quoting these
  * anywhere new.
  *
- * v1 runs Linux ARM jobs, so the site compares against `arm64`. The `x64`
- * rates are here so nobody quotes them against an ARM job by accident.
+ * The released labels are Linux arm64, so the site compares against `arm64`.
+ * A job is compared at its own label's architecture: see
+ * `competitorUsdPerMinuteForLabel`.
  */
-export type RunnerArch = "arm64" | "x64"
-
 export const COMPARISON_ARCH: RunnerArch = "arm64"
 
 export const COMPETITOR_RATES = {
@@ -160,6 +202,21 @@ export function competitorUsdPerMinute(
   if (rate === undefined)
     throw new Error(`No ${provider} ${arch} rate for ${vcpus} vCPUs`)
   return rate
+}
+
+/**
+ * What a minute of a job with this label lists for at a competitor, at the
+ * label's own architecture and size. Null for a label that is not ours, or a
+ * size the competitor does not list: such a job is left out of a comparison
+ * rather than guessed at.
+ */
+export function competitorUsdPerMinuteForLabel(
+  provider: "github" | "blacksmith",
+  label: string
+) {
+  const size = runnerSize(label)
+  if (!size) return null
+  return COMPETITOR_RATES[provider].usdPerMinute[size.arch][size.vcpus] ?? null
 }
 
 /**

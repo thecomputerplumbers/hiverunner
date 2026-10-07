@@ -1,9 +1,12 @@
-# The guest every job runs in. Built with Docker on the Mac and turned into a
-# bootable disk by build.sh; it is never run as a container.
-FROM --platform=linux/arm64 ubuntu:24.04
+# The guest every job runs in. Built with Docker and turned into a bootable
+# disk by build.sh, which also chooses the architecture; it is never run as a
+# container.
+FROM ubuntu:24.04
 
 ARG RUNNER_VERSION
 ARG RUNNER_SHA256
+# GitHub's name for the runner's architecture: arm64 or x64.
+ARG RUNNER_ARCH=arm64
 ENV DEBIAN_FRONTEND=noninteractive
 
 # A kernel and init, and what a job expects to find: git, curl, sudo, the
@@ -24,7 +27,7 @@ RUN useradd --create-home --uid 1001 --shell /bin/bash runner \
  && chmod 0440 /etc/sudoers.d/runner \
  && mkdir -p /opt/runner \
  && curl -fsSL -o /tmp/runner.tar.gz \
-      "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-arm64-${RUNNER_VERSION}.tar.gz" \
+      "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz" \
  && echo "${RUNNER_SHA256}  /tmp/runner.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/runner.tar.gz -C /opt/runner \
  && rm /tmp/runner.tar.gz \

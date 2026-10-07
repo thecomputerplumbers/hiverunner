@@ -22,11 +22,11 @@ import {
   authenticateMachine,
   authenticateMachineForPool,
   enrollMachine,
-  validateMachineFacts,
   listMachinePools,
   listMachines,
   removeMachineFromPool,
   revokeMachine,
+  validateMachineFacts,
   MAX_MACHINES_PER_PERSON,
 } from "../packages/db/src/machines.ts"
 import { GitHubError } from "../packages/github/src/index.ts"
@@ -429,23 +429,10 @@ test("machines enroll once, authenticate by token, and stop when revoked", async
 
   const bad = await enrollMachine(db, inAcme(), {
     ...input,
-    facts: { ...mac, os: "linux", arch: "x64", cores: 0 },
+    facts: { ...mac, os: "windows", arch: "x64", cores: 0 },
   })
   assert.equal(bad.code, "INVALID_INPUT")
   assert.ok(bad.fields.os && bad.fields.cores)
-  // An arm64 Linux box is a host like any Mac; other processors are not yet.
-  for (const [os, arch, allowed] of [
-    ["linux", "arm64", true],
-    ["darwin", "arm64", true],
-    ["darwin", "x64", false],
-    ["windows", "arm64", false],
-  ])
-    assert.equal(
-      validateMachineFacts({ ...mac, os, arch }) === null,
-      allowed,
-      `${os}/${arch}`
-    )
-
   const enrolled = await enrollMachine(db, inAcme(), input)
   assert.equal(enrolled.ok, true)
   assert.deepEqual(enrolled.joined, [orgId])
@@ -476,6 +463,53 @@ test("machines enroll once, authenticate by token, and stop when revoked", async
   await revokeMachine(db, enrolled.machineId)
   assert.equal(await forAcme(), null)
   assert.equal(await authenticateMachine(db, enrolled.token), null)
+})
+
+test("a machine enrolls as what it is, in the product's words", async (t) => {
+  // The daemon reports Go's names, and exactly three are hosts.
+  for (const [os, arch] of [
+    ["darwin", "arm64"],
+    ["linux", "arm64"],
+    ["linux", "amd64"],
+  ])
+    assert.equal(
+      validateMachineFacts({ ...mac, os, arch }),
+      null,
+      `${os} ${arch}`
+    )
+  for (const [os, arch] of [
+    ["darwin", "amd64"],
+    ["darwin", "x64"],
+    ["linux", "x64"],
+    ["linux", "x86_64"],
+    ["linux", "aarch64"],
+    ["linux", "riscv64"],
+    ["linux", "386"],
+    ["windows", "amd64"],
+    ["freebsd", "arm64"],
+  ])
+    assert.ok(validateMachineFacts({ ...mac, os, arch }).os, `${os} ${arch}`)
+
+  const { db, sqlite } = database(t)
+  await provisionInstallation(db, acme)
+  person(sqlite, "ada", 1)
+  await syncMemberships(db, inAcme(), sync)
+  // Go calls it amd64. The pool matches jobs to machines on what is stored,
+  // so it is stored as the labels spell it.
+  const box = await enrollMachine(db, inAcme(), {
+    userId: "ada",
+    organizationIds: [orgId],
+    facts: {
+      ...mac,
+      name: "build box",
+      model: "KVM",
+      os: "linux",
+      arch: "amd64",
+    },
+  })
+  assert.equal(box.ok, true)
+  const row = sqlite.prepare("select os, arch from machine").get()
+  assert.deepEqual({ ...row }, { os: "linux", arch: "x64" })
 })
 
 test("one machine serves several organizations, each authorized separately", async (t) => {

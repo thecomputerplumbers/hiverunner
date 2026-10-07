@@ -1,4 +1,8 @@
-import { RUNNER_SIZES, privatePoolUsdPerMinute } from "@workspace/pricing"
+import {
+  RUNNER_SIZES,
+  UNRELEASED_RUNNER_SIZES,
+  privatePoolUsdPerMinute,
+} from "@workspace/pricing"
 import { Code, CodeBlock } from "../code"
 import { formatRate } from "../format"
 
@@ -34,6 +38,34 @@ export function LabelsAndSizes() {
         your own organization's machines.
       </p>
 
+      <h2 id="x64">Linux x64 labels (not yet released)</h2>
+      <p>
+        The labels above run arm64 jobs. Linux x64 jobs get labels of their own,
+        and run only on Linux x64 machines in your hive. Neither is released
+        yet: there is no daemon for Linux machines, and a job sent to one of
+        these labels today waits in GitHub's queue.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>vCPUs</th>
+            <th>Architecture</th>
+          </tr>
+        </thead>
+        <tbody>
+          {UNRELEASED_RUNNER_SIZES.map((size) => (
+            <tr key={size.label}>
+              <td>
+                <Code>{size.label}</Code>
+              </td>
+              <td>{size.vcpus}</td>
+              <td>Linux {size.arch}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
       <h2 id="example">In a workflow</h2>
       <CodeBlock title=".github/workflows/ci.yml">{`jobs:
   test:
@@ -52,7 +84,8 @@ export function LabelsAndSizes() {
       <ul>
         <li>
           A Linux arm64 VM. Actions, container images and binaries a job uses
-          need an arm64 build.
+          need an arm64 build. The x64 labels, once released, run a Linux x64
+          VM.
         </li>
         <li>
           One job per VM. The VM is created for the job and destroyed after it.

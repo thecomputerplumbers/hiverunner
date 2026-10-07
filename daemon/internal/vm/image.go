@@ -1,9 +1,8 @@
 // Package vm runs one job in one throwaway virtual machine.
 //
-// The machine is a Linux guest with its own kernel, its own memory and its
-// own disk, under Apple's Virtualization.framework on a Mac and under KVM on
-// Linux. The disk is a copy-on-write clone of the guest image, made for the
-// job and deleted after it. The only thing
+// The machine is a Linux guest under Apple's Virtualization.framework: its
+// own kernel, its own memory, its own disk. The disk is a copy-on-write clone
+// of the guest image, made for the job and deleted after it. The only thing
 // the host shares with the guest is one directory created for that job,
 // holding the job's one-time runner configuration.
 package vm
@@ -14,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -22,14 +22,16 @@ type Image struct {
 	Dir           string
 	RunnerVersion string `json:"runnerVersion"`
 	ImageVersion  int    `json:"imageVersion"`
-	Kernel        string `json:"kernel"`
-	Initrd        string `json:"initrd"`
-	Disk          string `json:"disk"`
-	CommandLine   string `json:"commandLine"`
 	// Architecture is Go's name for what the image was built for: arm64 or
 	// amd64. A manifest written before there was a choice says nothing, and
 	// is arm64.
 	Architecture string `json:"arch"`
+	// Kernel is what direct kernel boot is given: the uncompressed Image on
+	// arm64, a bzImage on amd64.
+	Kernel      string `json:"kernel"`
+	Initrd      string `json:"initrd"`
+	Disk        string `json:"disk"`
+	CommandLine string `json:"commandLine"`
 }
 
 // Arch is the architecture the image runs on.
@@ -42,6 +44,13 @@ func (i Image) Arch() string {
 
 // ErrNoImage means the guest image has not been built or installed.
 var ErrNoImage = errors.New("no guest image is installed")
+
+// ErrWrongArch means the installed guest image is for another architecture.
+// A machine boots guests of its own architecture and no other.
+var ErrWrongArch = errors.New("the guest image is for another architecture")
+
+// hostArch is what this machine is. A variable so tests can be another.
+var hostArch = func() string { return runtime.GOARCH }
 
 // DefaultImageDir is where build.sh writes and hived looks.
 func DefaultImageDir() (string, error) {
@@ -67,6 +76,11 @@ func LoadImage(dir string) (Image, error) {
 	image := Image{Dir: dir}
 	if err := json.Unmarshal(raw, &image); err != nil {
 		return Image{}, fmt.Errorf("guest image manifest: %w", err)
+	}
+	if arch := image.Arch(); arch != "arm64" && arch != "amd64" {
+		return Image{}, fmt.Errorf("guest image manifest names an unknown architecture %q", arch)
+	} else if host := hostArch(); arch != host {
+		return Image{}, fmt.Errorf("%w: it is %s and this machine is %s", ErrWrongArch, arch, host)
 	}
 	for _, name := range []string{image.Kernel, image.Initrd, image.Disk} {
 		// A manifest names files beside itself and nowhere else.

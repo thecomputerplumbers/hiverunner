@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm"
 import type { AuthDb } from "@workspace/auth/db"
 import { member, organization, session, user } from "@workspace/auth/schema"
 import type { GitHubApp } from "@workspace/github"
+import { runnerArch } from "@workspace/pricing"
 
 import { canAddMachines } from "@workspace/db/membership"
 import { githubInstallation, machine, machinePool } from "@workspace/db/schema"
@@ -68,11 +69,11 @@ export function validateMachineFacts(facts: MachineFacts) {
   if (!text(facts.model, 120)) fields.model = "Missing hardware model"
   if (!text(facts.daemonVersion, 40))
     fields.daemonVersion = "Missing daemon version"
-  // The hosts the daemon is built and tested for. Every job is arm64 Linux
-  // today, so every host is arm64. Widening this is a product decision, not
+  // The hosts a daemon exists for. Widening this is a product decision, not
   // a validation tweak.
-  if (facts.arch !== "arm64" || (facts.os !== "darwin" && facts.os !== "linux"))
-    fields.os = "HiveWorker runs on Apple Silicon Macs and arm64 Linux for now"
+  if (!hostArch(facts))
+    fields.os =
+      "HiveWorker runs on Apple Silicon Macs, and on Linux on arm64 or x64"
   if (!Number.isInteger(facts.cores) || facts.cores < 1 || facts.cores > 512)
     fields.cores = "Invalid core count"
   if (!Number.isSafeInteger(facts.memoryBytes) || facts.memoryBytes < 2 ** 30)
@@ -83,6 +84,20 @@ export function validateMachineFacts(facts: MachineFacts) {
   )
     fields.speedScore = "Invalid benchmark result"
   return Object.keys(fields).length ? fields : null
+}
+
+/**
+ * The architecture of the jobs a machine can run, or null for a machine no
+ * daemon runs on. The daemon reports Go's names for what it is, and exactly
+ * three are hosts: darwin/arm64, linux/arm64 and linux/amd64. What is stored
+ * is the product's word, so Go's amd64 becomes the labels' x64.
+ */
+function hostArch(facts: Pick<MachineFacts, "os" | "arch">) {
+  const known =
+    facts.arch === "arm64"
+      ? facts.os === "darwin" || facts.os === "linux"
+      : facts.arch === "amd64" && facts.os === "linux"
+  return known ? runnerArch(facts.arch) : null
 }
 
 /**
@@ -189,7 +204,7 @@ export async function enrollMachine(
     name: input.facts.name.trim(),
     model: input.facts.model.trim(),
     os: input.facts.os,
-    arch: input.facts.arch,
+    arch: hostArch(input.facts)!,
     cores: input.facts.cores,
     memoryBytes: input.facts.memoryBytes,
     speedScore: Math.min(Math.max(input.facts.speedScore ?? 1, 0.25), 8),

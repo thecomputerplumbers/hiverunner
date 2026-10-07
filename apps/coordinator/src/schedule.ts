@@ -1,11 +1,17 @@
+import type { RunnerArch } from "@workspace/pricing"
 import type { Presence } from "@workspace/protocol"
 
 /** Cores every job leaves for the machine's owner. */
 export const OWNER_CORES = 2
 
+/** What a label asks of a machine: so many cores, of one architecture. */
+export type JobSize = { vcpus: number; arch: RunnerArch }
+
 export type Candidate = {
   machineId: string
   presence: Presence
+  /** Absent means arm64, which is all there was before there were two. */
+  arch?: RunnerArch
   cores: number
   /** The owner's limit on job size, from the daemon. Absent means none. */
   maxVcpus?: number
@@ -20,10 +26,16 @@ export type Candidate = {
 }
 
 /**
- * Whether a machine may ever be given a job of this size: it must leave
- * cores for its owner, and stay within the limit its owner set.
+ * Whether a machine may ever be given a job of this size: it must be of the
+ * architecture the job's label names, leave cores for its owner, and stay
+ * within the limit its owner set.
+ *
+ * The architecture is checked here and nowhere else, so everything that
+ * asks what a machine can take (an offer, capacity, which listeners to
+ * wake) gets the same answer: an x64 job on an arm64 machine never fits.
  */
-export function fits(candidate: Candidate, vcpus: number) {
+export function fits(candidate: Candidate, { vcpus, arch }: JobSize) {
+  if ((candidate.arch ?? "arm64") !== arch) return false
   if (candidate.cores - vcpus < OWNER_CORES) return false
   return candidate.maxVcpus === undefined || vcpus <= candidate.maxVcpus
 }
@@ -33,8 +45,9 @@ export function fits(candidate: Candidate, vcpus: number) {
  * the ones it already holds. Whether it is willing is its presence, which
  * this does not look at.
  */
-export function room(candidate: Candidate, vcpus: number) {
-  if (!fits(candidate, vcpus)) return 0
+export function room(candidate: Candidate, size: JobSize) {
+  if (!fits(candidate, size)) return 0
+  const { vcpus } = size
   const held = Object.values(candidate.jobs ?? {})
   const slots = (candidate.maxJobs ?? 1) - held.length
   const used = held.reduce((sum, job) => sum + job.vcpus, 0)
@@ -49,10 +62,10 @@ export function room(candidate: Candidate, vcpus: number) {
  * speed score already prices the difference. Between equals, the one doing
  * less, so work spreads before it stacks.
  */
-export function pickMachine(candidates: Candidate[], vcpus: number) {
+export function pickMachine(candidates: Candidate[], size: JobSize) {
   let best: Candidate | null = null
   for (const candidate of candidates) {
-    if (candidate.presence !== "online" || !room(candidate, vcpus)) continue
+    if (candidate.presence !== "online" || !room(candidate, size)) continue
     if (
       !best ||
       candidate.speedScore > best.speedScore ||

@@ -45,6 +45,13 @@ test("frames that are not daemon messages are refused", () => {
       maxJobs: 99,
     }),
     JSON.stringify({
+      type: "hello",
+      protocol: 3,
+      daemonVersion: "0",
+      presence: "online",
+      arch: "amd64",
+    }),
+    JSON.stringify({
       type: "job.start",
       assignmentId: "a",
       jitConfig: "x",

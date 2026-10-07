@@ -15,7 +15,7 @@
 #   images/<image>/image-<arch>-<sum>.tar.gz  the same image, as a tarball
 #
 # Linux on arm64 runs the image the Mac does. Linux on x86-64 needs its own,
-# built with `./image/build.sh --arch amd64 DIR`; name that directory in
+# built with `GUEST_ARCH=x64 ./image/build.sh DIR`; name that directory in
 # HIVE_IMAGE_AMD64 to publish it, or x86-64 is left out of the release.
 #
 # Signing needs a "Developer ID Application" certificate in the keychain, and

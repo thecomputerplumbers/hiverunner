@@ -35,6 +35,10 @@ func (f *fake) Run(ctx context.Context, job Job) (int, error) {
 	}
 }
 
+// The tests are an arm64 machine wherever they run, as every offer here
+// that names no architecture is an arm64 job.
+func init() { hostArch = func() string { return protocol.ArchARM64 } }
+
 func offer(id string) *protocol.JobAssign {
 	return &protocol.JobAssign{AssignmentID: id, Label: "hive", VCPUs: 2, TimeoutMinutes: 60}
 }
@@ -294,6 +298,36 @@ func TestAnOfferPastTheOwnersLimitIsDeclined(t *testing.T) {
 	}
 	if reason := manager.Offer("p", &protocol.JobAssign{AssignmentID: "fits", VCPUs: 4}); reason != "" {
 		t.Fatalf("a 4 vCPU offer under a limit of 4 was declined: %q", reason)
+	}
+}
+
+func TestAJobForAnotherArchitectureIsDeclined(t *testing.T) {
+	manager := New(newFake(), quiet)
+	x64 := offer("x-1")
+	x64.Label, x64.Arch = "hive-x64", protocol.ArchX64
+	if reason := manager.Offer("p", x64); reason != ReasonWrongArch {
+		t.Fatalf("an x64 offer to an arm64 machine: %q", reason)
+	}
+	if manager.Busy() {
+		t.Fatal("a declined offer took the slot")
+	}
+	arm := offer("a-1")
+	arm.Arch = protocol.ArchARM64
+	if reason := manager.Offer("p", arm); reason != "" {
+		t.Fatalf("an arm64 offer to an arm64 machine was declined: %q", reason)
+	}
+
+	// An x64 machine takes x64 jobs, and not the ones that name nothing:
+	// those come from a pool that only knows arm64.
+	hostArch = func() string { return protocol.ArchX64 }
+	defer func() { hostArch = func() string { return protocol.ArchARM64 } }()
+	box := New(newFake(), quiet)
+	if reason := box.Offer("p", offer("a-2")); reason != ReasonWrongArch {
+		t.Fatalf("an unmarked offer to an x64 machine: %q", reason)
+	}
+	x64.AssignmentID = "x-2"
+	if reason := box.Offer("p", x64); reason != "" {
+		t.Fatalf("an x64 offer to an x64 machine was declined: %q", reason)
 	}
 }
 

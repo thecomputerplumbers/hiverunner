@@ -46,10 +46,13 @@ func TestDaemonMessagesMatchFixtures(t *testing.T) {
 	limited := NewHello("0.1.0", Online)
 	limited.MaxVCPUs = 4
 	limited.MaxJobs = 2
+	box := NewHello("0.2.0", Online)
+	box.Arch = ArchX64
 	sent := []any{
 		NewHello("0.1.0", Online),
 		NewHello("0.1.0", Busy, "a-1", "a-2"),
 		limited,
+		box,
 		NewPresence(Paused),
 		NewPresence(Draining),
 		NewJobAccepted("a-1"),
@@ -71,6 +74,24 @@ func TestDaemonMessagesMatchFixtures(t *testing.T) {
 		if !reflect.DeepEqual(got, expected) {
 			t.Errorf("message %d: sent %s, fixture %s", i, encoded, want[i])
 		}
+	}
+}
+
+// An offer says which architecture its label names; one from a coordinator
+// that predates a second architecture says nothing.
+func TestAnOfferCarriesItsArchitecture(t *testing.T) {
+	var arches []string
+	for _, raw := range fixtures(t, "coordinator.json") {
+		message, err := DecodeCoordinator(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if assign, ok := message.(*JobAssign); ok {
+			arches = append(arches, assign.Label+"="+assign.Arch)
+		}
+	}
+	if want := []string{"hive=", "hive-x64-4cpu=x64"}; !reflect.DeepEqual(arches, want) {
+		t.Fatalf("offers in the fixtures = %v, want %v", arches, want)
 	}
 }
 

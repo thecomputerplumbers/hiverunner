@@ -23,6 +23,10 @@ const signer = generateKeyPairSync("ed25519")
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 })
 const scenario = process.env.HIVE_LISTENER_CASE ?? "offer"
 const direct = scenario !== "offer"
+// The one machine in the pool, and so the one label its four cores can
+// serve: an arm64 Mac takes `hive` jobs, a Linux x64 box `hive-x64` jobs.
+const arch = process.env.HIVE_LISTENER_ARCH ?? "arm64"
+const label = arch === "x64" ? "hive-x64" : "hive"
 const jobIdentity = direct ? "9b60c775-161b-430b-a441-c34e54ae3f55" : 100
 const queue = [
   {
@@ -42,6 +46,7 @@ if (scenario === "initial") queue.length = 0
 let acquisitionCount = 0,
   jitCount = 0,
   ackCount = 0
+const scaleSetNames = new Set()
 let runnerName,
   acquireFailure = false,
   pollFailure = false,
@@ -79,8 +84,10 @@ const fake = createServer(async (req, res) => {
     return json({ url: `${api}/tenant`, token: "admin" })
   if (url.pathname.endsWith("runnergroups/"))
     return json({ value: [{ id: 1 }] })
-  if (url.pathname.endsWith("runnerscalesets"))
-    return json({ value: [{ id: 6, name: "hive", runnerGroupId: 1 }] })
+  if (url.pathname.endsWith("runnerscalesets")) {
+    scaleSetNames.add(url.searchParams.get("name"))
+    return json({ value: [{ id: 6, name: label, runnerGroupId: 1 }] })
+  }
   if (url.pathname.endsWith("sessions"))
     return json({
       sessionId: "session",
@@ -228,7 +235,7 @@ try {
   await sql(`INSERT INTO organization (id,name,slug,created_at) VALUES ('gh-501','acme','gh-501',0);
     INSERT INTO github_installation (account_id,installation_id,organization_id,account_login,account_type,repository_selection,created_at,updated_at) VALUES (501,9001,'gh-501','acme','Organization','all',0,0);
     INSERT INTO user (id,name,email,email_verified,created_at,updated_at) VALUES ('ada','Ada','ada@example.test',1,0,0);
-    INSERT INTO machine (id,user_id,name,model,os,arch,cores,memory_bytes,speed_score,daemon_version,token_hash,created_at) VALUES ('mac','ada','Mac','Mac15,9','darwin','arm64',4,1,1.5,'0.1.0','${createHash("sha256").update("hwm_test").digest("hex")}',0);
+    INSERT INTO machine (id,user_id,name,model,os,arch,cores,memory_bytes,speed_score,daemon_version,token_hash,created_at) VALUES ('mac','ada','Mac','Mac15,9','${arch === "x64" ? "linux" : "darwin"}','${arch}',4,1,1.5,'0.1.0','${createHash("sha256").update("hwm_test").digest("hex")}',0);
     INSERT INTO machine_pool (machine_id,organization_id,created_at) VALUES ('mac','gh-501',0);
     INSERT INTO ledger_entry (id,account_type,account_id,kind,amount,created_at) VALUES ('grant:gh-501','organization','gh-501','grant',5000000,0);`)
   const config = `${storage}/wrangler.json`
@@ -332,6 +339,11 @@ try {
   socket = await connect()
   const rejected = await next("job.assign")
   assert.equal(rejected.jitConfig, undefined)
+  // The machine is only ever offered its own architecture's label.
+  assert.deepEqual(
+    [rejected.label, rejected.arch, rejected.vcpus],
+    [label, arch, 2]
+  )
   assert.equal(acquisitionCount, 0, "Never acquire before acceptance")
   send({
     type: "job.rejected",
@@ -444,6 +456,8 @@ try {
   const row = (await sql("SELECT * FROM job"))[0]
   assert.equal(row.id, `gh-501:${jobIdentity}`)
   assert.equal(row.amount, 1500)
+  assert.equal(row.label, label)
+  assert.deepEqual([...scaleSetNames], [label], "one scale set, of its label")
   assert.equal(row.speed_score, 1.5)
   const publicKey = await (await fetch(`${origin}/v1/receipt-key`)).json()
   assert.equal(publicKey.keyId, row.receipt_key_id)
@@ -507,7 +521,7 @@ try {
     )
   }
   console.log(
-    `Listener ${scenario}: rejection, JIT, reconnect, stable identity and signed idempotent settlement passed.`
+    `Listener ${scenario} (${label}): rejection, JIT, reconnect, stable identity and signed idempotent settlement passed.`
   )
   passed = true
 } finally {
@@ -530,11 +544,23 @@ try {
 }
 
 if (!process.env.HIVE_LISTENER_CASE) {
-  for (const scenario of ["direct", "initial"]) {
+  for (const [scenario, arch] of [
+    ["direct", "arm64"],
+    ["initial", "arm64"],
+    ["direct", "x64"],
+  ]) {
     const child = spawnSync(process.execPath, [import.meta.filename], {
-      env: { ...process.env, HIVE_LISTENER_CASE: scenario },
+      env: {
+        ...process.env,
+        HIVE_LISTENER_CASE: scenario,
+        HIVE_LISTENER_ARCH: arch,
+      },
       stdio: "inherit",
     })
-    assert.equal(child.status, 0, `Listener ${scenario} scenario failed`)
+    assert.equal(
+      child.status,
+      0,
+      `Listener ${scenario} ${arch} scenario failed`
+    )
   }
 }

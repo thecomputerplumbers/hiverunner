@@ -10,6 +10,7 @@
 package jobs
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -53,7 +54,12 @@ const (
 	ReasonNoCores  = "this machine does not have the cores free for this job"
 	ReasonNoRunner = "this machine cannot run jobs: no runner image is installed"
 	ReasonTooLarge = "this job is larger than this machine's owner allows"
+	// ReasonWrongArch names no architecture: the offer's is the pool's word.
+	ReasonWrongArch = "this job is for a machine of another architecture"
 )
+
+// hostArch is what this machine is. A variable so tests can be another.
+var hostArch = protocol.HostArch
 
 // OwnerCores is what every job leaves for the machine's owner. The pool
 // applies the same rule when it chooses a machine.
@@ -177,6 +183,12 @@ func (m *Manager) Holding(pool string) []string {
 func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// The pool should never offer this: it is told what this machine is. A
+	// job on the wrong kind of guest would not fail cleanly, so it is not
+	// started at all. An offer that names no architecture is arm64.
+	if wants := cmp.Or(offer.Arch, protocol.ArchARM64); wants != hostArch() {
+		return ReasonWrongArch
+	}
 	if m.runner == nil {
 		return ReasonNoRunner
 	}
