@@ -13,7 +13,7 @@ export const DOCS = [
   {
     slug: "quickstart",
     title: "Quickstart",
-    description: "Install the GitHub App, add a machine, change one line.",
+    description: "Install the GitHub App, add a machine, route a workflow.",
     Body: Quickstart,
   },
   {

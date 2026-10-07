@@ -42,7 +42,14 @@ export function Faq() {
       </dd>
 
       <dt>What happens when no machine is free?</dt>
-      <dd>The job waits in GitHub's queue until one is.</dd>
+      <dd>
+        A job sent straight to a <Code>hive</Code> label waits in GitHub's queue
+        until one is. The{" "}
+        <Link href="/docs/quickstart#route-a-workflow">
+          recommended workflow
+        </Link>{" "}
+        checks first and falls back to a GitHub-hosted runner.
+      </dd>
 
       <dt>Do I need a credit card to start?</dt>
       <dd>

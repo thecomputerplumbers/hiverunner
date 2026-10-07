@@ -9,6 +9,10 @@ export const INSTALL_SCRIPT_URL =
 
 export const INSTALL_COMMAND = `curl -fsSL ${INSTALL_SCRIPT_URL} | sh`
 
+/** The coordinator's public origin, and the OIDC audience a capacity probe asks for. */
+export const COORDINATOR_ORIGIN =
+  "https://connect.hiveworkr.thecomputerplumbers.com"
+
 /** No daemon binary has been published. Flip this with the first release. */
 export const DAEMON_RELEASED = false
 
