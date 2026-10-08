@@ -10,34 +10,28 @@ concurrency:
   cancel-in-progress: true
 jobs:
   # Where the jobs below run: this organization's own hive when one of its
-  # machines is free, GitHub's runner when none is within the wait.
+  # machines is free, GitHub's runner when none is.
   route:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     permissions:
       id-token: write
     outputs:
-      check: ${{ steps.check.outputs.runner }}
-      daemon: ${{ steps.daemon.outputs.runner }}
+      runner: ${{ steps.hive.outputs.runner }}
     steps:
-      - id: check
-        uses: thecomputerplumbers/hive-route@v1
-        with:
-          label: hive-4cpu
-          fallback: ubuntu-latest
-          wait: 30
-      - id: daemon
+      - id: hive
         uses: thecomputerplumbers/hive-route@v1
         with:
           label: hive
           fallback: ubuntu-latest
-          wait: 30
   check:
     needs: route
-    runs-on: ${{ needs.route.outputs.check }}
+    runs-on: ${{ needs.route.outputs.runner }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      - name: Give the hive's image what Node needs on arm64
+        if: runner.environment == 'self-hosted'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libatomic1
       - uses: jdx/mise-action@v4
       - run: pnpm install --frozen-lockfile
       - run: mise run check
@@ -49,13 +43,16 @@ jobs:
         run: node tests/run-listener-smoke.mjs
   daemon:
     needs: route
-    runs-on: ${{ needs.route.outputs.daemon }}
+    runs-on: ${{ needs.route.outputs.runner }}
     timeout-minutes: 10
     defaults:
       run:
         working-directory: daemon
     steps:
       - uses: actions/checkout@v7
+      - name: Give the hive's image what Node needs on arm64
+        if: runner.environment == 'self-hosted'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libatomic1
       - uses: jdx/mise-action@v4
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
