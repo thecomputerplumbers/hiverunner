@@ -46,6 +46,9 @@ type Settings struct {
 	// separate user rather than in a VM. `hived macos setup` turns it on
 	// once the Mac is ready; it is never on by default.
 	MacOSJobs bool `json:"macosJobs"`
+	// AutoUpdate lets the daemon update itself when a release is out and
+	// it has no job, by running the installer. Off, it only says so.
+	AutoUpdate bool `json:"autoUpdate"`
 }
 
 // Sizes are the job sizes a machine can be offered, by guest vCPUs.
@@ -61,7 +64,7 @@ const MostJobs = 8
 // Default is a machine whose owner has decided nothing: it behaves as the
 // daemon did before there were settings.
 func Default() Settings {
-	return Settings{MaxJobs: 1, Warm: true, Battery: true, Cache: true}
+	return Settings{MaxJobs: 1, Warm: true, Battery: true, Cache: true, AutoUpdate: true}
 }
 
 // Path is the settings file, beside the machine file.
@@ -151,7 +154,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours", "cache", "cache-size", "macos-jobs"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours", "cache", "cache-size", "macos-jobs", "auto-update"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -173,7 +176,7 @@ func (s *Settings) Set(key, value string) error {
 			return errors.New("max-vcpus takes 2, 4, 8 or auto")
 		}
 		s.MaxVCPUs = vcpus
-	case "warm", "battery", "cache", "macos-jobs":
+	case "warm", "battery", "cache", "macos-jobs", "auto-update":
 		on, err := parseSwitch(value)
 		if err != nil {
 			return fmt.Errorf("%s takes on or off", key)
@@ -185,6 +188,8 @@ func (s *Settings) Set(key, value string) error {
 			s.Battery = on
 		case "macos-jobs":
 			s.MacOSJobs = on
+		case "auto-update":
+			s.AutoUpdate = on
 		default:
 			s.Cache = on
 		}

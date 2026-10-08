@@ -17,6 +17,7 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/settings"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/ui"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/update"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/vm"
 )
 
@@ -87,6 +88,24 @@ func status() error {
 		state = screen.Dot(false) + " not taking jobs: " + holding
 	}
 
+	// What the daemon last learned, and a fresh look if that was a while
+	// ago; never long enough to hold the rest of the page up.
+	release := ""
+	if remembered, err := update.LoadState(); err == nil {
+		if time.Since(remembered.CheckedAt) > update.Every {
+			quick, cancel := context.WithTimeout(ctx, 3*time.Second)
+			_, _, _ = update.Check(quick, &remembered)
+			cancel()
+			_ = update.SaveState(remembered)
+		}
+		if update.Newer(version, remembered.Latest) {
+			release = screen.Honey(remembered.Latest+" is available") + screen.Dim("  update with: hived update")
+			if current.AutoUpdate {
+				release = screen.Honey(remembered.Latest+" is available") + screen.Dim("  installs itself when idle, or now with: hived update")
+			}
+		}
+	}
+
 	fmt.Println()
 	fmt.Print(indent(screen.Masthead(
 		"",
@@ -95,13 +114,17 @@ func status() error {
 		screen.Dim(machine.Server),
 	)))
 	fmt.Println()
-	fmt.Print(indent(screen.Box(strings.ToUpper(thisMachine[:1])+thisMachine[1:],
+	rows := []string{
 		field("Name", facts.Name+screen.Dim("  "+facts.Model)),
 		field("Hardware", fmt.Sprintf("%d cores, %d GB", facts.Cores, facts.MemoryBytes/gib)),
 		field("Hives", pools),
 		field("Daemon", screen.Dot(daemonUp)+" "+daemon),
 		field("Jobs", state),
-	)))
+	}
+	if release != "" {
+		rows = append(rows, field("Update", release))
+	}
+	fmt.Print(indent(screen.Box(strings.ToUpper(thisMachine[:1])+thisMachine[1:], rows...)))
 	fmt.Println()
 	fmt.Print(indent(screen.Box("What you lend", lending(screen, facts, current)...)))
 	fmt.Println()
@@ -193,6 +216,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("cache", onOff(current.Cache), "keep an Actions cache on "+thisMachine),
 		row("cache-size", cacheSize, "the most disk the cache may use"),
 		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs on this Mac itself"),
+		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
 		row("paused", yesNo(current.Paused), "hived pause, hived resume"),
 	}
 }
@@ -230,6 +254,8 @@ hived config set <name> <value>  Change one
   cache-size 1 to 2000 or auto   the most disk the cache may use, in GB
   macos-jobs on or off           take hive-macos jobs, run on this Mac itself
                                  as a separate user; hived macos setup first
+  auto-update on or off          update to new releases when no job is running;
+                                 off, hived status and a notification say so
 `
 
 func configure(args []string) error {

@@ -51,6 +51,16 @@ runner group. The daemon pauses availability when the lid is closed and
 keeps running on battery. One machine runs one job at a time across all its pools unless its
 owner raises `max-jobs`, and always leaves two cores for its owner.
 
+The daemon keeps itself current. Once a day it reads the release manifest
+(one request, cached by ETag) and, when a newer release is out, says so once
+in its log, in `hived status` and as a desktop notification. With the default
+`auto-update on` it then stops taking jobs, waits for the one in hand, and
+runs the installer, which restarts it; `hived update` does the same on
+demand, and `hived config set auto-update off` leaves it to the owner. The
+dashboard marks machines whose daemon is behind the release. GitHub requires
+runners to update within 30 days of a runner release, and the image pins the
+runner, so publishing a release is how a fleet stays within that.
+
 Use these labels in a repository's workflow:
 
 | `runs-on`   | Guest vCPUs | Minimum host cores |

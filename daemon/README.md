@@ -13,6 +13,7 @@ It runs on Apple Silicon Macs and on Linux with KVM, arm64 or x86-64.
 ./hived status      # what this machine lends, and whether it is lending
 ./hived config      # the owner's settings, below
 ./hived pause       # stop taking jobs; ./hived resume to undo
+./hived update      # move to the current release; the daemon does this itself when idle
 ./hived benchmark
 ```
 
@@ -135,6 +136,21 @@ and `hived config set <name> <value>` changes one:
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
+
+## Updating
+
+Once a day, at a random minute, the daemon reads `latest.json` from the
+releases bucket, sending the ETag it remembers so an unchanged manifest costs
+one small request. When a newer release is out it says so once per version:
+in its log, in `hived status`, and as a desktop notification. Then, unless the
+owner has set `auto-update off`, it stops taking new jobs, waits for the ones
+it has, and runs the installer in its own session (the service manager stops
+the daemon's process group when the installer restarts the service, and the
+installer must outlive that). The installer checks every download against its
+published checksum, as at first install. `hived update` does the same at once,
+from the terminal. A daemon run from anywhere but `~/.local/bin/hived` is a
+developer's build: it is told about releases and never replaced by one. The
+state is `update.json` beside `machine.json`.
 
 The settings live in `settings.json` beside the machine file and can be edited
 by hand. A running daemon reads the file again when it changes, so nothing

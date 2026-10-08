@@ -30,6 +30,9 @@ type Options struct {
 	Runner jobs.Runner
 	// Native runs hive-macos jobs on the Mac itself. Nil declines them.
 	Native jobs.Runner
+	// Jobs, if set, is the slot manager to use instead of one built from
+	// Runner, Native and Limits: for a caller that needs to watch it.
+	Jobs *jobs.Manager
 	// RefreshEvery is how often the server is asked which pools to serve.
 	// Defaults to a minute.
 	RefreshEvery time.Duration
@@ -53,9 +56,12 @@ func Run(ctx context.Context, options Options) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	slot := jobs.New(options.Runner, options.Log)
-	slot.Native(options.Native)
-	slot.Limit(options.Limits)
+	slot := options.Jobs
+	if slot == nil {
+		slot = jobs.New(options.Runner, options.Log)
+		slot.Native(options.Native)
+		slot.Limit(options.Limits)
+	}
 	presence := func() protocol.Presence {
 		// Online means willing to take another job, whether or not some
 		// are running. A machine whose owner is holding it back stays busy

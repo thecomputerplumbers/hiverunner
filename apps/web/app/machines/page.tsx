@@ -9,7 +9,10 @@ import { AccountPage } from "@/components/account-page"
 import { ActionButton } from "@/components/action-button"
 import { InvitePanel } from "@/components/console/invite"
 import { Panel, Snippet } from "@/components/console/panel"
-import { INSTALL_COMMAND } from "@/components/marketing/site"
+import {
+  INSTALL_COMMAND,
+  releasedDaemonVersion,
+} from "@/components/marketing/site"
 import { getDb } from "@/db"
 import { requirePool } from "@/lib/session"
 import { MachineGrid } from "./machine-grid"
@@ -20,10 +23,11 @@ export default async function MachinesPage() {
   const { organizationId, installation, membership, session } =
     await requirePool()
   const db = getDb()
-  const [live, own, settings] = await Promise.all([
+  const [live, own, settings, released] = await Promise.all([
     getLiveSnapshot(db, organizationId),
     listUserMachines(db, session.user.id),
     getPoolSettings(db, organizationId),
+    releasedDaemonVersion(),
   ])
   const machines = live.machines
   // The caller's machines that serve other pools but not this one.
@@ -42,6 +46,7 @@ export default async function MachinesPage() {
         organizationId={organizationId}
         userId={session.user.id}
         owner={owner}
+        released={released}
       />
       <InvitePanel
         machines={machines}

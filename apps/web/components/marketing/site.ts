@@ -3,9 +3,29 @@
  * the product domain is one edit, never a search for string-built URLs.
  */
 
+/** Where the daemon and its installer are served from (the releases bucket). */
+export const RELEASES_ORIGIN = "https://get.hiveworkr.thecomputerplumbers.com"
+
 /** Where the daemon's installer is served from (the releases bucket). */
-export const INSTALL_SCRIPT_URL =
-  "https://get.hiveworkr.thecomputerplumbers.com/install.sh"
+export const INSTALL_SCRIPT_URL = `${RELEASES_ORIGIN}/install.sh`
+
+/**
+ * The daemon version currently released, read from the manifest the
+ * installer reads and cached at the edge for an hour. Null when it cannot be
+ * read: the page then says nothing about updates rather than something wrong.
+ */
+export async function releasedDaemonVersion(): Promise<string | null> {
+  try {
+    const response = await fetch(`${RELEASES_ORIGIN}/latest.json`, {
+      cf: { cacheTtl: 3600, cacheEverything: true },
+    } as RequestInit)
+    if (!response.ok) return null
+    const manifest = (await response.json()) as { version?: unknown }
+    return typeof manifest.version === "string" ? manifest.version : null
+  } catch {
+    return null
+  }
+}
 
 export const INSTALL_COMMAND = `curl -fsSL ${INSTALL_SCRIPT_URL} | sh`
 

@@ -23,14 +23,33 @@ const dot: Record<string, string> = {
  * One box for each Mac in the pool: its cores drawn one square apiece, the
  * job it is running, and what it has done lately.
  */
+/** Whether `version` is a release older than `released`; false when unsure. */
+function behind(version: string, released: string | null | undefined) {
+  if (!released) return false
+  const parse = (v: string) => {
+    const parts = v.trim().replace(/^v/, "").split(".")
+    if (parts.length !== 3 || parts.some((p) => !/^\d+$/.test(p))) return null
+    return parts.map(Number)
+  }
+  const have = parse(version),
+    want = parse(released)
+  if (!have || !want) return false
+  for (let i = 0; i < 3; i++)
+    if (have[i] !== want[i]) return have[i]! < want[i]!
+  return false
+}
+
 export function MachineGrid({
   organizationId,
   userId,
   owner,
+  released,
 }: {
   organizationId: string
   userId: string
   owner: boolean
+  /** The daemon version currently released, to mark machines behind it. */
+  released?: string | null
 }) {
   const { snapshot } = useLive()
   const now = useNow()
@@ -128,6 +147,22 @@ export function MachineGrid({
                       ? `seen ${formatAgo(machine.lastSeenAt, now)}`
                       : "connected"
                     : "not connected yet"}
+                  {" · "}
+                  <span
+                    title={
+                      behind(machine.daemonVersion, released)
+                        ? `${released} is released. The daemon updates itself when idle unless its owner turned that off; or they run: hived update`
+                        : "The daemon's version"
+                    }
+                  >
+                    hived {machine.daemonVersion}
+                    {behind(machine.daemonVersion, released) && (
+                      <span className="text-foreground">
+                        {" "}
+                        (update available)
+                      </span>
+                    )}
+                  </span>
                 </p>
                 {(owner || machine.userId === userId) && (
                   <ActionButton
