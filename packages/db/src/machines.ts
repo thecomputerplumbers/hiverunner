@@ -6,7 +6,12 @@ import type { GitHubApp } from "@workspace/github"
 import { runnerArch } from "@workspace/pricing"
 
 import { canAddMachines } from "@workspace/db/membership"
-import { githubInstallation, machine, machinePool } from "@workspace/db/schema"
+import {
+  githubInstallation,
+  machine,
+  machinePool,
+  poolSettings,
+} from "@workspace/db/schema"
 
 /** Enough for a laptop, a desktop and a few build boxes; not for abuse. */
 export const MAX_MACHINES_PER_PERSON = 10
@@ -310,15 +315,25 @@ export async function listUserMachines(db: AuthDb, userId: string) {
 /**
  * The pools a machine should hold a tunnel to. The daemon asks for this on a
  * timer, which is how it learns it was added to a pool or dropped from one.
+ * Each says whether it allows macOS jobs, so a Mac set up for them can tell
+ * its owner which hives will actually send any.
  */
 export async function listMachinePools(db: AuthDb, machineId: string) {
-  return db
-    .select({ id: organization.id, name: organization.name })
+  const rows = await db
+    .select({
+      id: organization.id,
+      name: organization.name,
+      macosJobs: poolSettings.macosJobs,
+    })
     .from(machinePool)
     .innerJoin(organization, eq(organization.id, machinePool.organizationId))
     .innerJoin(
       githubInstallation,
       eq(githubInstallation.organizationId, machinePool.organizationId)
+    )
+    .leftJoin(
+      poolSettings,
+      eq(poolSettings.organizationId, machinePool.organizationId)
     )
     .where(
       and(
@@ -327,6 +342,7 @@ export async function listMachinePools(db: AuthDb, machineId: string) {
         eq(githubInstallation.status, "active")
       )
     )
+  return rows.map((row) => ({ ...row, macosJobs: row.macosJobs === true }))
 }
 
 export async function getMachine(db: AuthDb, machineId: string) {

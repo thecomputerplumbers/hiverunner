@@ -44,6 +44,9 @@ type DeviceCode struct {
 type Pool struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// MacOSJobs is whether this hive allows hive-macos jobs, which its
+	// owner turns on in its settings. Nil from a server that does not say.
+	MacOSJobs *bool `json:"macosJobs,omitempty"`
 }
 
 // ChoosePoolError means the person is in several pools and must say which of

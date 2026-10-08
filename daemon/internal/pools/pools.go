@@ -146,6 +146,11 @@ func Run(ctx context.Context, options Options) error {
 				poolCtx, stop := context.WithCancel(ctx)
 				running[id] = stop
 				options.Log.Info("serving a hive", "pool", pool.Name)
+				// A Mac set up for macOS jobs gets none from a hive whose
+				// owner has not allowed them; say so where the owner looks.
+				if options.Limits != nil && options.Limits().MacOS && pool.MacOSJobs != nil && !*pool.MacOSJobs {
+					options.Log.Info("this hive does not allow macOS jobs yet; an owner turns that on in its settings", "pool", pool.Name, "settings", options.Client.Server+"/settings")
+				}
 				go func() {
 					err := tunnel.Run(poolCtx, tunnel.Options{
 						URL:           address,

@@ -414,7 +414,10 @@ const me = (token) =>
   fetch(`${origin}/api/machines/me`, {
     headers: { Authorization: `Bearer ${token}` },
   })
-assert.deepEqual((await json(await me(enrolled.token))).pools, enrolled.pools)
+// What the daemon polls says, per hive, whether macOS jobs are allowed.
+assert.deepEqual((await json(await me(enrolled.token))).pools, [
+  { ...enrolled.pools[0], macosJobs: false },
+])
 assert.equal((await me("hwm_nope")).status, 401)
 assert.equal((await me(ownerToken)).status, 401)
 // The sign-in token did its one job and is gone.

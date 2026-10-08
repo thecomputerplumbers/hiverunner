@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/api"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/settings"
 )
@@ -42,8 +45,12 @@ func macos(ctx context.Context, args []string) error {
 		}
 		if !current.MacOSJobs {
 			current.MacOSJobs = true
-			return saved(current, "macos-jobs is now on")
+			if err := saved(current, "macos-jobs is now on"); err != nil {
+				return err
+			}
 		}
+		fmt.Println()
+		hiveLines(ctx)
 		return nil
 	case "status":
 		runner, err := native.New(nil)
@@ -63,9 +70,11 @@ func macos(ctx context.Context, args []string) error {
 		}
 		if !current.MacOSJobs {
 			fmt.Println("Ready, but turned off. Turn on with: hived config set macos-jobs on")
-		} else {
-			fmt.Println("This Mac takes macOS jobs.")
+			return nil
 		}
+		fmt.Println("This Mac takes macOS jobs.")
+		fmt.Println()
+		hiveLines(ctx)
 		return nil
 	case "remove":
 		if err := native.Remove(ctx, options); err != nil {
@@ -85,6 +94,35 @@ func macos(ctx context.Context, args []string) error {
 		return nil
 	}
 	return errors.New("usage: hived macos setup|status|remove")
+}
+
+// hiveLines says, for each hive this machine serves, whether it will send
+// macOS jobs: that is the other half of the switch, and it is not on this
+// Mac. Said as well as it can be when the server cannot be asked.
+func hiveLines(ctx context.Context) {
+	machine, err := config.Load()
+	if err != nil {
+		fmt.Println("Jobs come only from hives that allow macOS jobs; an owner turns that on in the hive's settings.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	assignment, err := api.New(machine.Server).Me(ctx, machine.Token)
+	if err != nil || len(assignment.Pools) == 0 {
+		fmt.Printf("Jobs come only from hives that allow macOS jobs; an owner turns that on at %s/settings\n", machine.Server)
+		return
+	}
+	fmt.Println("Whether the hives this Mac serves will send macOS jobs:")
+	for _, pool := range assignment.Pools {
+		switch {
+		case pool.MacOSJobs == nil:
+			fmt.Printf("  %-24s unknown\n", pool.Name)
+		case *pool.MacOSJobs:
+			fmt.Printf("  %-24s yes\n", pool.Name)
+		default:
+			fmt.Printf("  %-24s not yet: an owner of %s turns on \"Allow macOS jobs\" at %s/settings\n", pool.Name, pool.Name, machine.Server)
+		}
+	}
 }
 
 func orDash(value string) string {
