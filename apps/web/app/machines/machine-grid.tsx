@@ -67,6 +67,8 @@ export function MachineGrid({
           <li
             key={machine.id}
             id={machine.id}
+            // Read by the daemon's end-to-end test; keep it on the card.
+            data-presence={presence}
             className="flex scroll-mt-20 flex-col border border-border bg-card/50 target:border-primary"
           >
             <header className="flex items-center justify-between gap-3 border-b border-border px-3 py-2 font-mono text-xs">

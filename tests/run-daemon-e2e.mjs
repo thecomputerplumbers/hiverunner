@@ -85,12 +85,14 @@ async function healthy(url, child) {
   }
   throw new Error(`${url} did not become healthy`)
 }
+// `message` may be a function, read only on failure: a daemon's output is
+// worth showing as it stands then, not as it stood when the wait began.
 async function eventually(check, message) {
   for (let i = 0; i < 100; i++) {
     if (await check()) return
     await delay(200)
   }
-  throw new Error(message)
+  throw new Error(typeof message === "function" ? message() : message)
 }
 
 try {
@@ -172,6 +174,13 @@ try {
     HIVE_CONFIG: `${storage}/machine.json`,
     // Ask the server which pools to serve every second, not every minute.
     HIVE_REFRESH_SECONDS: "1",
+    // Its own image directory, so it never contends with a daemon already
+    // installed on this machine for the real one's work directory. With no
+    // image there, it connects and reports presence but declines jobs; a
+    // caller who wants jobs run names an image in HIVE_IMAGE.
+    HIVE_IMAGE: process.env.HIVE_IMAGE ?? `${storage}/image`,
+    // No release checks against the real bucket from a test.
+    HIVE_RELEASES: origin,
   }
   const hived = (args) => {
     const child = spawn(`${storage}/hived`, args, {
@@ -230,9 +239,11 @@ try {
       await browser("/api/auth/organization/set-active", { organizationId })
       viewing = organizationId
     }
+    // The card says its presence in a data attribute kept for this test,
+    // so a change of styling or wording does not break it.
     const html = await page("/machines")
     return html.match(
-      /rounded-full[^>]*>(?:<!-- -->)?(offline|paused|online|busy|draining)</
+      /data-presence="(offline|paused|online|busy|draining)"/
     )?.[1]
   }
   await browser("/api/auth/sign-in/email", {
@@ -266,7 +277,7 @@ try {
   let run = hived(["run"])
   await eventually(
     async () => (await presence()) !== "offline",
-    `the machine never came online\n${run.output}`
+    () => `the machine never came online\n${run.output}`
   )
   const state = await presence()
   assert.ok(["online", "paused"].includes(state), state)
@@ -281,7 +292,7 @@ try {
   })
   await eventually(
     async () => (await presence("gh-502")) === state,
-    `globex never saw the machine\n${run.output}`
+    () => `globex never saw the machine\n${run.output}`
   )
   assert.equal(await presence(), state)
   // Dropped from it again: that tunnel goes, the first stays.
@@ -290,8 +301,8 @@ try {
     organizationId: "gh-502",
   })
   await eventually(
-    () => /no longer serving a pool/.test(run.output),
-    "the daemon did not notice"
+    () => /no longer serving a hive/.test(run.output),
+    () => `the daemon did not notice\n${run.output}`
   )
   await delay(1500)
   assert.equal(
@@ -313,7 +324,7 @@ try {
   if (warm) {
     await eventually(
       () => /a VM is booted and waiting/.test(run.output),
-      `no warm VM\n${run.output}`
+      () => `no warm VM\n${run.output}`
     )
     assert.ok(
       readdirSync(jobs).some((name) => name.startsWith("job-")),
