@@ -158,6 +158,18 @@ func login(ctx context.Context, args []string) error {
 		}
 		enrollment, err = client.Enroll(ctx, token, machine)
 	}
+	var refusal *api.Error
+	if errors.As(err, &refusal) && refusal.Code == "NO_HIVE" {
+		// Signed in fine, but in no hive. Retrying cannot help; say what can.
+		return fmt.Errorf("your GitHub account is not in a hive yet.\n\n"+
+			"A hive is a GitHub organization with HiveWorker installed on it. Three steps:\n\n"+
+			"  1. Have a GitHub organization. Creating one is free; a personal account cannot be a hive.\n"+
+			"  2. Install HiveWorker on it:  %s/install\n"+
+			"     Choose the organization, not your personal account. If you are not an owner,\n"+
+			"     GitHub asks the owners to approve it.\n"+
+			"  3. Run \"hived login\" again and approve the new code.\n\n"+
+			"Joining a teammate's hive instead? Ask them for the invite link on their dashboard.", client.Server)
+	}
 	if err != nil {
 		return err
 	}

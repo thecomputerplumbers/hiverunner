@@ -139,7 +139,7 @@ if "$BIN_DIR/hived" status >/dev/null 2>&1; then
 else
   # Read from the terminal: when this script is piped from curl, its own
   # input is the script.
-  "$BIN_DIR/hived" login </dev/tty || fail "sign-in did not finish. Run this again to retry."
+  "$BIN_DIR/hived" login </dev/tty || fail "this machine was not added to a hive. See what hived said above; once that is sorted, run this again."
 fi
 
 step "Starting the daemon"
@@ -350,7 +350,7 @@ step "Adding this machine to your hive"
 if "$BIN_DIR/hived" status >/dev/null 2>&1; then
   say "This machine is already signed in."
 else
-  "$BIN_DIR/hived" login </dev/tty || fail "sign-in did not finish. Run this again to retry."
+  "$BIN_DIR/hived" login </dev/tty || fail "this machine was not added to a hive. See what hived said above; once that is sorted, run this again."
 fi
 
 step "Starting the daemon"

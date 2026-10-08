@@ -4,12 +4,11 @@ import { RUNNER_SIZES, TRIAL_GRANT_USD } from "@workspace/pricing"
 import { getLiveSnapshot } from "@workspace/db/live"
 import { getPoolSettings } from "@workspace/db/settings"
 import { roleAtLeast } from "@workspace/auth"
-import { Button } from "@workspace/ui/components/button"
 
 import { AccountPage } from "@/components/account-page"
 import { Notice, Panel, Snippet } from "@/components/console/panel"
-import { RouteLink } from "@/components/route-link"
 import { getDb } from "@/db"
+import { NoHiveSteps } from "@/components/no-hive-steps"
 import { DAEMON_RELEASED, INSTALL_COMMAND } from "@/components/marketing/site"
 import { getPool } from "@/lib/session"
 import { LiveDashboard } from "./live-dashboard"
@@ -229,16 +228,8 @@ function FirstJob({
 function NoPool() {
   return (
     <AccountPage title="No hive yet">
-      <p className="max-w-2xl text-muted-foreground">
-        A hive belongs to a GitHub organization. Install HiveWorker on yours, or
-        ask an owner to: once it is installed, every member can sign in and add
-        a machine.
-      </p>
-      <div className="flex flex-wrap gap-3">
-        <Button render={<RouteLink to="/install" />}>Install on GitHub</Button>
-        <Button variant="outline" render={<RouteLink to="/github/sync" />}>
-          Check my organizations again
-        </Button>
+      <div className="max-w-2xl">
+        <NoHiveSteps />
       </div>
     </AccountPage>
   )

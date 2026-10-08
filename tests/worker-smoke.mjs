@@ -423,6 +423,43 @@ assert.equal(
 )
 assert.ok((await page(owner, "/machines")).includes("Mac15,9"))
 
+// Someone in no hive is told so in the browser instead of being offered an
+// approval that can only fail, and a daemon that enrolls anyway learns why.
+{
+  const code = await json(
+    await ownerDaemon.daemon("/api/auth/device/code", {
+      client_id: "hiveworker-daemon",
+    })
+  )
+  const noHive = await page(outsider, `/device?user_code=${code.user_code}`)
+  assert.ok(noHive.includes("not in a hive yet"))
+  assert.ok(noHive.includes('href="/install"'))
+  assert.ok(!noHive.includes("Approve"))
+  // The page never claimed the code, so approving it takes a deliberate
+  // detour through the auth API; a daemon enrolling with the result is
+  // refused with the same explanation.
+  await json(await outsider(`/api/auth/device?user_code=${code.user_code}`))
+  await json(
+    await outsider("/api/auth/device/approve", { userCode: code.user_code })
+  )
+  const granted = await json(
+    await ownerDaemon.daemon("/api/auth/device/token", {
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      device_code: code.device_code,
+      client_id: "hiveworker-daemon",
+    })
+  )
+  const refused = await ownerDaemon.daemon(
+    "/api/machines",
+    mac,
+    granted.access_token
+  )
+  assert.equal(refused.status, 403)
+  const body = await json(refused, 403)
+  assert.equal(body.code, "NO_HIVE")
+  assert.match(body.error, /\/install/)
+}
+
 // A member who is not on an allowed team cannot add a machine; one who is, can.
 let memberDaemon = await daemonSignIn(member)
 let memberToken = (await json(memberDaemon.granted)).access_token

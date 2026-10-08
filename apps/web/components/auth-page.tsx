@@ -8,13 +8,16 @@ import {
 export function AuthPage({
   title,
   children,
+  wide = false,
 }: {
   title: string
   children: ReactNode
+  /** Room for instructions rather than a single form. */
+  wide?: boolean
 }) {
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-md">
+      <Card className={wide ? "w-full max-w-2xl" : "w-full max-w-md"}>
         <CardHeader>
           <CardTitle>{title}</CardTitle>
         </CardHeader>

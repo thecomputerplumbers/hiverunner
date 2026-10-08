@@ -6,6 +6,7 @@ import {
 } from "@workspace/db/machines"
 
 import { getDb } from "@/db"
+import { noHiveMessage } from "@/lib/no-hive"
 import { apiSession } from "@/lib/browser-request"
 import { logError, requestId } from "@/lib/diagnostics"
 import { AppError, errorResponse } from "@/lib/errors"
@@ -29,17 +30,26 @@ export async function POST(request: Request) {
 
     let organizationIds = input.organizationIds
     if (organizationIds === undefined) {
+      // Signed in fine, but in no hive: the usual first-run dead end. The
+      // message is complete on its own because every daemon prints it.
+      if (!pools.length)
+        return Response.json(
+          {
+            error: noHiveMessage(),
+            code: "NO_HIVE",
+            pools: [],
+          },
+          { status: 403 }
+        )
       if (pools.length !== 1)
         // The daemon shows this list and asks again with a choice.
         return Response.json(
           {
-            error: pools.length
-              ? "Choose which hives this machine should serve"
-              : "You are not a member of any hive",
-            code: pools.length ? "CHOOSE_POOL" : "FORBIDDEN",
+            error: "Choose which hives this machine should serve",
+            code: "CHOOSE_POOL",
             pools: pools.map(({ id, name }) => ({ id, name })),
           },
-          { status: pools.length ? 409 : 403 }
+          { status: 409 }
         )
       organizationIds = [pools[0]!.id]
     }
