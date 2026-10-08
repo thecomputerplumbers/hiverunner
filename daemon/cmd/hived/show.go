@@ -14,6 +14,7 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/settings"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/ui"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/vm"
@@ -191,6 +192,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("hours", hours, "when jobs may start"),
 		row("cache", onOff(current.Cache), "keep an Actions cache on "+thisMachine),
 		row("cache-size", cacheSize, "the most disk the cache may use"),
+		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs on this Mac itself"),
 		row("paused", yesNo(current.Paused), "hived pause, hived resume"),
 	}
 }
@@ -226,6 +228,8 @@ hived config set <name> <value>  Change one
   hours      22:00-07:00 or any  when jobs may start, in local time
   cache      on or off           keep an Actions cache on this machine
   cache-size 1 to 2000 or auto   the most disk the cache may use, in GB
+  macos-jobs on or off           take hive-macos jobs, run on this Mac itself
+                                 as a separate user; hived macos setup first
 `
 
 func configure(args []string) error {
@@ -246,6 +250,18 @@ func configure(args []string) error {
 	case len(args) == 3 && args[0] == "set":
 		if err := current.Set(args[1], args[2]); err != nil {
 			return err
+		}
+		if args[1] == "macos-jobs" && current.MacOSJobs {
+			// On means jobs run here as another user: the Mac has to be
+			// set up for that first, and the setup command is what says
+			// what it will do.
+			runner, err := native.New(nil)
+			if err != nil {
+				return err
+			}
+			if report := runner.Status(); report.Problem != "" {
+				return errors.New(report.Problem)
+			}
 		}
 		return saved(current, args[1]+" is now "+strings.ToLower(args[2]))
 	case args[0] == "help" || args[0] == "-h" || args[0] == "--help":

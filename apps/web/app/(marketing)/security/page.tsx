@@ -39,6 +39,13 @@ export default function SecurityPage() {
             Inside the VM is GitHub's official runner, registered with a
             one-time configuration that is good for a single job.
           </Fact>
+          <Fact title="The one exception: macOS jobs">
+            A <code>hive-macos</code> job runs on a Mac itself, as a separate
+            local user, because Xcode cannot run in a Linux VM. It cannot read
+            the owner's files or keychain, but it can use what is installed on
+            that Mac and its network. It runs only on Macs whose owners opted
+            in, and only in hives whose owners turned it on.
+          </Fact>
         </Facts>
       </Band>
 

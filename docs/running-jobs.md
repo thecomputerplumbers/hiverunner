@@ -102,6 +102,62 @@ It is the same guest with GitHub's x64 runner and an x64 kernel, and its
 `manifest.json` says `"arch": "amd64"`, Go's name for it. `hived` refuses an image that is not
 for the machine it is running on.
 
+### macOS jobs (iOS builds)
+
+`runs-on: hive-macos` is for what only macOS can do: Xcode, iOS builds and
+signing, simulators. Such a job does not run in a VM. It runs on a member's
+Mac itself, as a separate local user named `hiveworker`, which keeps the
+owner's files and keychain out of reach and nothing more: the job can use the
+Xcode and other software installed on that Mac, and its network. It is the
+same trust model as any self-hosted macOS runner, and so two people have to
+agree before one runs:
+
+- The Mac's owner runs `hived macos setup`. With sudo, it creates the
+  `hiveworker` user (hidden, no usable password, in the `_developer` group),
+  writes one rule to `/etc/sudoers.d/hiveworker` that lets the owner run
+  exactly `hived macos-job` as that user, downloads GitHub's macOS runner
+  (`native.RunnerVersion`, pinned with its checksum), and turns on the
+  `macos-jobs` setting. `hived macos status` says what is in place;
+  `hived macos remove` undoes it all. The daemon says `macos: true` in its
+  hello only while the setting is on and the Mac is ready.
+- An owner of the hive turns on "Allow macOS jobs" in its settings
+  (`pool_settings.macos_jobs`). Until then the coordinator advertises no
+  capacity for the label, creates no scale set for it, and answers capacity
+  probes for it with no.
+
+The label's kind is `macos` in `@workspace/pricing`, beside the two
+architectures, and `serves()` in the coordinator's schedule is the one place
+that decides which machine is which kind. A job is billed as 4 vCPUs, the size
+of GitHub's standard macOS runner, and compared with GitHub's price for it.
+
+Each job gets an APFS clone of the runner directory, GitHub's runner in it
+with a clean environment, and the clone is deleted afterwards. What the job
+leaves in the `hiveworker` user's home (CocoaPods, npm and Xcode caches) stays
+for the next job. The owner installs what every job needs, typically CocoaPods
+and Fastlane with Homebrew. An Expo app:
+
+```yaml
+jobs:
+  ios:
+    runs-on: hive-macos
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx eas-cli build --local --platform ios --profile preview --non-interactive --output app.ipa
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: app.ipa
+```
+
+Android EAS builds need no Mac: they run on the Linux labels with
+`setup-java` and `android-actions/setup-android`.
+
 Jobs install their own toolchains with `setup-*` actions. `container:` and
 `services:` are not supported yet. Every job starts from a clean disk. What
 `actions/cache` saves is kept on the Mac that ran the job, per repository, and

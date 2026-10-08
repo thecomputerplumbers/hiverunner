@@ -52,8 +52,14 @@ export const AUTO_TOP_UP_MONTHLY_CAP_USD_OPTIONS = [
   50, 100, 250, 500, 1000,
 ] as const
 
-/** The architecture of a job's VM, and so of the machine that runs it. */
-export type RunnerArch = "arm64" | "x64"
+/**
+ * What kind of machine a job runs on. Two are the architecture of a job's
+ * Linux VM, and so of the machine that runs it. `macos` is not a VM at all:
+ * the job runs on an Apple Silicon Mac itself, as a separate user, for the
+ * things only macOS can do, such as building for iOS. Only a Mac whose owner
+ * opted in serves it.
+ */
+export type RunnerArch = "arm64" | "x64" | "macos"
 
 /**
  * Job sizes the site offers. Each label is its own scale set, because a
@@ -80,8 +86,22 @@ export const X64_RUNNER_SIZES = [
   { label: "hive-x64-8cpu", vcpus: 8, arch: "x64" },
 ] as const
 
+/**
+ * The macOS size, which runs on the Mac itself rather than in a VM, on Macs
+ * whose owners opted in and in hives whose owners allow it. One size: a
+ * native job is not confined to a core count, and four is what it is billed
+ * and compared as, the same as GitHub's standard macOS runner.
+ */
+export const MACOS_RUNNER_SIZES = [
+  { label: "hive-macos", vcpus: 4, arch: "macos" },
+] as const
+
 /** Every label a job can ask for, released or not. */
-export const ALL_RUNNER_SIZES = [...RUNNER_SIZES, ...X64_RUNNER_SIZES]
+export const ALL_RUNNER_SIZES = [
+  ...RUNNER_SIZES,
+  ...X64_RUNNER_SIZES,
+  ...MACOS_RUNNER_SIZES,
+]
 
 export type RunnerLabel = (typeof ALL_RUNNER_SIZES)[number]["label"]
 export type RunnerSize = {
@@ -180,6 +200,8 @@ export const COMPETITOR_RATES = {
     usdPerMinute: {
       arm64: { 2: 0.005, 4: 0.008, 8: 0.014 },
       x64: { 2: 0.006, 4: 0.012, 8: 0.022 },
+      // The standard macOS runner, 3 or 4 cores, M1 or Intel.
+      macos: { 4: 0.062 },
     } as Record<RunnerArch, Record<number, number>>,
   },
   blacksmith: {
@@ -188,6 +210,8 @@ export const COMPETITOR_RATES = {
     usdPerMinute: {
       arm64: { 2: 0.0025, 4: 0.005, 8: 0.01 },
       x64: { 2: 0.004, 4: 0.008, 8: 0.016 },
+      // Blacksmith does not offer macOS runners.
+      macos: {},
     } as Record<RunnerArch, Record<number, number>>,
   },
 }

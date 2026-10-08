@@ -1,9 +1,15 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { fits, pickMachine, room } from "../apps/coordinator/src/schedule.ts"
+import {
+  fits,
+  pickMachine,
+  room,
+  serves,
+} from "../apps/coordinator/src/schedule.ts"
 
 const arm = (vcpus) => ({ vcpus, arch: "arm64" })
 const x64 = (vcpus) => ({ vcpus, arch: "x64" })
+const macos = { vcpus: 4, arch: "macos" }
 
 const machine = (machineId, extra = {}) => ({
   machineId,
@@ -102,4 +108,21 @@ test("a job only ever goes to a machine of its label's architecture", () => {
   assert.equal(room(box, x64(8)), 3)
   assert.equal(fits(box, arm(2)), false)
   assert.equal(fits(box, x64(2)), true)
+})
+
+test("a macOS job goes only to a Mac whose owner opted in", () => {
+  const plain = machine("plain", { arch: "arm64", cores: 10 })
+  const opted = machine("opted", { arch: "arm64", cores: 10, macos: true })
+  const box = machine("box", { arch: "x64", cores: 32, macos: true })
+  const old = machine("old", { cores: 10, macos: true })
+  assert.equal(fits(plain, macos), false)
+  assert.equal(fits(box, macos), false)
+  // A machine that never said its architecture is an arm64 Mac.
+  assert.equal(fits(old, macos), true)
+  assert.equal(pickMachine([plain, box], macos), null)
+  assert.equal(pickMachine([plain, box, opted], macos).machineId, "opted")
+  // Opting in takes nothing away: the Mac still takes Linux arm64 jobs.
+  assert.equal(fits(opted, arm(2)), true)
+  assert.equal(serves({ arch: "arm64", macos: true }, "macos"), true)
+  assert.equal(serves({ arch: "arm64" }, "macos"), false)
 })

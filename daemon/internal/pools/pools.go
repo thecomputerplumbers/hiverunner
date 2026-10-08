@@ -28,6 +28,8 @@ type Options struct {
 	// Runner runs jobs. Nil means the machine connects and reports presence
 	// but declines every job.
 	Runner jobs.Runner
+	// Native runs hive-macos jobs on the Mac itself. Nil declines them.
+	Native jobs.Runner
 	// RefreshEvery is how often the server is asked which pools to serve.
 	// Defaults to a minute.
 	RefreshEvery time.Duration
@@ -52,6 +54,7 @@ func Run(ctx context.Context, options Options) error {
 	defer cancel()
 
 	slot := jobs.New(options.Runner, options.Log)
+	slot.Native(options.Native)
 	slot.Limit(options.Limits)
 	presence := func() protocol.Presence {
 		// Online means willing to take another job, whether or not some

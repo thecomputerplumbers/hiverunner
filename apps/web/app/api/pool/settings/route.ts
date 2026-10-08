@@ -18,6 +18,7 @@ export async function POST(request: Request) {
       !Array.isArray(input.allowedTeams) ||
       !input.allowedTeams.every((team) => typeof team === "string") ||
       typeof input.earningsDestination !== "string" ||
+      typeof input.macosJobs !== "boolean" ||
       typeof input.version !== "number"
     )
       throw new AppError("INVALID_INPUT", "Invalid input")
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
       earningsDestination: input.earningsDestination as
         | "organization"
         | "developer",
+      macosJobs: input.macosJobs,
       version: input.version,
     }
     const fields = validatePoolSettings(settings)

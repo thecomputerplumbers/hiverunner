@@ -289,6 +289,7 @@ const settings = (request, change = {}) =>
     organizationId,
     allowedTeams: ["ci"],
     earningsDestination: "developer",
+    macosJobs: false,
     version: 1,
     ...change,
   })

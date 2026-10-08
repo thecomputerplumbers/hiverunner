@@ -9,6 +9,7 @@ import {
 } from "@workspace/db/jobs"
 import { createReceiptSigner } from "@workspace/db/receipts"
 import { githubInstallation, runnerScaleSet } from "@workspace/db/schema"
+import { macosJobsAllowed } from "@workspace/db/settings"
 import { createGitHubApp } from "@workspace/github"
 import {
   createScaleSetClient,
@@ -156,7 +157,13 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       vcpus: settings.vcpus,
       arch: runnerSize(settings.label)?.arch ?? "arm64",
     }
-    const capacity = await pool.capacity(size)
+    // A macOS job runs on a member's Mac itself, so the hive's owner must
+    // have allowed it; until then this label has no capacity, whatever the
+    // Macs say, and no scale set for it is created at GitHub.
+    const allowed =
+      size.arch !== "macos" ||
+      (await macosJobsAllowed(db, settings.organizationId))
+    const capacity = allowed ? await pool.capacity(size) : 0
     if (!capacity && !Object.keys(state?.slots ?? {}).length) {
       if (state?.session) {
         await this.close(client, state)

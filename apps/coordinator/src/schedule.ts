@@ -4,7 +4,7 @@ import type { Presence } from "@workspace/protocol"
 /** Cores every job leaves for the machine's owner. */
 export const OWNER_CORES = 2
 
-/** What a label asks of a machine: so many cores, of one architecture. */
+/** What a label asks of a machine: so many cores, of one kind of machine. */
 export type JobSize = { vcpus: number; arch: RunnerArch }
 
 export type Candidate = {
@@ -12,6 +12,8 @@ export type Candidate = {
   presence: Presence
   /** Absent means arm64, which is all there was before there were two. */
   arch?: RunnerArch
+  /** Whether this Mac takes macOS jobs, run on the Mac itself. */
+  macos?: boolean
   cores: number
   /** The owner's limit on job size, from the daemon. Absent means none. */
   maxVcpus?: number
@@ -26,16 +28,28 @@ export type Candidate = {
 }
 
 /**
+ * Whether a machine is the kind the job's label names. An x64 job needs an
+ * x64 machine; a macOS job needs an arm64 Mac whose owner opted in to running
+ * jobs on the Mac itself. This is checked here and nowhere else, so
+ * everything that asks what a machine can take (an offer, capacity, which
+ * listeners to wake) gets the same answer.
+ */
+export function serves(
+  candidate: Pick<Candidate, "arch" | "macos">,
+  arch: RunnerArch
+) {
+  const machine = candidate.arch ?? "arm64"
+  if (arch === "macos") return machine === "arm64" && candidate.macos === true
+  return machine === arch
+}
+
+/**
  * Whether a machine may ever be given a job of this size: it must be of the
- * architecture the job's label names, leave cores for its owner, and stay
- * within the limit its owner set.
- *
- * The architecture is checked here and nowhere else, so everything that
- * asks what a machine can take (an offer, capacity, which listeners to
- * wake) gets the same answer: an x64 job on an arm64 machine never fits.
+ * kind the job's label names, leave cores for its owner, and stay within the
+ * limit its owner set.
  */
 export function fits(candidate: Candidate, { vcpus, arch }: JobSize) {
-  if ((candidate.arch ?? "arm64") !== arch) return false
+  if (!serves(candidate, arch)) return false
   if (candidate.cores - vcpus < OWNER_CORES) return false
   return candidate.maxVcpus === undefined || vcpus <= candidate.maxVcpus
 }

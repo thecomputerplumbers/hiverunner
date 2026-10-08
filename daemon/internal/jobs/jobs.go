@@ -21,9 +21,13 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/protocol"
 )
 
-// Job is one GitHub Actions job to run in a throwaway VM.
+// Job is one GitHub Actions job to run in a throwaway VM, or, for a
+// hive-macos job, on this Mac itself as a separate user.
 type Job struct {
 	AssignmentID string
+	// Kind is what the job's label asked for: an architecture, which means a
+	// Linux VM of it, or protocol.KindMacOS.
+	Kind string
 	// Pool is the pool that placed the job: whose work this is.
 	Pool string
 	// JITConfig is a credential. It goes to the guest and nowhere else.
@@ -56,6 +60,7 @@ const (
 	ReasonTooLarge = "this job is larger than this machine's owner allows"
 	// ReasonWrongArch names no architecture: the offer's is the pool's word.
 	ReasonWrongArch = "this job is for a machine of another architecture"
+	ReasonNoMacOS   = "this Mac does not take macOS jobs; its owner has not run hived macos setup"
 )
 
 // hostArch is what this machine is. A variable so tests can be another.
@@ -76,6 +81,9 @@ type Limits struct {
 	// Cores is the machine's core count. Zero means unknown, and no job is
 	// declined for want of cores.
 	Cores int
+	// MacOS is whether hive-macos jobs are taken: the owner opted in and the
+	// Mac is ready for them.
+	MacOS bool
 }
 
 type phase int
@@ -88,6 +96,7 @@ const (
 type slot struct {
 	pool         string
 	assignmentID string
+	kind         string
 	vcpus        int
 	timeout      time.Duration
 	phase        phase
@@ -100,7 +109,9 @@ type slot struct {
 
 // Manager is the slots. It is safe for use by every pool's tunnel at once.
 type Manager struct {
-	runner       Runner
+	runner Runner
+	// native runs hive-macos jobs on the Mac itself. Nil declines them.
+	native       Runner
 	startTimeout time.Duration
 	log          *slog.Logger
 	// limits is asked on every offer, so it may change while the daemon
@@ -131,6 +142,12 @@ func New(runner Runner, log *slog.Logger) *Manager {
 // offer.
 func (m *Manager) Limit(limits func() Limits) {
 	m.limits = limits
+}
+
+// Native sets the runner for hive-macos jobs, which run on this Mac itself.
+// Call it before the first offer. Nil declines every such job.
+func (m *Manager) Native(runner Runner) {
+	m.native = runner
 }
 
 func (m *Manager) limit() Limits {
@@ -183,16 +200,27 @@ func (m *Manager) Holding(pool string) []string {
 func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// The pool is told the limits and should not offer past them. These are
+	// for the offer made before it heard, and for another pool's jobs, which
+	// this pool cannot see.
+	limits := m.limit()
 	// The pool should never offer this: it is told what this machine is. A
 	// job on the wrong kind of guest would not fail cleanly, so it is not
 	// started at all. An offer that names no architecture is arm64.
-	if wants := cmp.Or(offer.Arch, protocol.ArchARM64); wants != hostArch() {
+	kind := cmp.Or(offer.Arch, protocol.ArchARM64)
+	runner := m.runner
+	if kind == protocol.KindMacOS {
+		if !limits.MacOS || m.native == nil {
+			return ReasonNoMacOS
+		}
+		runner = m.native
+	} else if kind != hostArch() {
 		return ReasonWrongArch
 	}
-	if m.runner == nil {
+	if runner == nil {
 		return ReasonNoRunner
 	}
-	if checked, ok := m.runner.(Unusable); ok {
+	if checked, ok := runner.(Unusable); ok {
 		if reason := checked.Unusable(); reason != "" {
 			return reason
 		}
@@ -202,10 +230,6 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	if _, ok := m.held[id]; ok {
 		return ""
 	}
-	// The pool is told the limits and should not offer past them. These are
-	// for the offer made before it heard, and for another pool's jobs, which
-	// this pool cannot see.
-	limits := m.limit()
 	if limits.MaxVCPUs != 0 && offer.VCPUs > limits.MaxVCPUs {
 		return ReasonTooLarge
 	}
@@ -224,6 +248,7 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	held := &slot{
 		pool:         pool,
 		assignmentID: offer.AssignmentID,
+		kind:         kind,
 		vcpus:        offer.VCPUs,
 		timeout:      time.Duration(offer.TimeoutMinutes) * time.Minute,
 		phase:        accepted,
@@ -269,19 +294,24 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 
 	job := Job{
 		AssignmentID: start.AssignmentID,
+		Kind:         held.kind,
 		Pool:         pool,
 		JITConfig:    start.JITConfig,
 		RunnerName:   start.RunnerName,
 		VCPUs:        held.vcpus,
 		Timeout:      held.timeout,
 	}
+	runner := m.runner
+	if held.kind == protocol.KindMacOS {
+		runner = m.native
+	}
 	m.running.Add(1)
 	go func() {
 		defer m.running.Done()
 		defer cancel()
-		m.log.Info("job started", "assignment", job.AssignmentID, "runner", job.RunnerName, "vcpus", job.VCPUs)
+		m.log.Info("job started", "assignment", job.AssignmentID, "runner", job.RunnerName, "kind", job.Kind, "vcpus", job.VCPUs)
 		// Run returns only once the VM and its files are gone.
-		exitCode, err := m.runner.Run(runCtx, job)
+		exitCode, err := runner.Run(runCtx, job)
 		m.mu.Lock()
 		released := held.released
 		m.mu.Unlock()

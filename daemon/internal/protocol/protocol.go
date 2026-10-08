@@ -45,6 +45,10 @@ const (
 const (
 	ArchARM64 = "arm64"
 	ArchX64   = "x64"
+	// KindMacOS is what a label asks for when the job is to run on an Apple
+	// Silicon Mac itself, as a separate user, rather than in a Linux VM. No
+	// machine is this; a Mac that takes such jobs says so in Hello.
+	KindMacOS = "macos"
 )
 
 // HostArch is this machine's architecture as the protocol spells it. A
@@ -66,6 +70,9 @@ type Hello struct {
 	// label names that architecture. A pool that hears none goes by what the
 	// machine enrolled as.
 	Arch string `json:"arch,omitempty"`
+	// MacOS is whether this Mac takes macOS jobs, run on the Mac itself as a
+	// separate user, because its owner opted in and it has Xcode.
+	MacOS bool `json:"macos,omitempty"`
 	// Holding is the jobs this machine is holding or running for this pool,
 	// if any. A daemon that reconnects mid-job says so, so the pool counts
 	// them again instead of offering cores that are already at work.
@@ -118,8 +125,9 @@ type JobAssign struct {
 	AssignmentID string `json:"assignmentId"`
 	// Label is the runs-on label, which is also the scale set.
 	Label string `json:"label"`
-	// Arch is the architecture the label names. Absent from a coordinator
-	// that predates a second one, when every job was arm64.
+	// Arch is the kind of machine the label names: an architecture, or
+	// KindMacOS. Absent from a coordinator that predates a second one, when
+	// every job was arm64.
 	Arch           string `json:"arch,omitempty"`
 	VCPUs          int    `json:"vcpus"`
 	TimeoutMinutes int    `json:"timeoutMinutes"`

@@ -21,6 +21,7 @@ import {
   fits,
   pickMachine,
   room,
+  serves,
   type Candidate,
   type JobSize,
 } from "./schedule"
@@ -153,10 +154,14 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       // does: a machine file can be carried to another machine. One that
       // does not say is whatever it enrolled as.
       if (message.arch) state.arch = message.arch
+      // Said again on every connection, like the limits: turning it off
+      // clears it here.
+      state.macos = message.macos === true
       await this.db
         .update(machine)
         .set({
           daemonVersion: message.daemonVersion,
+          macos: state.macos,
           ...(message.arch ? { arch: message.arch } : {}),
         })
         .where(eq(machine.id, state.machineId))
@@ -284,7 +289,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     let total = 0
     for (const socket of this.ctx.getWebSockets()) {
       const state = this.attachment(socket)
-      if (!state.greeted || state.arch !== size.arch) continue
+      if (!state.greeted || !serves(state, size.arch)) continue
       total += Object.values(state.jobs).filter(
         (held) => held.vcpus === size.vcpus && !held.releasing
       ).length

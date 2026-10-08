@@ -16,6 +16,14 @@
     "timeoutMinutes": 360
   },
   {
+    "type": "job.assign",
+    "assignmentId": "a-3",
+    "label": "hive-macos",
+    "arch": "macos",
+    "vcpus": 4,
+    "timeoutMinutes": 360
+  },
+  {
     "type": "job.start",
     "assignmentId": "a-1",
     "jitConfig": "ZXhhbXBsZQ==",

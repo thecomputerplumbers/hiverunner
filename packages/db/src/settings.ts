@@ -7,6 +7,8 @@ import { poolSettings } from "@workspace/db/schema"
 export type PoolSettingsInput = {
   allowedTeams: string[]
   earningsDestination: "organization" | "developer"
+  /** Whether `hive-macos` jobs, run on members' Macs themselves, are allowed. */
+  macosJobs: boolean
   /** The version the editor loaded; a stale one is refused. */
   version: number
 }
@@ -25,6 +27,8 @@ export function validatePoolSettings(input: PoolSettingsInput) {
       "Use up to 20 distinct team slugs, as they appear in the team's GitHub URL"
   if (!["organization", "developer"].includes(input.earningsDestination))
     fields.earningsDestination = "Choose who is paid"
+  if (typeof input.macosJobs !== "boolean")
+    fields.macosJobs = "Choose whether macOS jobs may run"
   if (!Number.isInteger(input.version)) fields.version = "Reload and try again"
   return Object.keys(fields).length ? fields : null
 }
@@ -36,6 +40,20 @@ export async function getPoolSettings(db: AuthDb, organizationId: string) {
     .where(eq(poolSettings.organizationId, organizationId))
     .limit(1)
   return row ?? null
+}
+
+/**
+ * Whether a `hive-macos` job may run in this hive. Read by the coordinator
+ * before it advertises capacity for the label or answers a capacity probe
+ * for it; a hive that has never saved settings has not turned it on.
+ */
+export async function macosJobsAllowed(db: AuthDb, organizationId: string) {
+  const [row] = await db
+    .select({ macosJobs: poolSettings.macosJobs })
+    .from(poolSettings)
+    .where(eq(poolSettings.organizationId, organizationId))
+    .limit(1)
+  return row?.macosJobs === true
 }
 
 /** False when someone else saved first. */
@@ -50,6 +68,7 @@ export async function updatePoolSettings(
     .set({
       allowedTeams: input.allowedTeams,
       earningsDestination: input.earningsDestination,
+      macosJobs: input.macosJobs,
       version: input.version + 1,
       updatedAt: now,
     })

@@ -2,19 +2,20 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
   ALL_RUNNER_SIZES,
-  COMPETITOR_RATES,
-  FLOOR_RATE,
-  RUNNER_SIZES,
-  X64_RUNNER_SIZES,
   compareMonthlyUsd,
+  COMPETITOR_RATES,
   competitorUsdPerMinuteForLabel,
-  runnerArch,
-  runnerSize,
   computeUnits,
+  FLOOR_RATE,
+  MACOS_RUNNER_SIZES,
+  microTokensToUsd,
   priceJob,
   privatePoolUsdPerMinute,
+  RUNNER_SIZES,
+  runnerArch,
+  runnerSize,
   usdToMicroTokens,
-  microTokensToUsd,
+  X64_RUNNER_SIZES,
 } from "../packages/pricing/src/index.ts"
 
 test("minutes are billed whole and never below one", () => {
@@ -49,6 +50,18 @@ test("every runner size has a comparison rate on both architectures", () => {
     for (const arch of ["arm64", "x64"])
       for (const provider of ["github", "blacksmith"])
         assert.ok(COMPETITOR_RATES[provider].usdPerMinute[arch][vcpus] > 0)
+})
+test("the macOS label is compared with GitHub's macOS runner alone", () => {
+  assert.deepEqual(
+    MACOS_RUNNER_SIZES.map((size) => [size.label, size.vcpus, size.arch]),
+    [["hive-macos", 4, "macos"]]
+  )
+  assert.equal(runnerSize("hive-macos").arch, "macos")
+  assert.equal(competitorUsdPerMinuteForLabel("github", "hive-macos"), 0.062)
+  // Blacksmith has no macOS runners, so such a job is left out, not guessed.
+  assert.equal(competitorUsdPerMinuteForLabel("blacksmith", "hive-macos"), null)
+  // "macos" is a kind of job, never what a machine reports itself as.
+  assert.equal(runnerArch("macos"), null)
 })
 test("the monthly comparison is minutes times the per-minute rates", () => {
   const month = compareMonthlyUsd({ minutes: 100_000, vcpus: 2 })

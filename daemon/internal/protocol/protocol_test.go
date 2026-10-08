@@ -48,11 +48,15 @@ func TestDaemonMessagesMatchFixtures(t *testing.T) {
 	limited.MaxJobs = 2
 	box := NewHello("0.2.0", Online)
 	box.Arch = ArchX64
+	mac := NewHello("0.4.0", Online)
+	mac.Arch = ArchARM64
+	mac.MacOS = true
 	sent := []any{
 		NewHello("0.1.0", Online),
 		NewHello("0.1.0", Busy, "a-1", "a-2"),
 		limited,
 		box,
+		mac,
 		NewPresence(Paused),
 		NewPresence(Draining),
 		NewJobAccepted("a-1"),
@@ -90,7 +94,7 @@ func TestAnOfferCarriesItsArchitecture(t *testing.T) {
 			arches = append(arches, assign.Label+"="+assign.Arch)
 		}
 	}
-	if want := []string{"hive=", "hive-x64-4cpu=x64"}; !reflect.DeepEqual(arches, want) {
+	if want := []string{"hive=", "hive-x64-4cpu=x64", "hive-macos=macos"}; !reflect.DeepEqual(arches, want) {
 		t.Fatalf("offers in the fixtures = %v, want %v", arches, want)
 	}
 }

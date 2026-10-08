@@ -77,6 +77,14 @@ Frames from a daemon are untrusted input. They go through `parseDaemonMessage` a
 
 The web app does not call the coordinator. It changes rows in D1 (revoking a machine, an uninstall) and each pool notices on its sweep.
 
+A label names a kind of machine: `arm64`, `x64`, or `macos`. The first two are
+Linux VMs on a machine of that architecture; `macos` is a job run on an Apple
+Silicon Mac itself as the `hiveworker` user (`daemon/internal/native`), which
+a Mac offers only while its owner's `macos-jobs` setting is on and the Mac is
+ready, and a hive accepts only while `pool_settings.macos_jobs` is on.
+`serves()` in `apps/coordinator/src/schedule.ts` is the one place that matches
+a machine to a kind; do not compare `arch` anywhere else.
+
 ## Stripe
 
 There is no `stripe` SDK — the API is reached with `fetch` and webhooks are verified with `crypto.subtle`, because workerd will not host the SDK's Node built-ins. Keep it that way.

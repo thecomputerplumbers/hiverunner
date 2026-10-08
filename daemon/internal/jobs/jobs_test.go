@@ -417,3 +417,67 @@ func TestTwoPoolsMayUseTheSameAssignmentID(t *testing.T) {
 		t.Fatal("releasing one pool's job dropped the other's")
 	}
 }
+
+// A hive-macos job goes to the native runner, and only on a Mac whose owner
+// opted in; a Linux job never does.
+func TestAMacOSJobGoesToTheNativeRunner(t *testing.T) {
+	vm, mac := newFake(), newFake()
+	m := New(vm, quiet)
+	macos := &protocol.JobAssign{AssignmentID: "a-1", Label: "hive-macos", Arch: protocol.KindMacOS, VCPUs: 4, TimeoutMinutes: 60}
+
+	// Not opted in: declined with a reason the pool can show.
+	if reason := m.Offer("p", macos); reason != ReasonNoMacOS {
+		t.Fatalf("Offer() = %q, want %q", reason, ReasonNoMacOS)
+	}
+	// Opted in, but nothing to run it with: still declined.
+	m.Limit(func() Limits { return Limits{MacOS: true} })
+	if reason := m.Offer("p", macos); reason != ReasonNoMacOS {
+		t.Fatalf("Offer() without a native runner = %q, want %q", reason, ReasonNoMacOS)
+	}
+	m.Native(mac)
+	if reason := m.Offer("p", macos); reason != "" {
+		t.Fatalf("Offer() = %q, want accepted", reason)
+	}
+	if err := m.Start(context.Background(), "p", start("a-1")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case job := <-mac.started:
+		if job.Kind != protocol.KindMacOS || job.VCPUs != 4 {
+			t.Fatalf("native runner got %+v", job)
+		}
+	case <-vm.started:
+		t.Fatal("the VM runner got a macOS job")
+	case <-within(t, "start"):
+		t.Fatal("the job never started")
+	}
+	mac.finish <- 0
+	select {
+	case exited := <-m.Exits("p"):
+		if exited.ExitCode != 0 {
+			t.Fatalf("exit = %d", exited.ExitCode)
+		}
+	case <-within(t, "exit"):
+		t.Fatal("no exit")
+	}
+
+	// A plain job still goes to the VM.
+	if reason := m.Offer("p", offer("a-2")); reason != "" {
+		t.Fatalf("Offer(linux) = %q", reason)
+	}
+	if err := m.Start(context.Background(), "p", start("a-2")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case job := <-vm.started:
+		if job.Kind != protocol.ArchARM64 {
+			t.Fatalf("VM runner got kind %q", job.Kind)
+		}
+	case <-mac.started:
+		t.Fatal("the native runner got a Linux job")
+	case <-within(t, "start"):
+		t.Fatal("the job never started")
+	}
+	vm.finish <- 0
+	<-m.Exits("p")
+}

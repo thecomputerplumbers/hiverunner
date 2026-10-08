@@ -21,12 +21,16 @@ export default async function SettingsPage() {
         taking jobs.
       </p>
       {settings && (
-        <Panel title="who can join, and who gets paid" className="max-w-3xl">
+        <Panel
+          title="who can join, who gets paid, and what runs"
+          className="max-w-3xl"
+        >
           <SettingsForm
             organizationId={organizationId}
             login={installation.accountLogin}
             allowedTeams={settings.allowedTeams}
             earningsDestination={settings.earningsDestination}
+            macosJobs={settings.macosJobs}
             version={settings.version}
             editable={owner}
           />

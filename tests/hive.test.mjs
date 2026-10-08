@@ -336,6 +336,7 @@ test("team restriction gates machines for members but not owners", async (t) => 
     await updatePoolSettings(db, orgId, {
       allowedTeams: ["ci"],
       earningsDestination: "developer",
+      macosJobs: false,
       version: 1,
     }),
     true
@@ -366,12 +367,15 @@ test("pool settings refuse stale versions and bad slugs", async (t) => {
   const change = {
     allowedTeams: ["ci"],
     earningsDestination: "developer",
+    macosJobs: true,
     version: 1,
   }
   assert.equal(await updatePoolSettings(db, orgId, change), true)
   assert.equal(await updatePoolSettings(db, orgId, change), false)
   assert.equal((await getPoolSettings(db, orgId)).version, 2)
+  assert.equal((await getPoolSettings(db, orgId)).macosJobs, true)
   assert.equal(validatePoolSettings(change), null)
+  assert.ok(validatePoolSettings({ ...change, macosJobs: "yes" }).macosJobs)
   assert.ok(
     validatePoolSettings({ ...change, allowedTeams: ["Not A Slug"] })
       .allowedTeams

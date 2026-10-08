@@ -109,6 +109,18 @@ export function MachineGrid({
               <div className="mt-auto flex flex-wrap items-end justify-between gap-3">
                 <p className="font-mono text-xs leading-5 text-muted-foreground">
                   {machine.model} · {gib(machine.memoryBytes)}
+                  {machine.macos && (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <span
+                        className="text-foreground"
+                        title="Its owner opted in to hive-macos jobs, which run on the Mac itself"
+                      >
+                        macOS jobs
+                      </span>
+                    </>
+                  )}
                   <br />
                   {machine.owner} ·{" "}
                   {machine.lastSeenAt

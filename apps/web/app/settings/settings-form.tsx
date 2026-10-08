@@ -16,6 +16,7 @@ export function SettingsForm({
   login,
   allowedTeams,
   earningsDestination,
+  macosJobs,
   version,
   editable,
 }: {
@@ -23,6 +24,7 @@ export function SettingsForm({
   login: string
   allowedTeams: string[]
   earningsDestination: "organization" | "developer"
+  macosJobs: boolean
   version: number
   editable: boolean
 }) {
@@ -38,6 +40,7 @@ export function SettingsForm({
         organizationId,
         version,
         earningsDestination: data.get("earningsDestination"),
+        macosJobs: data.get("macosJobs") === "on",
         allowedTeams: String(data.get("allowedTeams") ?? "")
           .split(/[\s,]+/)
           .filter(Boolean),
@@ -84,6 +87,29 @@ export function SettingsForm({
           Paying the organization returns most of each job&apos;s price to your
           own balance.
         </FieldDescription>
+      </Field>
+      <Field>
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            name="macosJobs"
+            className="mt-1 size-4"
+            defaultChecked={macosJobs}
+            disabled={!editable || busy}
+          />
+          <span>
+            <span className="font-medium">
+              Allow macOS jobs (<code>runs-on: hive-macos</code>)
+            </span>
+            <FieldDescription>
+              For Xcode and iOS builds. Unlike other jobs, a macOS job runs on a
+              member&apos;s Mac itself, as a separate user, not in a VM. It sees
+              that Mac&apos;s installed software and network. Turn this on only
+              for code you trust, and only Macs whose owners opted in with{" "}
+              <code>hived config set macos-jobs on</code> will take them.
+            </FieldDescription>
+          </span>
+        </label>
       </Field>
       {editable ? (
         <div>

@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/d1"
 import { getInstallationByOrganization } from "@workspace/db/installations"
 import { canAcquireJobs } from "@workspace/db/jobs"
+import { macosJobsAllowed } from "@workspace/db/settings"
 import { createGitHubApp } from "@workspace/github"
 import { runnerSize } from "@workspace/pricing"
 import { githubTestAPI } from "./config"
@@ -62,6 +63,9 @@ export async function capacityResponse(
     }
     const available =
       (await canAcquireJobs(db, identity.organizationId)) &&
+      // A macOS job runs on a member's Mac itself; the hive must allow it.
+      (size.arch !== "macos" ||
+        (await macosJobsAllowed(db, identity.organizationId))) &&
       (await env.POOL.getByName(identity.organizationId).availableCapacity(
         identity.organizationId,
         { vcpus: size.vcpus, arch: size.arch }

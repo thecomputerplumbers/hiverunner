@@ -24,8 +24,9 @@ export function Faq() {
       <dd>
         Linux jobs, arm64 and x64. x64 jobs have{" "}
         <Link href="/docs/labels-and-sizes#x64">labels of their own</Link> and
-        need a Linux x64 machine in your hive. macOS, Windows and GPU jobs are
-        not supported.
+        need a Linux x64 machine in your hive. macOS jobs run on a member&apos;s
+        Mac itself, with its Xcode, once its owner and your hive both opt in;
+        see the labels page. Windows and GPU jobs are not supported.
       </dd>
 
       <dt>Which machines can join a hive?</dt>

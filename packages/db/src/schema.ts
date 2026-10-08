@@ -63,6 +63,15 @@ export const poolSettings = sqliteTable("pool_settings", {
   })
     .notNull()
     .default("organization"),
+  /**
+   * Whether `hive-macos` jobs may run here at all. Such a job runs on a
+   * member's Mac itself, as a separate user, not in a VM; an owner turns
+   * this on knowing that. Off, no scale set for the label is created and
+   * no Mac is offered one.
+   */
+  macosJobs: integer("macos_jobs", { mode: "boolean" })
+    .notNull()
+    .default(false),
   version: integer("version").notNull().default(1),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 })
@@ -108,6 +117,11 @@ export const machine = sqliteTable(
      * corrects it against observed job durations.
      */
     speedScore: real("speed_score").notNull().default(1),
+    /**
+     * Whether the daemon says this Mac takes macOS jobs, run on the Mac
+     * itself. Written from each hello, so it follows the owner's setting.
+     */
+    macos: integer("macos", { mode: "boolean" }).notNull().default(false),
     daemonVersion: text("daemon_version").notNull(),
     /** SHA-256 of the machine token, hex. */
     tokenHash: text("token_hash").notNull(),

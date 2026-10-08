@@ -23,6 +23,7 @@ import (
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/jobs"
+	"github.com/thecomputerplumbers/hiveworker/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/pools"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/settings"
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/vm"
@@ -40,6 +41,7 @@ const usage = `hived, the HiveWorker daemon
   hived status      Show what this machine lends, and whether it is lending
   hived config      Show or change this machine's settings
   hived cache       Show or empty this machine's Actions cache
+  hived macos       Set this Mac up for macOS jobs (Xcode, iOS builds)
   hived pause       Stop taking jobs until you say otherwise
   hived resume      Take jobs again
   hived logout      Forget this machine's token
@@ -71,6 +73,12 @@ func main() {
 		err = configure(os.Args[2:])
 	case "cache":
 		err = cacheCommand(os.Args[2:])
+	case "macos":
+		err = macos(ctx, os.Args[2:])
+	case "macos-job":
+		// The child that runs one macOS job as the hiveworker user. Only
+		// ever started by hived itself, through sudo.
+		os.Exit(native.Serve(ctx, os.Stdin, os.Stdout))
 	case "pause":
 		err = pause(true)
 	case "resume":
@@ -257,6 +265,24 @@ func run(ctx context.Context) error {
 		unlock()
 	}()
 
+	// macOS jobs, if the owner has set this Mac up for them. Built now,
+	// asked later: whether it is ready is checked when the setting is on.
+	var nativeRunner *native.Runner
+	if runtime.GOOS == "darwin" {
+		if built, err := native.New(log); err != nil {
+			log.Warn("macOS jobs are not available", "error", err)
+		} else {
+			nativeRunner = built
+		}
+	}
+	macOS := func() bool {
+		return nativeRunner != nil && live.Get().MacOSJobs && nativeRunner.Ready()
+	}
+	var native jobs.Runner
+	if nativeRunner != nil {
+		native = nativeRunner
+	}
+
 	// Without a guest image the machine still connects and reports presence;
 	// it declines jobs and says why.
 	var runner jobs.Runner
@@ -304,23 +330,26 @@ func run(ctx context.Context) error {
 		DaemonVersion: version,
 		RefreshEvery:  refresh,
 		Runner:        runner,
+		Native:        native,
 		Log:           log,
 		// Paused, not online, when the machine cannot take a job: the pool
 		// then stops offering it any, instead of being declined each time.
 		Available: func() bool {
 			// A machine that cannot run a job at all, for want of an image
-			// or a hypervisor, is not waiting for one.
-			if runner == nil {
-				return false
-			}
+			// or a hypervisor, is not waiting for one. Unless it takes
+			// macOS jobs, which need neither.
+			vm := runner != nil
 			if unusable, ok := runner.(jobs.Unusable); ok && unusable.Unusable() != "" {
+				vm = false
+			}
+			if !vm && !macOS() {
 				return false
 			}
 			return holding() == ""
 		},
 		Limits: func() jobs.Limits {
 			current := live.Get()
-			return jobs.Limits{MaxJobs: current.MaxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU()}
+			return jobs.Limits{MaxJobs: current.MaxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS()}
 		},
 	})
 }

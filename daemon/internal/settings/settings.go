@@ -42,6 +42,10 @@ type Settings struct {
 	// Hours is when jobs may run, as "22:00-07:00" in local time. Empty
 	// means any time. A window may cross midnight.
 	Hours string `json:"hours"`
+	// MacOSJobs takes hive-macos jobs, which run on this Mac itself as a
+	// separate user rather than in a VM. `hived macos setup` turns it on
+	// once the Mac is ready; it is never on by default.
+	MacOSJobs bool `json:"macosJobs"`
 }
 
 // Sizes are the job sizes a machine can be offered, by guest vCPUs.
@@ -147,7 +151,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours", "cache", "cache-size"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours", "cache", "cache-size", "macos-jobs"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -169,7 +173,7 @@ func (s *Settings) Set(key, value string) error {
 			return errors.New("max-vcpus takes 2, 4, 8 or auto")
 		}
 		s.MaxVCPUs = vcpus
-	case "warm", "battery", "cache":
+	case "warm", "battery", "cache", "macos-jobs":
 		on, err := parseSwitch(value)
 		if err != nil {
 			return fmt.Errorf("%s takes on or off", key)
@@ -179,6 +183,8 @@ func (s *Settings) Set(key, value string) error {
 			s.Warm = on
 		case "battery":
 			s.Battery = on
+		case "macos-jobs":
+			s.MacOSJobs = on
 		default:
 			s.Cache = on
 		}

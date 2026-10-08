@@ -205,6 +205,7 @@ func session(ctx context.Context, options Options) (bool, error) {
 				// dropped connection left off.
 				hello := protocol.NewHello(options.DaemonVersion, presence, options.Jobs.Holding(options.PoolID)...)
 				hello.Arch = protocol.HostArch()
+				hello.MacOS = limits.MacOS
 				hello.MaxVCPUs = limits.MaxVCPUs
 				// One is what the pool assumes; only more needs saying.
 				if limits.MaxJobs > 1 {
@@ -269,7 +270,7 @@ func session(ctx context.Context, options Options) (bool, error) {
 			}
 			// The limits are only said in hello. Say hello again, but not
 			// while this pool's job is in hand: that can wait for it.
-			if now := options.Limits(); (now.MaxVCPUs != limits.MaxVCPUs || max(now.MaxJobs, 1) != max(limits.MaxJobs, 1)) && len(options.Jobs.Holding(options.PoolID)) == 0 {
+			if now := options.Limits(); (now.MaxVCPUs != limits.MaxVCPUs || max(now.MaxJobs, 1) != max(limits.MaxJobs, 1) || now.MacOS != limits.MacOS) && len(options.Jobs.Holding(options.PoolID)) == 0 {
 				_ = connection.Close(websocket.StatusNormalClosure, "settings changed")
 				return welcomed, errLimitChanged
 			}

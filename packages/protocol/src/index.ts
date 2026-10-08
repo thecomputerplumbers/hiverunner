@@ -46,6 +46,14 @@ export const CLOSE = {
 export const ARCHES = ["arm64", "x64"] as const
 export type Arch = (typeof ARCHES)[number]
 
+/**
+ * What a job's label asks for: one of the architectures, or `macos`, a job
+ * run on an Apple Silicon Mac itself rather than in a Linux VM. A machine is
+ * never `macos`; a Mac that will take such jobs says `macos: true` in hello.
+ */
+export const JOB_KINDS = [...ARCHES, "macos"] as const
+export type JobKind = (typeof JOB_KINDS)[number]
+
 export type DaemonMessage =
   | {
       type: "hello"
@@ -58,6 +66,12 @@ export type DaemonMessage =
        * then goes by what the machine enrolled as.
        */
       arch?: Arch
+      /**
+       * Whether this Mac takes macOS jobs, run on the Mac itself as a
+       * separate user, because its owner opted in and it has Xcode. Absent
+       * means no.
+       */
+      macos?: boolean
       /**
        * The jobs this machine is holding or running for this pool, if any.
        * A daemon that reconnects mid-job says so here, so the pool counts
@@ -101,11 +115,11 @@ export type CoordinatorMessage =
       /** The `runs-on` label, which is also the scale set. */
       label: string
       /**
-       * The architecture the label names. The coordinator only offers a job
-       * to a machine of that architecture; this lets the machine refuse one
+       * The kind of machine the label names. The coordinator only offers a
+       * job to a machine of that kind; this lets the machine refuse one
        * offered by mistake rather than run it on the wrong kind of guest.
        */
-      arch?: Arch
+      arch?: JobKind
       vcpus: number
       timeoutMinutes: number
     }
@@ -170,6 +184,7 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         !isString(value.daemonVersion, 40) ||
         !isPresence(value.presence) ||
         (value.arch !== undefined && !isArch(value.arch)) ||
+        (value.macos !== undefined && typeof value.macos !== "boolean") ||
         (value.holding !== undefined &&
           !(
             Array.isArray(value.holding) &&
@@ -186,6 +201,7 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         daemonVersion: value.daemonVersion,
         presence: value.presence,
         ...(value.arch === undefined ? {} : { arch: value.arch as Arch }),
+        ...(value.macos ? { macos: true } : {}),
         ...(value.holding === undefined
           ? {}
           : { holding: value.holding as string[] }),
