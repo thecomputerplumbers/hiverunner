@@ -224,7 +224,8 @@ jobs:
   # On a pull request: everything a release does short of signing and sending.
   rehearse:
     needs: images
-    if: github.event_name == 'pull_request'
+    # Said in full because plan, which images waits for, is skipped here.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.images.result == 'success' }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
