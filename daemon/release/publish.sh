@@ -27,13 +27,19 @@
 #
 #   HIVE_SIGN_IDENTITY   the certificate's name. Required to upload.
 #   HIVE_NOTARY_PROFILE  the stored credentials' name. Defaults to hiveworker.
+#   HIVE_NOTARY_KEY      instead of stored credentials, as a workflow has none:
+#                        the path of an App Store Connect API key, with its id
+#                        in HIVE_NOTARY_KEY_ID and HIVE_NOTARY_ISSUER.
 #
 # Without HIVE_SIGN_IDENTITY the daemon is signed ad hoc, which runs only on
 # the Mac that built it. Such a build is marked as a development build, the
 # installer refuses it unless told HIVE_DEV=1, and it cannot be uploaded.
 #
-# The image is built first with ./image/build.sh if it is not already in
-# HIVE_IMAGE (or hived's default directory).
+# An image that is already published is not built or packed again: a release
+# that changes only the daemon names the image files the last one did, so it
+# needs no image on disk and no Docker. Otherwise the image is built first
+# with ./image/build.sh if it is not already in HIVE_IMAGE (or hived's
+# default directory).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -83,76 +89,115 @@ rm -f "$daemon_zip"
 ditto -c -k "$build/hived" "$daemon_zip"
 if [ -n "$identity" ]; then
   echo "   notarizing with Apple, which takes a minute or two"
-  xcrun notarytool submit "$daemon_zip" --keychain-profile "$profile" --wait | tee "$build/notary.log"
+  if [ -n "${HIVE_NOTARY_KEY:-}" ]; then
+    xcrun notarytool submit "$daemon_zip" --key "$HIVE_NOTARY_KEY" --key-id "$HIVE_NOTARY_KEY_ID" --issuer "$HIVE_NOTARY_ISSUER" --wait | tee "$build/notary.log"
+  else
+    xcrun notarytool submit "$daemon_zip" --keychain-profile "$profile" --wait | tee "$build/notary.log"
+  fi
   grep -q "status: Accepted" "$build/notary.log" || { echo "Apple did not accept the build." >&2; exit 1; }
 fi
 daemon_sha=$(shasum -a 256 "$daemon_zip" | cut -d' ' -f1)
 rm -rf "$build"
 
 echo "== Image"
-image_dir="${HIVE_IMAGE:-$HOME/Library/Application Support/HiveWorker/image}"
-[ -f "$image_dir/manifest.json" ] || ./image/build.sh "$image_dir"
-image_version="$(plutil -extract imageVersion raw -o - "$image_dir/manifest.json")-$(plutil -extract runnerVersion raw -o - "$image_dir/manifest.json")"
 # The image the repository describes, not whichever one happens to be on disk.
 wanted="$(sed -n 's/^IMAGE_VERSION=//p' image/build.sh)-$(sed -n 's/^RUNNER_VERSION="${RUNNER_VERSION:-\(.*\)}"/\1/p' image/build.sh)"
-[ "$image_version" = "$wanted" ] || { echo "The image in $image_dir is $image_version; this commit builds $wanted. Rebuild it with ./image/build.sh" >&2; exit 1; }
-mkdir -p "$out/images/$image_version"
-image_aar="$out/images/$image_version/image.aar"
-if [ ! -f "$image_aar" ]; then
-  (cd "$image_dir" && aa archive -a lzfse -d . -o "$image_aar" -include-path-list <(printf 'Image\ninitrd\nmanifest.json\nrootfs.img\n'))
+# What the last release published, asked past the CDN's memory. If that is
+# this image, its files are named again as they are: packing the same image
+# twice does not give the same bytes, and a published name is cached for a
+# year.
+live=$(mktemp -d)
+for manifest in latest.json linux-arm64.txt linux-amd64.txt; do
+  curl -fsS -H "Cache-Control: no-cache" -o "$live/$manifest" "$BASE/$manifest?published=$(date +%s)$$" 2>/dev/null || rm -f "$live/$manifest"
+done
+image_dir="${HIVE_IMAGE:-$HOME/Library/Application Support/HiveWorker/image}"
+image_aar=""
+if [ "$(plutil -extract image.version raw -o - "$live/latest.json" 2>/dev/null || true)" = "$wanted" ]; then
+  image_version="$wanted"
+  image_sha=$(plutil -extract image.sha256 raw -o - "$live/latest.json")
+  image_mb=$(plutil -extract image.megabytes raw -o - "$live/latest.json")
+  echo "   $image_version, $image_mb MB, as already published"
+else
+  [ -f "$image_dir/manifest.json" ] || ./image/build.sh "$image_dir"
+  image_version="$(plutil -extract imageVersion raw -o - "$image_dir/manifest.json")-$(plutil -extract runnerVersion raw -o - "$image_dir/manifest.json")"
+  [ "$image_version" = "$wanted" ] || { echo "The image in $image_dir is $image_version; this commit builds $wanted. Rebuild it with ./image/build.sh" >&2; exit 1; }
+  mkdir -p "$out/images/$image_version"
+  image_aar="$out/images/$image_version/image.aar"
+  if [ ! -f "$image_aar" ]; then
+    (cd "$image_dir" && aa archive -a lzfse -d . -o "$image_aar" -include-path-list <(printf 'Image\ninitrd\nmanifest.json\nrootfs.img\n'))
+  fi
+  image_sha=$(shasum -a 256 "$image_aar" | cut -d' ' -f1)
+  image_mb=$(($(stat -f %z "$image_aar") / 1048576))
+  echo "   $image_version, $image_mb MB"
 fi
-image_sha=$(shasum -a 256 "$image_aar" | cut -d' ' -f1)
-image_mb=$(($(stat -f %z "$image_aar") / 1048576))
-echo "   $image_version, $image_mb MB"
 
 echo "== Linux"
 # Nothing to sign: Linux has no gatekeeper to satisfy, and the installer
 # checks each download against the checksum published beside it.
 linux_arches=""
+# One value from what the last release published for an architecture.
+live_value() { sed -n "s/^$2=//p" "$live/linux-$1.txt" 2>/dev/null; }
+virtiofsd_version=$(sed -n 's/^VIRTIOFSD_VERSION="${VIRTIOFSD_VERSION:-\(.*\)}"/\1/p' release/virtiofsd.sh)
+# Whether the last release's image and virtiofsd for an architecture are the
+# ones this commit describes, and so can be named again.
+as_published() { [ "$(live_value "$1" image_version)" = "$wanted" ] && [ "$(live_value "$1" virtiofsd_version)" = "$virtiofsd_version" ]; }
 linux() { # arch image-directory
   arch="$1"
   dir="$2"
-  [ -f "$dir/manifest.json" ] || { echo "No image in $dir" >&2; exit 1; }
-  built_for=$(plutil -extract arch raw -o - "$dir/manifest.json" 2>/dev/null || echo arm64)
-  [ "$built_for" = "$arch" ] || { echo "The image in $dir is for $built_for, not $arch." >&2; exit 1; }
-  this_image="$(plutil -extract imageVersion raw -o - "$dir/manifest.json")-$(plutil -extract runnerVersion raw -o - "$dir/manifest.json")"
-  [ "$this_image" = "$wanted" ] || { echo "The $arch image in $dir is $this_image; this commit builds $wanted." >&2; exit 1; }
+  mkdir -p "$out/hived/$version"
   binary=$(mktemp -d)
   GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$binary/hived" ./cmd/hived
   daemon_tar="$out/hived/$version/hived-linux-$arch.tar.gz"
   COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$daemon_tar" -C "$binary" hived
   rm -rf "$binary"
-  # Named for its contents. A tarball of the same image is not the same
-  # bytes twice, and a name is cached for a year: with the checksum in the
-  # name, the manifest can only ever point at the file it describes.
-  packing="$out/images/$this_image/image-$arch.packing"
-  mkdir -p "$out/images/$this_image"
-  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$packing" -C "$dir" manifest.json \
-    "$(plutil -extract kernel raw -o - "$dir/manifest.json")" \
-    "$(plutil -extract initrd raw -o - "$dir/manifest.json")" \
-    "$(plutil -extract disk raw -o - "$dir/manifest.json")"
-  image_tar_sha=$(shasum -a 256 "$packing" | cut -d' ' -f1)
-  image_key="images/$this_image/image-$arch-$(printf %.12s "$image_tar_sha").tar.gz"
-  image_megabytes=$(($(stat -f %z "$packing") / 1048576))
-  # In pieces: the bucket takes at most 300 MB in one upload, and an image
-  # can be more. The installer puts them back together and checks the whole.
-  split -b 200m "$packing" "$out/$image_key."
-  rm "$packing"
-  image_parts=$(cd "$out/images/$this_image" && ls "$(basename "$image_key")".* | sed 's/.*\.//' | tr '\n' ' ' | sed 's/ $//')
-  # The program that shares a job's directory with its VM, for systems that
-  # do not package the one that runs without root. Built once per version
-  # and kept, because the build takes minutes and need not be repeated.
-  virtiofsd_version=$(sed -n 's/^VIRTIOFSD_VERSION="${VIRTIOFSD_VERSION:-\(.*\)}"/\1/p' release/virtiofsd.sh)
-  kept="${HIVE_TOOLS:-$HOME/Library/Caches/HiveWorker/tools}/virtiofsd-$virtiofsd_version-linux-$arch"
-  if [ ! -f "$kept" ]; then
-    echo "   building virtiofsd $virtiofsd_version for $arch, once"
-    mkdir -p "$(dirname "$kept")"
-    ./release/virtiofsd.sh "$arch" "$kept"
+  this_image="$wanted"
+  if as_published "$arch"; then
+    image_url=$(live_value "$arch" image_url)
+    image_parts=$(live_value "$arch" image_parts)
+    image_tar_sha=$(live_value "$arch" image_sha256)
+    image_megabytes=$(live_value "$arch" image_megabytes)
+    virtiofsd_url=$(live_value "$arch" virtiofsd_url)
+    virtiofsd_sha=$(live_value "$arch" virtiofsd_sha256)
+  else
+    [ -f "$dir/manifest.json" ] || { echo "No image in $dir" >&2; exit 1; }
+    built_for=$(plutil -extract arch raw -o - "$dir/manifest.json" 2>/dev/null || echo arm64)
+    [ "$built_for" = "$arch" ] || { echo "The image in $dir is for $built_for, not $arch." >&2; exit 1; }
+    this_image="$(plutil -extract imageVersion raw -o - "$dir/manifest.json")-$(plutil -extract runnerVersion raw -o - "$dir/manifest.json")"
+    [ "$this_image" = "$wanted" ] || { echo "The $arch image in $dir is $this_image; this commit builds $wanted." >&2; exit 1; }
+    # Named for its contents. A tarball of the same image is not the same
+    # bytes twice, and a name is cached for a year: with the checksum in the
+    # name, the manifest can only ever point at the file it describes.
+    packing="$out/images/$this_image/image-$arch.packing"
+    mkdir -p "$out/images/$this_image"
+    COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$packing" -C "$dir" manifest.json \
+      "$(plutil -extract kernel raw -o - "$dir/manifest.json")" \
+      "$(plutil -extract initrd raw -o - "$dir/manifest.json")" \
+      "$(plutil -extract disk raw -o - "$dir/manifest.json")"
+    image_tar_sha=$(shasum -a 256 "$packing" | cut -d' ' -f1)
+    image_key="images/$this_image/image-$arch-$(printf %.12s "$image_tar_sha").tar.gz"
+    image_url="$BASE/$image_key"
+    image_megabytes=$(($(stat -f %z "$packing") / 1048576))
+    # In pieces: the bucket takes at most 300 MB in one upload, and an image
+    # can be more. The installer puts them back together and checks the whole.
+    split -b 200m "$packing" "$out/$image_key."
+    rm "$packing"
+    image_parts=$(cd "$out/images/$this_image" && ls "$(basename "$image_key")".* | sed 's/.*\.//' | tr '\n' ' ' | sed 's/ $//')
+    # The program that shares a job's directory with its VM, for systems that
+    # do not package the one that runs without root. Built once per version
+    # and kept, because the build takes minutes and need not be repeated.
+    kept="${HIVE_TOOLS:-$HOME/Library/Caches/HiveWorker/tools}/virtiofsd-$virtiofsd_version-linux-$arch"
+    if [ ! -f "$kept" ]; then
+      echo "   building virtiofsd $virtiofsd_version for $arch, once"
+      mkdir -p "$(dirname "$kept")"
+      ./release/virtiofsd.sh "$arch" "$kept"
+    fi
+    virtiofsd_sha=$(shasum -a 256 "$kept" | cut -d' ' -f1)
+    virtiofsd_key="tools/virtiofsd-$virtiofsd_version-linux-$arch-$(printf %.12s "$virtiofsd_sha")"
+    virtiofsd_url="$BASE/$virtiofsd_key"
+    mkdir -p "$out/tools"
+    cp "$kept" "$out/$virtiofsd_key"
   fi
-  virtiofsd_sha=$(shasum -a 256 "$kept" | cut -d' ' -f1)
-  virtiofsd_key="tools/virtiofsd-$virtiofsd_version-linux-$arch-$(printf %.12s "$virtiofsd_sha")"
   mkdir -p "$out/tools"
-  cp "$kept" "$out/$virtiofsd_key"
   cp release/virtiofsd.NOTICE.txt "$out/tools/virtiofsd.NOTICE.txt"
   cat > "$out/linux-$arch.txt" <<MANIFEST
 version=$version
@@ -160,20 +205,20 @@ commit=$(git rev-parse HEAD)
 daemon_url=$BASE/hived/$version/hived-linux-$arch.tar.gz
 daemon_sha256=$(shasum -a 256 "$daemon_tar" | cut -d' ' -f1)
 image_version=$this_image
-image_url=$BASE/$image_key
+image_url=$image_url
 image_parts=$image_parts
 image_sha256=$image_tar_sha
 image_megabytes=$image_megabytes
 virtiofsd_version=$virtiofsd_version
-virtiofsd_url=$BASE/$virtiofsd_key
+virtiofsd_url=$virtiofsd_url
 virtiofsd_sha256=$virtiofsd_sha
 MANIFEST
   linux_arches="$linux_arches $arch"
   echo "   $arch: daemon and image $this_image, $image_megabytes MB"
 }
 linux arm64 "$image_dir"
-if [ -n "${HIVE_IMAGE_AMD64:-}" ]; then
-  linux amd64 "$HIVE_IMAGE_AMD64"
+if [ -n "${HIVE_IMAGE_AMD64:-}" ] || as_published amd64; then
+  linux amd64 "${HIVE_IMAGE_AMD64:-}"
 else
   echo "   amd64: left out (HIVE_IMAGE_AMD64 is not set)"
 fi
@@ -225,7 +270,7 @@ fi
 
 # The large, versioned files first and the manifest that points at them last:
 # nobody is ever sent to a file that is not there yet.
-if ! published "images/$image_version/image.aar"; then
+if [ -n "$image_aar" ] && ! published "images/$image_version/image.aar"; then
   put "images/$image_version/image.aar" "$image_aar" application/octet-stream "public, max-age=31536000, immutable"
 fi
 put "hived/$version/hived-darwin-arm64.zip" "$daemon_zip" application/zip "public, max-age=31536000, immutable"

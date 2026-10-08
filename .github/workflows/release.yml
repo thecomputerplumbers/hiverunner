@@ -1,0 +1,259 @@
+name: Release
+# Publishes the daemon when what ships in it changes on main: the version is
+# bumped here, the daemon is signed and notarized, and the release manifest
+# is replaced, so machines with auto-update on take it when they are idle.
+#
+# It does nothing until the repository variable AUTOMATIC_RELEASES is "on",
+# which is for once the production environment has the secrets it needs:
+# see "Releasing the daemon" in docs/deployment.md.
+#
+# A pull request that changes how a release is made rehearses one: the
+# images are built and the release is put together, unsigned, and not sent.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "daemon/**"
+      - "!daemon/VERSION"
+      - "!daemon/**/*.md"
+      - "!daemon/**/*_test.go"
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "daemon/release/**"
+      - "daemon/image/**"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # One release at a time, and never one abandoned halfway.
+  group: release-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  RELEASES: https://get.hiveworkr.thecomputerplumbers.com
+jobs:
+  # Whether there is anything to release, and as which version.
+  plan:
+    if: github.event_name != 'pull_request' && vars.AUTOMATIC_RELEASES == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      images: ${{ steps.plan.outputs.images }}
+      sha: ${{ steps.plan.outputs.sha }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tip of main, not the push that started this: a run that
+          # waited behind another releases what is there now.
+          ref: main
+          fetch-depth: 0
+      - id: plan
+        run: |
+          set -euo pipefail
+          fresh() { curl -fsS -H "Cache-Control: no-cache" "$RELEASES/$1?published=$(date +%s)"; }
+          published() { curl -fsI -H "Cache-Control: no-cache" "$RELEASES/$1?published=$(date +%s)" >/dev/null 2>&1; }
+          fresh latest.json > latest.json
+          for arch in arm64 amd64; do fresh "linux-$arch.txt" > "linux-$arch.txt"; done
+
+          # Nothing that ships has changed since the last release: a run
+          # queued behind the one that released it, or a change to a test.
+          last=$(jq -r .commit latest.json)
+          if git cat-file -e "$last^{commit}" 2>/dev/null && git diff --quiet "$last" HEAD -- \
+            daemon ':(exclude)daemon/VERSION' ':(exclude,glob)daemon/**/*.md' ':(exclude,glob)daemon/**/*_test.go'; then
+            echo "Nothing in the daemon has changed since the release of $last."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A version is published once. One already out is followed by the
+          # next; one bumped by hand in the change itself is used as it is.
+          version=$(tr -d '[:space:]' < daemon/VERSION)
+          if published "hived/$version/hived-darwin-arm64.zip"; then
+            while published "hived/$version/hived-darwin-arm64.zip"; do
+              version="${version%.*}.$((${version##*.} + 1))"
+            done
+            echo "$version" > daemon/VERSION
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -qm "Release $version" daemon/VERSION
+            git push -q origin HEAD:main
+          fi
+
+          # The images are built only when the ones published are not the
+          # ones this commit describes.
+          wanted="$(sed -n 's/^IMAGE_VERSION=//p' daemon/image/build.sh)-$(sed -n 's/^RUNNER_VERSION="${RUNNER_VERSION:-\(.*\)}"/\1/p' daemon/image/build.sh)"
+          virtiofsd="$(sed -n 's/^VIRTIOFSD_VERSION="${VIRTIOFSD_VERSION:-\(.*\)}"/\1/p' daemon/release/virtiofsd.sh)"
+          images=false
+          [ "$(jq -r .image.version latest.json)" = "$wanted" ] || images=true
+          for arch in arm64 amd64; do
+            [ "$(sed -n 's/^image_version=//p' "linux-$arch.txt")" = "$wanted" ] || images=true
+            [ "$(sed -n 's/^virtiofsd_version=//p' "linux-$arch.txt")" = "$virtiofsd" ] || images=true
+          done
+
+          echo "Releasing $version from $(git rev-parse --short HEAD); building images: $images."
+          {
+            echo "release=true"
+            echo "images=$images"
+            echo "sha=$(git rev-parse HEAD)"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+  # The guest image and virtiofsd need Docker, which a Mac runner has not got.
+  images:
+    needs: plan
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.plan.outputs.images == 'true') }}
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            guest: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            guest: x64
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - name: Build the ${{ matrix.arch }} guest image
+        run: GUEST_ARCH=${{ matrix.guest }} ./daemon/image/build.sh "$RUNNER_TEMP/built/image-${{ matrix.arch }}"
+      - name: Build virtiofsd for ${{ matrix.arch }}
+        run: |
+          version="$(sed -n 's/^VIRTIOFSD_VERSION="${VIRTIOFSD_VERSION:-\(.*\)}"/\1/p' daemon/release/virtiofsd.sh)"
+          mkdir -p "$RUNNER_TEMP/built/tools"
+          ./daemon/release/virtiofsd.sh ${{ matrix.arch }} "$RUNNER_TEMP/built/tools/virtiofsd-$version-linux-${{ matrix.arch }}"
+      - name: Pack them for the job that publishes
+        run: tar -C "$RUNNER_TEMP/built" -cf "$RUNNER_TEMP/built-${{ matrix.arch }}.tar" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: built-${{ matrix.arch }}
+          path: ${{ runner.temp }}/built-${{ matrix.arch }}.tar
+          retention-days: 1
+
+  # Signing needs macOS: a Mac in the hive that takes macOS jobs when one is
+  # free, GitHub's when none is.
+  route:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    outputs:
+      runner: ${{ steps.hive.outputs.runner }}
+    steps:
+      - id: hive
+        uses: thecomputerplumbers/hive-route@v1
+        with:
+          label: hive-macos
+          fallback: macos-latest
+
+  publish:
+    needs: [plan, images, route]
+    if: ${{ !cancelled() && needs.route.result == 'success' && (needs.images.result == 'success' || needs.images.result == 'skipped') }}
+    runs-on: ${{ needs.route.outputs.runner }}
+    timeout-minutes: 45
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: jdx/mise-action@v4
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        if: needs.images.result == 'success'
+        with:
+          path: ${{ runner.temp }}/artifacts
+          merge-multiple: true
+      - name: Unpack the images built for this release
+        if: needs.images.result == 'success'
+        run: |
+          mkdir -p "$RUNNER_TEMP/built"
+          for packed in "$RUNNER_TEMP"/artifacts/built-*.tar; do
+            tar -C "$RUNNER_TEMP/built" -xf "$packed"
+          done
+          {
+            echo "HIVE_IMAGE=$RUNNER_TEMP/built/image-arm64"
+            echo "HIVE_IMAGE_AMD64=$RUNNER_TEMP/built/image-amd64"
+            echo "HIVE_TOOLS=$RUNNER_TEMP/built/tools"
+          } >> "$GITHUB_ENV"
+      - name: Put the signing certificate in a keychain of its own
+        env:
+          CERTIFICATE: ${{ secrets.RELEASE_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.RELEASE_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$CERTIFICATE" ] && [ -n "$NOTARY_KEY" ] || { echo "The production environment has no RELEASE_CERTIFICATE_P12 or NOTARY_KEY: see docs/deployment.md." >&2; exit 1; }
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf %s "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+          [ -n "$identity" ] || { echo "RELEASE_CERTIFICATE_P12 holds no Developer ID Application certificate." >&2; exit 1; }
+          printf %s "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          {
+            echo "HIVE_SIGN_IDENTITY=$identity"
+            echo "HIVE_NOTARY_KEY=$RUNNER_TEMP/notary.p8"
+          } >> "$GITHUB_ENV"
+      - name: Sign, notarize and publish
+        env:
+          HIVE_NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          HIVE_NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: ./daemon/release/publish.sh --upload
+      - name: Take the certificate away again
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/certificate.p12"
+
+  # On a pull request: everything a release does short of signing and sending.
+  rehearse:
+    needs: images
+    if: github.event_name == 'pull_request'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/artifacts
+          merge-multiple: true
+      - name: Unpack the images built for this rehearsal
+        run: |
+          mkdir -p "$RUNNER_TEMP/built"
+          for packed in "$RUNNER_TEMP"/artifacts/built-*.tar; do
+            tar -C "$RUNNER_TEMP/built" -xf "$packed"
+          done
+          ls -l "$RUNNER_TEMP"/built/*
+      - name: Put a release together from what is published
+        working-directory: daemon
+        run: |
+          ./release/publish.sh --out "$RUNNER_TEMP/release"
+          cat "$RUNNER_TEMP/release/latest.json" "$RUNNER_TEMP"/release/linux-*.txt
+      - name: Put a release together from the images just built
+        working-directory: daemon
+        env:
+          HIVE_IMAGE: ${{ runner.temp }}/built/image-arm64
+          HIVE_IMAGE_AMD64: ${{ runner.temp }}/built/image-amd64
+          HIVE_TOOLS: ${{ runner.temp }}/built/tools
+          # A place nothing is published at, so nothing is taken as published.
+          HIVE_RELEASES: http://127.0.0.1:9
+        run: |
+          ./release/publish.sh --out "$RUNNER_TEMP/release-built"
+          cat "$RUNNER_TEMP/release-built/latest.json" "$RUNNER_TEMP"/release-built/linux-*.txt

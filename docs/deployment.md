@@ -101,8 +101,52 @@ Mac or Linux box.
 | `hived/<version>/hived-linux-<arch>.tar.gz`             | The daemon for Linux                                                      |
 | `images/<image>/image-<arch>-<sum>.tar.gz.aa`, `.ab`, … | The guest image, as a tarball named for its checksum, in pieces of 200 MB |
 
-A release is built and published from a clean checkout on an Apple Silicon
-Mac, because signing and notarizing need macOS:
+### Automatically
+
+`.github/workflows/release.yml` publishes a release whenever what ships in the
+daemon changes on main: anything under `daemon/` but its tests, its Markdown
+and `VERSION`. It compares main with the commit the current release was built
+from, so a change that ships nothing releases nothing. It then:
+
+1. Takes `daemon/VERSION` if that version is not out yet, and otherwise bumps
+   the patch number and commits that to main as `Release x.y.z`.
+2. Builds the guest images and virtiofsd on GitHub's Linux runners, only when
+   the published ones are not the ones the commit describes. The script names
+   the published files again otherwise, so most releases need no Docker.
+3. Signs, notarizes and publishes on a Mac: one in the hive that takes macOS
+   jobs when one is free, GitHub's `macos-latest` when none is.
+
+Machines with `auto-update on` then install it when they are idle, so every
+such merge reaches every machine. It is off until the repository variable
+`AUTOMATIC_RELEASES` is `on`, and it needs these in the `production`
+environment:
+
+| Secret                         | What it is                                                                |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| `RELEASE_CERTIFICATE_P12`      | The Developer ID Application certificate and its key, as base64 of a .p12 |
+| `RELEASE_CERTIFICATE_PASSWORD` | The password the .p12 was exported with                                   |
+| `NOTARY_KEY`                   | An App Store Connect API key, the contents of its `AuthKey_XXXX.p8`       |
+| `NOTARY_KEY_ID`                | That key's id                                                             |
+| `NOTARY_ISSUER`                | That key's issuer id                                                      |
+| `CLOUDFLARE_API_TOKEN`         | Already there for deploys; it must also be able to write to the R2 bucket |
+
+```sh
+base64 -i DeveloperID.p12 | gh secret set RELEASE_CERTIFICATE_P12 --env production
+gh secret set RELEASE_CERTIFICATE_PASSWORD --env production
+gh secret set NOTARY_KEY --env production < AuthKey_XXXX.p8
+gh secret set NOTARY_KEY_ID --env production
+gh secret set NOTARY_ISSUER --env production
+gh variable set AUTOMATIC_RELEASES --body on
+```
+
+A pull request that changes the workflow, `daemon/release` or `daemon/image`
+rehearses a release: it builds both images and puts a release together,
+unsigned, without sending it anywhere.
+
+### By hand
+
+A release can still be built and published from a clean checkout on an Apple
+Silicon Mac, because signing and notarizing need macOS:
 
 ```sh
 # Once per Mac: the notarization credentials, kept in the keychain.
