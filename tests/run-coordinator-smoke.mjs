@@ -321,7 +321,17 @@ try {
       method: "POST",
       body: JSON.stringify({ assignmentId, release }),
     })
+  // The hello travels on the socket and the offer over HTTP, so nothing
+  // orders them: a hello arriving second would forget the job just offered.
+  // The hello writes the daemon's version, so wait to see that written.
+  await sql("update machine set daemon_version='unheard' where id='a'")
   a.send({ ...hello(), maxJobs: 2 })
+  await eventually(
+    async () =>
+      (await sql("select daemon_version v from machine where id='a'"))[0].v ===
+      "0.1.0",
+    "a second hello is heard"
+  )
   await offer("first")
   assert.equal((await a.next()).assignmentId, "first")
   await eventually(available, "a machine with one job of two has room")
