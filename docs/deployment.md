@@ -53,8 +53,9 @@ approval rule if the project requires release approval.
 
 ## Release
 
-The Deploy workflow is manually dispatched from main and selects exactly one
-environment. Like the checks, it runs on this organization's own hive when a
+Production follows main: when Check passes on a push to main, the Deploy
+workflow deploys that commit to production. It can also be dispatched by hand
+from main, for either environment. Like the checks, it runs on this organization's own hive when a
 machine is free and on GitHub's runner when none is; on the hive, the
 environment's Cloudflare token is in a VM on a member's machine for the length
 of the job. It runs the isolated smoke tests first. You can run the same release
@@ -69,7 +70,7 @@ The command validates target configuration/secret inventory and code checks,
 builds with the selected CLOUDFLARE_ENV, and verifies the generated artifact's
 Worker and D1 identities. It then applies D1 migrations, deploys that exact built
 artifact, and checks the canonical HTTPS health endpoint for the expected commit
-marker and configured dependencies. No production deploy occurs on a plain push.
+marker and configured dependencies. A push that fails Check is not deployed.
 
 Use backward-compatible migrations: the old Worker can still serve requests
 between migration and deployment. Split destructive schema changes across

@@ -1,5 +1,11 @@
 name: Deploy
+# Production follows main: a push there that passes Check is deployed. It can
+# also be started by hand, for either environment.
 on:
+  workflow_run:
+    workflows: [Check]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -9,13 +15,18 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: deploy-${{ inputs.environment }}
+  group: deploy-${{ inputs.environment || 'production' }}
   cancel-in-progress: false
 jobs:
   # Where the deploy runs: this organization's own hive when one of its
   # machines is free, GitHub's runner when none is.
   route:
-    if: github.ref == 'refs/heads/main'
+    # By hand from main, or after Check passed on a push to main: not after
+    # a pull request's checks, which run this same workflow.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -33,16 +44,19 @@ jobs:
     needs: route
     runs-on: ${{ needs.route.outputs.runner }}
     timeout-minutes: 20
-    environment: ${{ inputs.environment }}
+    environment: ${{ inputs.environment || 'production' }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The commit Check passed on, which main may since have moved past.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Give the hive's image what Node needs on arm64
         if: runner.environment == 'self-hosted'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libatomic1
       - uses: jdx/mise-action@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:worker
-      - run: pnpm release "${{ inputs.environment }}"
+      - run: pnpm release "${{ inputs.environment || 'production' }}"
