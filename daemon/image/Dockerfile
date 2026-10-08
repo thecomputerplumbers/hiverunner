@@ -10,14 +10,16 @@ ARG RUNNER_ARCH=arm64
 ENV DEBIAN_FRONTEND=noninteractive
 
 # A kernel and init, and what a job expects to find: git, curl, sudo, the
-# usual archive tools. Deliberately not the hosted runners' toolcache; jobs
-# install what they need with setup-* actions, as they do anywhere.
+# usual archive tools, and libatomic, which Node's own arm64 builds load.
+# Deliberately not the hosted runners' toolcache; jobs install what they need
+# with setup-* actions, as they do anywhere.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       systemd systemd-sysv systemd-resolved dbus udev kmod \
       linux-image-virtual initramfs-tools e2fsprogs \
       ca-certificates curl git sudo iproute2 iputils-ping \
       jq tar gzip unzip zip xz-utils zstd openssh-client locales socat \
+      libatomic1 \
  && locale-gen en_US.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 

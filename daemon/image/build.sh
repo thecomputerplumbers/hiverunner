@@ -19,7 +19,7 @@ RUNNER_VERSION="${RUNNER_VERSION:-2.337.0}"
 RUNNER_SHA256_ARM64="9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393"
 RUNNER_SHA256_X64="70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
 # Bump when anything in this directory changes what ends up in the guest.
-IMAGE_VERSION=7
+IMAGE_VERSION=8
 
 # Direct kernel boot wants a different file on each: the uncompressed Image
 # on arm64, the compressed bzImage on x64. GitHub's runner calls the second
