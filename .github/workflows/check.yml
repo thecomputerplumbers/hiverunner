@@ -9,8 +9,32 @@ concurrency:
   group: check-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  check:
+  # Where the jobs below run: this organization's own hive when one of its
+  # machines is free, GitHub's runner when none is within the wait.
+  route:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    outputs:
+      check: ${{ steps.check.outputs.runner }}
+      daemon: ${{ steps.daemon.outputs.runner }}
+    steps:
+      - id: check
+        uses: thecomputerplumbers/hive-route@v1
+        with:
+          label: hive-4cpu
+          fallback: ubuntu-latest
+          wait: 30
+      - id: daemon
+        uses: thecomputerplumbers/hive-route@v1
+        with:
+          label: hive
+          fallback: ubuntu-latest
+          wait: 30
+  check:
+    needs: route
+    runs-on: ${{ needs.route.outputs.check }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -24,7 +48,8 @@ jobs:
       - name: Dispatch and settle a job against a local GitHub Actions service
         run: node tests/run-listener-smoke.mjs
   daemon:
-    runs-on: ubuntu-latest
+    needs: route
+    runs-on: ${{ needs.route.outputs.daemon }}
     timeout-minutes: 10
     defaults:
       run:
@@ -35,6 +60,17 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
+  # Always GitHub's runner, whatever the jobs above run on: it is the
+  # hardware the score is measured against.
+  reference-speed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
       - name: Reference speed on a GitHub standard hosted runner
         # The speed score is relative to this hardware. Copy the median into
         # ReferenceUnitsPerSecond in daemon/internal/bench when it moves.
