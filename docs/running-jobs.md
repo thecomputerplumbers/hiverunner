@@ -47,8 +47,8 @@ Build the image once with Docker, then build the daemon with Go:
 
 `login` opens the browser to approve machine enrollment. The GitHub App must
 be installed on the organization and its repository must be accessible to the
-runner group. The daemon pauses availability when the lid is closed and
-keeps running on battery. One machine runs one job at a time across all its pools unless its
+runner group. The daemon pauses availability when the lid is closed, unless
+its owner sets `lid on`, and keeps running on battery. One machine runs one job at a time across all its pools unless its
 owner raises `max-jobs`, and always leaves two cores for its owner.
 
 The daemon keeps itself current. Once a day it reads the release manifest
@@ -77,6 +77,28 @@ jobs:
       - uses: actions/checkout@v7
       - run: uname -m
 ```
+
+These are labels, not runner groups. `runs-on` takes the label as a plain
+string, and these four are the whole list for an arm64 hive:
+
+```yaml
+runs-on: hive # 2 vCPU Linux
+runs-on: hive-4cpu # 4 vCPU Linux
+runs-on: hive-8cpu # 8 vCPU Linux
+runs-on: hive-macos # a member's Mac itself; see macOS jobs below
+```
+
+The `group:` form does not work:
+
+```yaml
+runs-on:
+  group: hive-4cpu # fails: Required runner group 'hive-4cpu' not found
+```
+
+There is no runner group of that name, and none is needed. HiveWorker's
+runners are in the organization's Default runner group, which is the only
+group an organization on GitHub Free has, so nothing here depends on the
+organization's plan.
 
 ### Linux x64 (not yet released)
 

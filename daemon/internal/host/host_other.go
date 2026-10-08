@@ -15,3 +15,9 @@ func ReadFacts() (Facts, error) { return Facts{}, ErrUnsupported }
 
 // Unsupported hosts remain unavailable.
 func ReadPower() Power { return Power{LidClosed: true} }
+
+const StayAwake = ""
+
+func StaysAwake() (awake, known bool) { return false, false }
+
+func Unattended() []Check { return nil }

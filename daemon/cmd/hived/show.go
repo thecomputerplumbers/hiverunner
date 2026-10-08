@@ -121,6 +121,17 @@ func status() error {
 		field("Daemon", screen.Dot(daemonUp)+" "+daemon),
 		field("Jobs", state),
 	}
+	if fix := current.Fix(power, time.Now()); fix != "" {
+		rows = append(rows, field("", screen.Dim(fix)))
+	}
+	if problem, fix := asleep(current, power); problem != "" {
+		for _, line := range wrap(problem, ui.Inner-12) {
+			rows = append(rows, field("", screen.Honey(line)))
+		}
+		for _, line := range wrap(fix, ui.Inner-12) {
+			rows = append(rows, field("", screen.Dim(line)))
+		}
+	}
 	if release != "" {
 		rows = append(rows, field("Update", release))
 	}
@@ -212,6 +223,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("max-vcpus", limit, "the largest job "+thisMachine+" takes"),
 		row("warm", onOff(current.Warm), "keep one VM booted so jobs start sooner"),
 		row("battery", onOff(current.Battery), "take jobs while unplugged"),
+		row("lid", onOff(current.Lid), "take jobs with the lid closed"),
 		row("hours", hours, "when jobs may start"),
 		row("cache", onOff(current.Cache), "keep an Actions cache on "+thisMachine),
 		row("cache-size", cacheSize, "the most disk the cache may use"),
@@ -222,6 +234,23 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 }
 
 func field(name, value string) string { return ui.Pad(name, 12) + value }
+
+// wrap breaks text at spaces into lines no wider than width.
+func wrap(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		if line != "" && ui.Width(line)+1+ui.Width(word) > width {
+			lines = append(lines, line)
+			line = ""
+		}
+		if line != "" {
+			line += " "
+		}
+		line += word
+	}
+	return append(lines, line)
+}
 
 func indent(block string) string {
 	lines := strings.Split(strings.TrimSuffix(block, "\n"), "\n")
@@ -249,6 +278,8 @@ hived config set <name> <value>  Change one
   max-vcpus  2, 4, 8 or auto     the largest job this machine takes
   warm       on or off           keep one VM booted so jobs start sooner
   battery    on or off           take jobs while unplugged
+  lid        on or off           take jobs with the lid closed; hived doctor
+                                 says whether this machine stays awake closed
   hours      22:00-07:00 or any  when jobs may start, in local time
   cache      on or off           keep an Actions cache on this machine
   cache-size 1 to 2000 or auto   the most disk the cache may use, in GB
@@ -289,7 +320,15 @@ func configure(args []string) error {
 				return errors.New(report.Problem)
 			}
 		}
-		return saved(current, args[1]+" is now "+strings.ToLower(args[2]))
+		if err := saved(current, args[1]+" is now "+strings.ToLower(args[2])); err != nil {
+			return err
+		}
+		if args[1] == "lid" {
+			if problem, fix := asleep(current, host.ReadPower()); problem != "" {
+				fmt.Println("\nBut " + strings.TrimPrefix(problem, "lid is on, but ") + ".\nKeep it awake with: " + fix)
+			}
+		}
+		return nil
 	case args[0] == "help" || args[0] == "-h" || args[0] == "--help":
 		fmt.Print(configUsage)
 		return nil

@@ -155,6 +155,25 @@ export function LabelsAndSizes() {
       - uses: oven-sh/setup-bun@v2
       - run: bun run build`}</CodeBlock>
 
+      <h2 id="not-groups">Labels, not runner groups</h2>
+      <p>
+        <Code>runs-on</Code> takes one of these labels as a plain string:{" "}
+        <Code>hive</Code>, <Code>hive-4cpu</Code>, <Code>hive-8cpu</Code> or{" "}
+        <Code>hive-macos</Code>. They are not runner groups, so the{" "}
+        <Code>group:</Code> form fails:
+      </p>
+      <CodeBlock title="This does not work">{`jobs:
+  test:
+    runs-on:
+      group: hive-4cpu
+# Required runner group 'hive-4cpu' not found`}</CodeBlock>
+      <p>
+        Write <Code>runs-on: hive-4cpu</Code> instead. HiveWorker&apos;s runners
+        are in your organization&apos;s Default runner group, the only group an
+        organization on GitHub Free has, so the labels work on every GitHub
+        plan.
+      </p>
+
       <h2 id="what-runs">What a job runs on</h2>
       <ul>
         <li>

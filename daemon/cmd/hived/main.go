@@ -42,6 +42,7 @@ const usage = `hived, the HiveWorker daemon
   hived run         Connect to your hive and wait for jobs
   hived status      Show what this machine lends, and whether it is lending
   hived config      Show or change this machine's settings
+  hived doctor      Check this machine keeps taking jobs with nobody at it
   hived cache       Show or empty this machine's Actions cache
   hived macos       Set this Mac up for macOS jobs (Xcode, iOS builds)
   hived update      Update to the current release, if this is not it
@@ -74,6 +75,8 @@ func main() {
 		err = status()
 	case "config":
 		err = configure(os.Args[2:])
+	case "doctor":
+		err = doctor()
 	case "cache":
 		err = cacheCommand(os.Args[2:])
 	case "macos":
@@ -252,6 +255,17 @@ func run(ctx context.Context) error {
 	// Whether the owner would mind a job right now: their settings, then
 	// what the machine itself is doing.
 	holding := func() string { return live.Get().Holding(host.ReadPower(), time.Now()) }
+	// Said at the start and whenever it becomes true, while there is someone
+	// to read it: closed and asleep, the daemon says nothing at all.
+	var said atomic.Value
+	said.Store("")
+	warnAsleep := func() {
+		problem, fix := asleep(live.Get(), host.ReadPower())
+		if said.Swap(problem) != problem && problem != "" {
+			log.Warn(problem, "fix", fix)
+		}
+	}
+	warnAsleep()
 	refresh := time.Minute
 	if seconds, err := strconv.Atoi(os.Getenv("HIVE_REFRESH_SECONDS")); err == nil && seconds > 0 {
 		refresh = time.Duration(seconds) * time.Second
@@ -372,6 +386,7 @@ func run(ctx context.Context) error {
 			if updating.Load() {
 				return false
 			}
+			warnAsleep()
 			return holding() == ""
 		},
 		Limits: limits,

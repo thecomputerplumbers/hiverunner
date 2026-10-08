@@ -4,6 +4,7 @@ package host
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -62,7 +63,72 @@ func readModel() string {
 // ReadPower asks the kernel about power and the lid. A machine with no
 // battery and no lid, which is most Linux boxes, is always available.
 func ReadPower() Power {
-	return Power{OnBattery: onBattery("/sys/class/power_supply"), LidClosed: lidClosed("/proc/acpi/button/lid")}
+	lids, _ := filepath.Glob("/proc/acpi/button/lid/*/state")
+	return Power{OnBattery: onBattery("/sys/class/power_supply"), LidClosed: lidClosed("/proc/acpi/button/lid"), HasLid: len(lids) > 0}
+}
+
+// StayAwake is how the owner keeps this machine awake with its lid closed.
+const StayAwake = "set HandleLidSwitch and HandleLidSwitchExternalPower to ignore in /etc/systemd/logind.conf, then restart systemd-logind"
+
+// StaysAwake reports whether this machine stays awake with its lid closed,
+// which is logind's decision. known is false when logind's settings could
+// not be read.
+func StaysAwake() (awake, known bool) {
+	settings, err := exec.Command("systemd-analyze", "cat-config", "systemd/logind.conf").Output()
+	if err != nil {
+		return false, false
+	}
+	return lidIgnored(string(settings)), true
+}
+
+// lidIgnored reads logind's settings, later lines winning as they do for
+// logind. Unset, a closed lid suspends, and on mains it does what it does on
+// battery.
+func lidIgnored(settings string) bool {
+	battery, mains := "suspend", ""
+	for _, line := range strings.Split(settings, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "HandleLidSwitch":
+			battery = strings.TrimSpace(value)
+		case "HandleLidSwitchExternalPower":
+			mains = strings.TrimSpace(value)
+		}
+	}
+	if mains == "" {
+		mains = battery
+	}
+	awake := func(action string) bool { return action == "ignore" || action == "lock" }
+	return awake(battery) && awake(mains)
+}
+
+// Unattended looks at what stops this machine taking jobs with its lid
+// closed or after a restart nobody was there for.
+func Unattended() []Check {
+	var checks []Check
+	if ReadPower().HasLid {
+		switch awake, known := StaysAwake(); {
+		case !known:
+			checks = append(checks, Check{Name: "sleep", Found: "logind's settings could not be read", Fix: StayAwake})
+		case awake:
+			checks = append(checks, Check{Name: "sleep", Found: "closing the lid does not suspend it", OK: true})
+		default:
+			checks = append(checks, Check{Name: "sleep", Found: "suspends when its lid closes", Fix: StayAwake})
+		}
+	}
+	// hived is a user service: without lingering it starts when its user
+	// logs in, not at boot.
+	user := os.Getenv("USER")
+	linger, err := exec.Command("loginctl", "show-user", user, "--property=Linger").Output()
+	if err == nil && strings.TrimSpace(string(linger)) == "Linger=yes" {
+		checks = append(checks, Check{Name: "start at boot", Found: "lingering is on, so hived starts without a login", OK: true})
+	} else {
+		checks = append(checks, Check{Name: "start at boot", Found: "after a restart hived waits for " + user + " to log in", Fix: "sudo loginctl enable-linger " + user})
+	}
+	return checks
 }
 
 // onBattery is true when the machine has a battery and no mains supply

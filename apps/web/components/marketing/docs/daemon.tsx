@@ -78,8 +78,26 @@ export function Daemon() {
           new jobs and discards the idle VM. An active job can stall if the Mac
           goes to sleep.
         </li>
+        <li>
+          When the machine is not taking jobs, <Code>hived status</Code> says
+          why and what to do about it.
+        </li>
         <li>A menu bar control to pause new jobs is planned.</li>
       </ul>
+
+      <h2 id="unattended">A machine nobody sits at</h2>
+      <p>
+        To take jobs with the lid closed, run{" "}
+        <Code>hived config set lid on</Code>. A closed MacBook sleeps unless
+        sleep is disabled, and a sleeping Mac takes no jobs, so also run{" "}
+        <Code>sudo pmset -a disablesleep 1</Code>. If you have not,{" "}
+        <Code>hived status</Code> says so.
+      </p>
+      <p>
+        <Code>hived doctor</Code> checks what would stop the machine taking jobs
+        with its lid closed or after a restart: sleep settings, power,
+        auto-login and FileVault. It says how to fix each one.
+      </p>
 
       <h2 id="network">Network</h2>
       <p>

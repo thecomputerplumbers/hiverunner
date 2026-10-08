@@ -60,3 +60,19 @@ func TestTheLid(t *testing.T) {
 		t.Error("a closed lid read as open")
 	}
 }
+
+func TestLogindDecidesWhetherAClosedLidSuspends(t *testing.T) {
+	for settings, want := range map[string]bool{
+		"":                                   false,
+		"[Login]\n#HandleLidSwitch=ignore\n": false,
+		"[Login]\nHandleLidSwitch=ignore\n":  true,
+		"HandleLidSwitch=ignore\nHandleLidSwitchExternalPower=suspend\n": false,
+		"HandleLidSwitch=suspend\nHandleLidSwitchExternalPower=ignore\n": false,
+		"HandleLidSwitch=ignore\nHandleLidSwitch=suspend\n":              false,
+		"HandleLidSwitch=lock\nHandleLidSwitchExternalPower=ignore\n":    true,
+	} {
+		if got := lidIgnored(settings); got != want {
+			t.Errorf("%q: got %v, want %v", settings, got, want)
+		}
+	}
+}

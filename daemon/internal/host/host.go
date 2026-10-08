@@ -18,6 +18,21 @@ type Power struct {
 	OnBattery bool
 	// LidClosed is true for a laptop with its lid shut.
 	LidClosed bool
+	// HasLid is true for a machine that has a lid to shut.
+	HasLid bool
+}
+
+// Check is one thing about the machine that decides whether it keeps taking
+// jobs with nobody at it: what was looked at, what was found, and what to do
+// when that is not what an unattended machine needs.
+type Check struct {
+	Name  string
+	Found string
+	OK    bool
+	Fix   string
+	// Note marks what the owner may well have chosen: it is said, and it
+	// does not count as something wrong.
+	Note bool
 }
 
 // Available reports whether the machine may accept a job. Battery power is

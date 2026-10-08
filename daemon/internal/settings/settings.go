@@ -34,6 +34,9 @@ type Settings struct {
 	Warm bool `json:"warm"`
 	// Battery allows jobs while the machine is unplugged.
 	Battery bool `json:"battery"`
+	// Lid allows jobs while the lid is closed. The machine has to stay
+	// awake closed for that to mean anything: see host.StaysAwake.
+	Lid bool `json:"lid"`
 	// Cache keeps an Actions cache on this machine for the jobs it runs.
 	Cache bool `json:"cache"`
 	// CacheGB is the most disk the cache may use, in gigabytes. Zero means
@@ -154,7 +157,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "hours", "cache", "cache-size", "macos-jobs", "auto-update"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "macos-jobs", "auto-update"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -176,7 +179,7 @@ func (s *Settings) Set(key, value string) error {
 			return errors.New("max-vcpus takes 2, 4, 8 or auto")
 		}
 		s.MaxVCPUs = vcpus
-	case "warm", "battery", "cache", "macos-jobs", "auto-update":
+	case "warm", "battery", "lid", "cache", "macos-jobs", "auto-update":
 		on, err := parseSwitch(value)
 		if err != nil {
 			return fmt.Errorf("%s takes on or off", key)
@@ -186,6 +189,8 @@ func (s *Settings) Set(key, value string) error {
 			s.Warm = on
 		case "battery":
 			s.Battery = on
+		case "lid":
+			s.Lid = on
 		case "macos-jobs":
 			s.MacOSJobs = on
 		case "auto-update":
@@ -272,17 +277,29 @@ func (s Settings) InHours(now time.Time) bool {
 // Holding is why the machine is not taking jobs right now, in the owner's
 // terms, or "" if it is. The first reason that applies is the one given.
 func (s Settings) Holding(power host.Power, now time.Time) string {
+	reason, _ := s.holding(power, now)
+	return reason
+}
+
+// Fix is what the owner can do about Holding's reason, or "" when the
+// machine is taking jobs.
+func (s Settings) Fix(power host.Power, now time.Time) string {
+	_, fix := s.holding(power, now)
+	return fix
+}
+
+func (s Settings) holding(power host.Power, now time.Time) (reason, fix string) {
 	switch {
 	case s.Paused:
-		return "paused by you"
-	case power.LidClosed:
-		return "lid closed"
+		return "paused by you", "run hived resume"
+	case power.LidClosed && !s.Lid:
+		return "lid closed", "open the lid or run hived config set lid on"
 	case power.OnBattery && !s.Battery:
-		return "on battery"
+		return "on battery", "plug it in or run hived config set battery on"
 	case !s.InHours(now):
-		return "outside " + s.Hours
+		return "outside " + s.Hours, "wait for the window or run hived config set hours any"
 	}
-	return ""
+	return "", ""
 }
 
 // Takes reports whether a job of this size is within the owner's limit.

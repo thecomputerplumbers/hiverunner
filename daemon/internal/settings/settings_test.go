@@ -96,6 +96,28 @@ func TestSetAndHolding(t *testing.T) {
 	}
 }
 
+func TestAClosedLidHoldsJobsUnlessTheOwnerAllowsIt(t *testing.T) {
+	current, closed := Default(), host.Power{LidClosed: true, HasLid: true}
+	if got := current.Holding(closed, at("12:00")); got != "lid closed" {
+		t.Errorf("lid off, closed: got %q", got)
+	}
+	if got := current.Fix(closed, at("12:00")); got != "open the lid or run hived config set lid on" {
+		t.Errorf("lid off, closed: told to %q", got)
+	}
+	if err := current.Set("lid", "on"); err != nil {
+		t.Fatal(err)
+	}
+	if reason, fix := current.Holding(closed, at("12:00")), current.Fix(closed, at("12:00")); reason != "" || fix != "" {
+		t.Errorf("lid on, closed: holding for %q, told to %q", reason, fix)
+	}
+	// The lid being allowed does not allow anything else.
+	current.Battery = false
+	closed.OnBattery = true
+	if got := current.Holding(closed, at("12:00")); got != "on battery" {
+		t.Errorf("lid on, closed, unplugged with battery off: got %q", got)
+	}
+}
+
 func TestLiveFollowsTheFileAndKeepsTheLastGoodOne(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HIVE_CONFIG", filepath.Join(dir, "machine.json"))

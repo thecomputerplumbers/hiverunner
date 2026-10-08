@@ -112,7 +112,7 @@ which is often the `kvm` group's alone even where `/dev/kvm` is lent to
 whoever is logged in. Without either, jobs run and use GitHub's cache.
 
 A machine with a battery follows the same rules as a Mac: jobs on battery
-unless the owner says otherwise, none with the lid shut. A machine with
+unless the owner says otherwise, none with the lid shut unless `lid` is on. A machine with
 neither is always available.
 
 Files are where Linux keeps them: `~/.config/HiveWorker` for the image, the
@@ -130,12 +130,58 @@ and `hived config set <name> <value>` changes one:
 | `max-vcpus`  | `2`, `4`, `8`, `auto` | The largest job this Mac takes                   |
 | `warm`       | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner |
 | `battery`    | `on`, `off`           | Take jobs while unplugged                        |
+| `lid`        | `on`, `off`           | Take jobs with the lid closed                    |
 | `hours`      | `22:00-07:00`, `any`  | When jobs may start, in local time               |
 | `cache`      | `on`, `off`           | Keep an Actions cache on this Mac                |
 | `cache-size` | `1` to `2000`, `auto` | The most disk the cache may use, in gigabytes    |
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
+
+When the machine is not taking jobs, `hived status` says why and what to do
+about it: `lid closed`, then `open the lid or run hived config set lid on`.
+
+## A machine nobody sits at
+
+`lid` is off unless the owner turns it on, because a closed laptop normally
+sleeps, and a sleeping machine takes no jobs and says nothing. With `lid on`
+the daemon stops reading the lid, and the machine has to be kept awake:
+
+```sh
+./hived config set lid on
+sudo pmset -a disablesleep 1   # macOS: pmset -g then shows SleepDisabled 1
+```
+
+On Linux the same thing is `HandleLidSwitch=ignore` and
+`HandleLidSwitchExternalPower=ignore` in `/etc/systemd/logind.conf`. With
+`lid on` and sleep not disabled, `hived config set lid on`, `hived status`
+and the daemon's log at start all say so, rather than the machine looking
+healthy until its lid closes.
+
+`hived doctor` checks everything that stops a machine taking jobs after a
+restart or with its lid closed, says how to fix each, and exits 1 if anything
+is wrong:
+
+| Check           | What it wants                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `sign-in`       | The machine is in a hive                                                                     |
+| `service`       | The background service is installed                                                          |
+| `jobs`          | Nothing is holding jobs now: not paused, in its hours                                        |
+| `power`         | Plugged in                                                                                   |
+| `lid`           | `lid on`, on a machine with a lid                                                            |
+| `sleep`         | macOS: `SleepDisabled 1` on a MacBook, `sleep 0` on a desktop. Linux: logind ignores the lid |
+| `power cut`     | macOS desktops: starts up again by itself (`autorestart 1`)                                  |
+| `auto-login`    | macOS: the user hived runs as is logged in at start-up, since hived is a launch agent        |
+| `FileVault`     | macOS: off, since a restart otherwise stops at the unlock screen                             |
+| `start at boot` | Linux: lingering is on for the user, so the service starts without a login                   |
+
+FileVault, and the auto-login it rules out, trade the disk's protection for
+coming back unattended, and running on battery with `battery on` is allowed.
+`hived doctor` says these and does not count them: only what is certainly
+wrong makes it exit 1. A MacBook closed with a display and power attached
+stays awake without `SleepDisabled`, so there the warning says it is awake
+only while they are attached. The daemon repeats the sleep warning in its log
+when `lid` is turned on while it runs.
 
 ## Updating
 
@@ -155,8 +201,8 @@ state is `update.json` beside `machine.json`.
 The settings live in `settings.json` beside the machine file and can be edited
 by hand. A running daemon reads the file again when it changes, so nothing
 needs restarting; a file it cannot read is reported and the last good settings
-stay in force. Outside its hours, on battery with `battery` off, or paused, the
-machine reports `paused` and the hive offers it nothing. The limits on job
+stay in force. Outside its hours, on battery with `battery` off, with its lid
+closed and `lid` off, or paused, the machine reports `paused` and the hive offers it nothing. The limits on job
 size and job count are sent to the hive in `hello`, so the hive neither offers
 past them nor counts the machine as capacity it does not have; changing one
 reconnects the tunnel once the machine is idle.
@@ -294,8 +340,8 @@ self-test against its image.
 - **A pre-registered runner.** The runner still registers with GitHub when the
   job arrives, which is most of what is left of the start-up time.
 - **Caches between jobs.** Each job starts from the same clean disk.
-- **Throttling for the owner.** It pauses with the lid closed,
-  but does not yet slow a running job when the owner is busy.
+- **Throttling for the owner.** It pauses with the lid closed (unless `lid`
+  is on), but does not yet slow a running job when the owner is busy.
 - **A menu bar item, and the Keychain** for the machine token.
 
 ## Layout
