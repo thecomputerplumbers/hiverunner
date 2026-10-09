@@ -4,6 +4,8 @@ import { account } from "@workspace/auth/schema"
 import { createGitHubApp, type GitHubApp } from "@workspace/github"
 
 import { getDb } from "@/db"
+import { auth } from "@/lib/auth"
+import { logError } from "@/lib/diagnostics"
 
 const local = () =>
   /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(env.APP_URL ?? "")
@@ -38,23 +40,36 @@ export function installUrl() {
 
 /**
  * The person's own GitHub token, or null when they did not sign in with
- * GitHub or the token has expired.
+ * GitHub or the token can no longer be renewed.
  *
- * Read straight from the account row and never refreshed: it is used at
- * sign-in, when it is minutes old, to learn which installations the person
- * can see. Everything after that is asked with installation tokens.
+ * At sign-in it is minutes old. Later callers, such as the return from
+ * installing the App on a second organization, find it expired, since GitHub
+ * issues it for eight hours; it is renewed here with the refresh token, which
+ * lasts six months. Everything else is asked with installation tokens.
  */
 export async function githubUserToken(userId: string) {
   const [linked] = await getDb()
     .select({
+      id: account.id,
       accessToken: account.accessToken,
       expiresAt: account.accessTokenExpiresAt,
+      refreshToken: account.refreshToken,
     })
     .from(account)
     .where(and(eq(account.userId, userId), eq(account.providerId, "github")))
     .limit(1)
   if (!linked?.accessToken) return null
-  if (linked.expiresAt && linked.expiresAt.getTime() < Date.now() + 30_000)
+  if (!linked.expiresAt || linked.expiresAt.getTime() >= Date.now() + 30_000)
+    return linked.accessToken
+  if (!linked.refreshToken) return null
+  try {
+    const renewed = await auth.api.getAccessToken({
+      body: { accountId: linked.id, userId },
+    })
+    return renewed.accessToken || null
+  } catch (error) {
+    // A revoked or spent refresh token: the person has to sign in again.
+    logError(error, "github.user-token")
     return null
-  return linked.accessToken
+  }
 }
