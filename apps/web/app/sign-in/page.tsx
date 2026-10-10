@@ -68,8 +68,9 @@ export default async function SignInPage({
           )}
         </CardContent>
       </Card>
-      {/* Someone following a teammate's invite is adding a Mac, not setting up. */}
-      {!invited && (
+      {/* Not for someone adding a Mac to a teammate's hive, or already
+          part way through connecting an agent or a daemon. */}
+      {!invited && !/^\/(connect|device)\b/.test(next) && (
         <AgentPrompt
           prompt={setupPrompt(env.APP_URL || PRODUCT_ORIGIN)}
           quiet

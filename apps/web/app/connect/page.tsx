@@ -49,13 +49,16 @@ export default async function Page({
       title={`Connect ${client.name ?? "application"}`}
       wide={!organizations.length}
     >
-      <p className="mb-4 text-sm break-all text-muted-foreground">
-        Client: {client.id}
+      <p className="mb-6 text-sm text-muted-foreground">
+        Signed in as{" "}
+        <span className="text-foreground">{session.user.name}</span>.{" "}
+        <span className="break-all">Client: {client.id}</span>
       </p>
       {!organizations.length && <NoHive back={here(params)} />}
       <ConsentForm
         organizations={organizations.map(({ id, name }) => ({ id, name }))}
         scopes={scope.split(" ").filter(Boolean)}
+        current={session.session.activeOrganizationId}
       />
     </AuthPage>
   )
