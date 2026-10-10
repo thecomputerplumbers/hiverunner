@@ -1,7 +1,8 @@
 import { getLiveSnapshot, listLiveJobs } from "@workspace/db/live"
 
 import { AccountPage } from "@/components/account-page"
-import { JobsPerDay, byDay } from "@/components/console/charts"
+import { JobsPerDay } from "@/components/console/charts"
+import { byDay } from "@/components/console/days"
 import { Panel } from "@/components/console/panel"
 import { getDb } from "@/db"
 import { requirePool } from "@/lib/session"
