@@ -9,7 +9,7 @@ export const metadata = {
     "The terms that apply to using HiveWorker: accounts, machines, jobs, payment and liability.",
 }
 
-const COMPANY = "The Computer Plumbers LLC"
+const COMPANY = "The Computer Plumbers"
 const EFFECTIVE = "October 9, 2026"
 
 export default function TermsPage() {

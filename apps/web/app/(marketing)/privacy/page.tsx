@@ -9,7 +9,7 @@ export const metadata = {
     "What HiveWorker collects, what it does not, who it is shared with and how to ask for it.",
 }
 
-const COMPANY = "The Computer Plumbers LLC"
+const COMPANY = "The Computer Plumbers"
 const EFFECTIVE = "October 9, 2026"
 
 export default function PrivacyPage() {
