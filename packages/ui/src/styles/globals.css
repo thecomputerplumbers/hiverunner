@@ -61,84 +61,103 @@
 }
 
 /*
- * HiveWorker: honey on black. Neutrals carry no hue, so honey is the only
- * colour on the page and marks the thing to do next and the thing that is
- * ours in a comparison. The diff colours are for diffs and nothing else.
+ * HiveWorker: honey on propolis. The neutrals lean toward honey's own hue,
+ * the darks a brown-black and the lights a wax cream, so honey sits in a
+ * warm page instead of on grey. Honey still marks the thing to do next and
+ * the thing that is ours in a comparison. The diff colours are for diffs and
+ * nothing else.
  */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.16 0 0);
-  --card: oklch(0.975 0 0);
-  --card-foreground: oklch(0.16 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0 0);
-  --primary: oklch(0.83 0.165 84);
-  --primary-foreground: oklch(0.16 0 0);
-  --secondary: oklch(0.955 0 0);
-  --secondary-foreground: oklch(0.16 0 0);
-  --muted: oklch(0.955 0 0);
-  --muted-foreground: oklch(0.44 0 0);
-  --accent: oklch(0.955 0 0);
-  --accent-foreground: oklch(0.16 0 0);
+  --background: oklch(0.985 0.012 92);
+  --foreground: oklch(0.2 0.03 70);
+  --card: oklch(0.965 0.02 92);
+  --card-foreground: oklch(0.2 0.03 70);
+  --popover: oklch(0.985 0.012 92);
+  --popover-foreground: oklch(0.2 0.03 70);
+  --primary: oklch(0.81 0.172 78);
+  --primary-foreground: oklch(0.19 0.035 70);
+  --secondary: oklch(0.94 0.024 92);
+  --secondary-foreground: oklch(0.2 0.03 70);
+  --muted: oklch(0.94 0.024 92);
+  --muted-foreground: oklch(0.45 0.035 75);
+  --accent: oklch(0.94 0.024 92);
+  --accent-foreground: oklch(0.2 0.03 70);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.86 0 0);
-  --input: oklch(0.86 0 0);
-  --ring: oklch(0.7 0.15 80);
-  --chart-1: oklch(0.83 0.165 84);
-  --chart-2: oklch(0.45 0 0);
-  --chart-3: oklch(0.62 0 0);
-  --chart-4: oklch(0.32 0 0);
-  --chart-5: oklch(0.78 0 0);
+  --border: oklch(0.85 0.035 88);
+  --input: oklch(0.85 0.035 88);
+  --ring: oklch(0.7 0.15 78);
+  --chart-1: oklch(0.81 0.172 78);
+  --chart-2: oklch(0.45 0.03 75);
+  --chart-3: oklch(0.62 0.03 80);
+  --chart-4: oklch(0.32 0.03 70);
+  --chart-5: oklch(0.78 0.03 88);
   --radius: 0.25rem;
-  --sidebar: oklch(0.975 0 0);
-  --sidebar-foreground: oklch(0.16 0 0);
-  --sidebar-primary: oklch(0.83 0.165 84);
-  --sidebar-primary-foreground: oklch(0.16 0 0);
-  --sidebar-accent: oklch(0.935 0 0);
-  --sidebar-accent-foreground: oklch(0.16 0 0);
-  --sidebar-border: oklch(0.86 0 0);
-  --sidebar-ring: oklch(0.7 0.15 80);
+  --sidebar: oklch(0.965 0.02 92);
+  --sidebar-foreground: oklch(0.2 0.03 70);
+  --sidebar-primary: oklch(0.81 0.172 78);
+  --sidebar-primary-foreground: oklch(0.19 0.035 70);
+  --sidebar-accent: oklch(0.925 0.026 92);
+  --sidebar-accent-foreground: oklch(0.2 0.03 70);
+  --sidebar-border: oklch(0.85 0.035 88);
+  --sidebar-ring: oklch(0.7 0.15 78);
   /* Code panels stay dark in both themes, like the editor they stand in for. */
-  --code: oklch(0.16 0 0);
-  --code-foreground: oklch(0.93 0 0);
+  --code: oklch(0.17 0.018 72);
+  --code-foreground: oklch(0.94 0.022 92);
   --diff-add: oklch(0.74 0.16 152);
   --diff-remove: oklch(0.7 0.17 18);
 }
 
 .dark {
-  --background: oklch(0.13 0 0);
-  --foreground: oklch(0.96 0 0);
-  --card: oklch(0.165 0 0);
-  --card-foreground: oklch(0.96 0 0);
-  --popover: oklch(0.165 0 0);
-  --popover-foreground: oklch(0.96 0 0);
-  --primary: oklch(0.84 0.16 86);
-  --primary-foreground: oklch(0.16 0 0);
-  --secondary: oklch(0.21 0 0);
-  --secondary-foreground: oklch(0.96 0 0);
-  --muted: oklch(0.21 0 0);
-  --muted-foreground: oklch(0.72 0 0);
-  --accent: oklch(0.21 0 0);
-  --accent-foreground: oklch(0.96 0 0);
+  --background: oklch(0.165 0.014 72);
+  --foreground: oklch(0.93 0.03 92);
+  --card: oklch(0.205 0.018 72);
+  --card-foreground: oklch(0.93 0.03 92);
+  --popover: oklch(0.205 0.018 72);
+  --popover-foreground: oklch(0.93 0.03 92);
+  --primary: oklch(0.83 0.172 78);
+  --primary-foreground: oklch(0.19 0.035 70);
+  --secondary: oklch(0.255 0.022 72);
+  --secondary-foreground: oklch(0.93 0.03 92);
+  --muted: oklch(0.255 0.022 72);
+  --muted-foreground: oklch(0.75 0.04 88);
+  --accent: oklch(0.255 0.022 72);
+  --accent-foreground: oklch(0.93 0.03 92);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 16%);
-  --input: oklch(1 0 0 / 20%);
-  --ring: oklch(0.7 0.15 80);
-  --chart-1: oklch(0.84 0.16 86);
-  --chart-2: oklch(0.7 0 0);
-  --chart-3: oklch(0.55 0 0);
-  --chart-4: oklch(0.42 0 0);
-  --chart-5: oklch(0.3 0 0);
-  --sidebar: oklch(0.15 0 0);
-  --sidebar-foreground: oklch(0.96 0 0);
-  --sidebar-primary: oklch(0.84 0.16 86);
-  --sidebar-primary-foreground: oklch(0.16 0 0);
-  --sidebar-accent: oklch(0.21 0 0);
-  --sidebar-accent-foreground: oklch(0.96 0 0);
-  --sidebar-border: oklch(1 0 0 / 16%);
-  --sidebar-ring: oklch(0.7 0.15 80);
-  --code: oklch(0.09 0 0);
-  --code-foreground: oklch(0.93 0 0);
+  --border: oklch(0.88 0.09 85 / 17%);
+  --input: oklch(0.88 0.09 85 / 22%);
+  --ring: oklch(0.7 0.15 78);
+  --chart-1: oklch(0.83 0.172 78);
+  --chart-2: oklch(0.7 0.035 88);
+  --chart-3: oklch(0.55 0.03 80);
+  --chart-4: oklch(0.42 0.028 75);
+  --chart-5: oklch(0.3 0.022 72);
+  --sidebar: oklch(0.185 0.016 72);
+  --sidebar-foreground: oklch(0.93 0.03 92);
+  --sidebar-primary: oklch(0.83 0.172 78);
+  --sidebar-primary-foreground: oklch(0.19 0.035 70);
+  --sidebar-accent: oklch(0.255 0.022 72);
+  --sidebar-accent-foreground: oklch(0.93 0.03 92);
+  --sidebar-border: oklch(0.88 0.09 85 / 17%);
+  --sidebar-ring: oklch(0.7 0.15 78);
+  --code: oklch(0.125 0.011 72);
+  --code-foreground: oklch(0.94 0.022 92);
+}
+
+/*
+ * A bee's own stripes, for the one place a page shows how far along
+ * something is. Not a border and not a background for text.
+ */
+@utility bee-stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--primary) 0 6px,
+    var(--primary-foreground) 6px 12px
+  );
+}
+
+/* A cell of comb, point up: step markers and the dot before a pane's name. */
+@utility hex {
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
 
 @layer base {

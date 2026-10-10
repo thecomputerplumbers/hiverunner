@@ -29,8 +29,8 @@ export function Panel({
       {...props}
     >
       <header className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 font-mono text-xs sm:px-6">
-        <h2 className="flex items-center gap-2 font-medium">
-          <span aria-hidden="true" className="size-1.5 bg-primary" />
+        <h2 className="flex items-center gap-2.5 text-[0.8125rem] font-normal">
+          <span aria-hidden="true" className="h-2.5 w-2 bg-primary hex" />
           {title}
         </h2>
         {aside ? (
