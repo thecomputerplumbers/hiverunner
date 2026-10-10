@@ -12,9 +12,12 @@ import { CopyButton } from "@/components/console/invite"
 export function AgentPrompt({
   prompt,
   quiet,
+  bare,
   className,
 }: {
   prompt: string
+  /** Inside a pane that already names it: no frame and no heading. */
+  bare?: boolean
   /** Beside a page's own main button, this one steps back to an outline. */
   quiet?: boolean
   className?: string
@@ -23,16 +26,19 @@ export function AgentPrompt({
     <section
       aria-label="Set up with your agent"
       className={cn(
-        "flex flex-col gap-4 border border-border bg-card/50 p-4 sm:p-6",
+        "flex flex-col gap-4",
+        !bare && "border border-border bg-card/50 p-4 sm:p-6",
         className
       )}
     >
       <div className="flex flex-col gap-2">
-        <h2 className="flex items-center gap-2.5 font-mono text-[0.8125rem]">
-          <span aria-hidden="true" className="h-2.5 w-2 bg-primary hex" />
-          or let your agent set it up
-        </h2>
-        <p className="text-sm leading-6 text-muted-foreground">
+        {bare ? null : (
+          <h2 className="flex items-center gap-2.5 font-mono text-[0.8125rem]">
+            <span aria-hidden="true" className="h-2.5 w-2 bg-primary hex" />
+            or let your agent set it up
+          </h2>
+        )}
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
           Paste one prompt into Claude Code, Cursor or Codex. It connects to
           HiveWorker, tells you the few things only you can do, and makes the
           workflow change.

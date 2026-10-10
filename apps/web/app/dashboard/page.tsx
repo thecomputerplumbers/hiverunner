@@ -14,6 +14,7 @@ import { ActionButton } from "@/components/action-button"
 import { Notice, Panel, Snippet } from "@/components/console/panel"
 import { HexMark } from "@/components/hex-mark"
 import { RunnerSizes } from "@/components/console/runner-sizes"
+import { SetupTabs } from "@/components/console/setup-tabs"
 import { WorkflowDiff } from "@/components/marketing/workflow-diff"
 import { getDb } from "@/db"
 import { NoHiveSteps } from "@/components/no-hive-steps"
@@ -96,18 +97,16 @@ export default async function DashboardPage({
       )}
 
       {!ready && (
-        <>
-          <FirstJob
-            machines={live.machines.length}
-            online={online}
-            jobs={live.recent.length}
-            organization={installation.accountLogin}
-            organizationId={organizationId}
-            elsewhere={elsewhere}
-            owner={owner}
-          />
-          <AgentPrompt prompt={setupPrompt(env.APP_URL)} />
-        </>
+        <FirstJob
+          machines={live.machines.length}
+          online={online}
+          jobs={live.recent.length}
+          organization={installation.accountLogin}
+          organizationId={organizationId}
+          elsewhere={elsewhere}
+          owner={owner}
+          agentPrompt={setupPrompt(env.APP_URL)}
+        />
       )}
 
       <LiveDashboard
@@ -153,6 +152,7 @@ function FirstJob({
   organizationId,
   elsewhere,
   owner,
+  agentPrompt,
 }: {
   machines: number
   online: number
@@ -163,6 +163,8 @@ function FirstJob({
   elsewhere: Array<{ id: string; name: string; model: string }>
   /** Credit and cards are the owners' business; a member is not told of them. */
   owner: boolean
+  /** The prompt that has a coding agent do these steps instead. */
+  agentPrompt: string
 }) {
   const steps = [
     {
@@ -280,52 +282,57 @@ function FirstJob({
       }
       flush
     >
-      <ol className="divide-y divide-border">
-        {steps.map((step, index) => (
-          <li key={step.title} className="flex gap-4 px-4 py-5 sm:px-6">
-            <HexMark
-              n={index + 1}
-              state={step.done ? "done" : index === next ? "next" : "todo"}
-            />
-            {step.body ? (
-              <details
-                open={index === next}
-                className="group min-w-0 flex-1 pt-1"
-              >
-                <summary
-                  className={cn(
-                    "flex cursor-pointer list-none items-baseline justify-between gap-3 outline-none focus-visible:underline [&::-webkit-details-marker]:hidden",
-                    index === next ? "font-medium" : "text-muted-foreground"
-                  )}
-                >
-                  <span>
+      <SetupTabs
+        byHand={
+          <ol className="divide-y divide-border">
+            {steps.map((step, index) => (
+              <li key={step.title} className="flex gap-4 px-4 py-5 sm:px-6">
+                <HexMark
+                  n={index + 1}
+                  state={step.done ? "done" : index === next ? "next" : "todo"}
+                />
+                {step.body ? (
+                  <details
+                    open={index === next}
+                    className="group min-w-0 flex-1 pt-1"
+                  >
+                    <summary
+                      className={cn(
+                        "flex cursor-pointer list-none items-baseline justify-between gap-3 outline-none focus-visible:underline [&::-webkit-details-marker]:hidden",
+                        index === next ? "font-medium" : "text-muted-foreground"
+                      )}
+                    >
+                      <span>
+                        <span className="sr-only">
+                          {step.done ? "Done: " : "To do: "}
+                        </span>
+                        {step.title}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className="font-mono text-xs font-normal text-muted-foreground group-open:hidden"
+                      >
+                        show
+                      </span>
+                    </summary>
+                    <div className="mt-3 flex max-w-3xl flex-col gap-3 text-sm text-muted-foreground">
+                      {step.body}
+                    </div>
+                  </details>
+                ) : (
+                  <p className="min-w-0 flex-1 pt-1 text-muted-foreground">
                     <span className="sr-only">
                       {step.done ? "Done: " : "To do: "}
                     </span>
                     {step.title}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="font-mono text-xs font-normal text-muted-foreground group-open:hidden"
-                  >
-                    show
-                  </span>
-                </summary>
-                <div className="mt-3 flex max-w-3xl flex-col gap-3 text-sm text-muted-foreground">
-                  {step.body}
-                </div>
-              </details>
-            ) : (
-              <p className="min-w-0 flex-1 pt-1 text-muted-foreground">
-                <span className="sr-only">
-                  {step.done ? "Done: " : "To do: "}
-                </span>
-                {step.title}
-              </p>
-            )}
-          </li>
-        ))}
-      </ol>
+                  </p>
+                )}
+              </li>
+            ))}
+          </ol>
+        }
+        withAgent={<AgentPrompt prompt={agentPrompt} bare />}
+      />
     </Panel>
   )
 }
