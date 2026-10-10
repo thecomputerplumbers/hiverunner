@@ -4,13 +4,13 @@ import { Container } from "@workspace/ui-shell/components/page-header"
 import {
   JOB_TAX_RATE,
   RUNNER_SIZES,
+  TRIAL_GRANT_USD,
   competitorUsdPerMinute,
   privatePoolUsdPerMinute,
 } from "@workspace/pricing"
 import { HexMark } from "@/components/hex-mark"
 import { Code, CodeBlock } from "@/components/marketing/code"
 import { CostChart } from "@/components/marketing/cost-chart"
-import { EarlyAccessNote } from "@/components/marketing/early-access"
 import { formatMultiple, formatRate } from "@/components/marketing/format"
 import { HiveComb } from "@/components/marketing/hive-comb"
 import { IsolationDiagram } from "@/components/marketing/isolation-diagram"
@@ -74,7 +74,6 @@ export default function HomePage() {
                 Read the docs
               </Button>
             </div>
-            <EarlyAccessNote className="mt-8 max-w-xl" />
           </div>
           <div className="border border-border">
             <p className="border-b border-border px-4 py-2.5 font-mono text-xs text-muted-foreground">
@@ -234,8 +233,8 @@ export default function HomePage() {
               Try it on one workflow.
             </h2>
             <p className="mt-3 text-lg leading-8">
-              Every new organization starts with a trial grant. HiveWorker is in
-              early access, so installs are not open to everyone yet.
+              Every new organization starts with ${TRIAL_GRANT_USD} of credit,
+              and no card is needed.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">

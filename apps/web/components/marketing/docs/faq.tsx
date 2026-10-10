@@ -9,7 +9,7 @@ export function Faq() {
       <dt>Is HiveWorker available now?</dt>
       <dd>
         {DAEMON_RELEASED
-          ? "It is in early access. The daemon is released for Apple Silicon Macs."
+          ? "Yes. An organization owner installs the GitHub App, and the daemon is released for Apple Silicon Macs and Linux machines with KVM."
           : "Not generally. It is in early access and the daemon has not been released. These docs describe how it is designed to work."}
       </dd>
 

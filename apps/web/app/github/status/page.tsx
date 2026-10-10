@@ -36,8 +36,8 @@ const states: Record<string, { title: string; body: string; retry?: boolean }> =
       retry: true,
     },
     unconfigured: {
-      title: "Not open yet",
-      body: "HiveWorker is in early access and installation is not open on this site yet.",
+      title: "Not set up here",
+      body: "Installation is not set up on this site.",
     },
     invalid: {
       title: "That link is incomplete",

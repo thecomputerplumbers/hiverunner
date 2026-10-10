@@ -159,8 +159,8 @@ export default function SecurityPage() {
           </Fact>
         </Facts>
         <p className="text-sm leading-7 text-muted-foreground">
-          HiveWorker is in early access and has not had an external security
-          audit. To report a problem, write to{" "}
+          HiveWorker has not had an external security audit. To report a
+          problem, write to{" "}
           <a href={`mailto:${product.supportEmail}`} className={textLink}>
             {product.supportEmail}
           </a>

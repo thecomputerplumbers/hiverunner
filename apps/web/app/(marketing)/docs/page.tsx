@@ -1,6 +1,5 @@
 import Link from "next/link"
 import { DOCS } from "@/components/marketing/docs"
-import { EarlyAccessNote } from "@/components/marketing/early-access"
 
 export const metadata = {
   title: "Docs",
@@ -17,7 +16,6 @@ export default function DocsIndexPage() {
       <p className="mt-4 max-w-2xl text-lg leading-8 text-muted-foreground">
         How to set HiveWorker up and how each part behaves.
       </p>
-      <EarlyAccessNote className="mt-6 max-w-2xl" />
       <ul className="mt-8 max-w-2xl border-b border-border">
         {DOCS.map((doc) => (
           <li key={doc.slug} className="border-t border-border">
