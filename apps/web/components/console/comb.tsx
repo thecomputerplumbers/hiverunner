@@ -48,6 +48,7 @@ function layout(count: number) {
 export const PRESENCE: Record<string, string> = {
   busy: "running a job",
   online: "ready",
+  draining: "finishing up",
   paused: "paused by its owner",
   offline: "offline",
 }
@@ -316,19 +317,33 @@ export function CombVersions({
   )
 }
 
-/** The pool's four states, with how many Macs are in each. */
-export function CombLegend({ machines }: { machines: LiveMachine[] }) {
+/** The states the pool's Macs are in now, with how many are in each. */
+export function CombLegend({
+  machines,
+  running = [],
+}: {
+  machines: LiveMachine[]
+  /** A Mac with a job here is counted as running one, as its cell is drawn. */
+  running?: LiveJob[]
+}) {
+  const working = new Set(running.map((job) => job.machineId))
   const count = (presence: string) =>
-    machines.filter((machine) => machine.presence === presence).length
+    machines.filter(
+      (machine) =>
+        (working.has(machine.id) ? "busy" : machine.presence) === presence
+    ).length
   const rows: Array<[string, string, string]> = [
     ["busy", "running a job", "border-primary bg-primary"],
     ["online", "ready", "border-primary/70 bg-primary/10"],
+    ["draining", "finishing up", "border-foreground/20 bg-foreground/[0.03]"],
     ["paused", "paused", "border-dashed border-foreground/45"],
     ["offline", "offline", "border-foreground/20 bg-foreground/[0.03]"],
   ]
+  const present = rows.filter(([presence]) => count(presence) > 0)
+  if (!present.length) return null
   return (
-    <ul className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
-      {rows.map(([presence, label, swatch]) => (
+    <ul className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-xs text-muted-foreground">
+      {present.map(([presence, label, swatch]) => (
         <li key={presence} className="flex items-center gap-1.5">
           <span aria-hidden="true" className={cn("size-2.5 border", swatch)} />
           <span className="text-foreground tabular-nums">

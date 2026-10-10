@@ -11,11 +11,14 @@ export function Panel({
   children,
   className,
   bodyClassName,
+  flush,
   ...props
 }: Omit<ComponentProps<"section">, "title"> & {
   title: ReactNode
   aside?: ReactNode
   bodyClassName?: string
+  /** No padding: the body is rows that run edge to edge and pad themselves. */
+  flush?: boolean
 }) {
   return (
     <section
@@ -25,7 +28,7 @@ export function Panel({
       )}
       {...props}
     >
-      <header className="flex min-h-10 items-center justify-between gap-3 border-b border-border px-5 font-mono text-xs">
+      <header className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 font-mono text-xs sm:px-6">
         <h2 className="flex items-center gap-2 font-medium">
           <span aria-hidden="true" className="size-1.5 bg-primary" />
           {title}
@@ -36,7 +39,9 @@ export function Panel({
           </div>
         ) : null}
       </header>
-      <div className={cn("flex-1 p-5", bodyClassName)}>{children}</div>
+      <div className={cn("flex-1", !flush && "p-4 sm:p-6", bodyClassName)}>
+        {children}
+      </div>
     </section>
   )
 }

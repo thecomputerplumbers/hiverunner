@@ -141,14 +141,14 @@ export function ConsoleShell({
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-8 pb-20 sm:px-6">
-        <h1 className="mb-6 flex items-baseline gap-2 font-mono text-lg font-medium tracking-tight">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-10 pb-24 sm:px-6">
+        <h1 className="mb-8 flex items-baseline gap-2 font-mono text-lg font-medium tracking-tight">
           <span aria-hidden="true" className="text-primary">
             ~/
           </span>
           {title}
         </h1>
-        <div className="flex flex-col gap-8">{children}</div>
+        <div className="flex flex-col gap-8 sm:gap-10">{children}</div>
       </main>
 
       <StatusLine pool={organization?.name} />

@@ -74,7 +74,7 @@ export function JoinPool({
             running={snapshot.running}
             seat={joined ? undefined : { label: "yours" }}
           />
-          <CombLegend machines={snapshot.machines} />
+          <CombLegend machines={snapshot.machines} running={snapshot.running} />
           <p className="font-mono text-xs text-muted-foreground">
             {slots} jobs at once across {snapshot.machines.length}{" "}
             {snapshot.machines.length === 1 ? "Mac" : "Macs"}

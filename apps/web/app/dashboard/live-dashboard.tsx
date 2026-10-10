@@ -4,9 +4,11 @@ import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { RUNNER_SIZES, privatePoolUsdPerMinute } from "@workspace/pricing"
+import { cn } from "@workspace/ui/lib/utils"
 
 import { CombLegend, CombVersions, PoolComb } from "@/components/console/comb"
 import {
+  behind,
   formatMinutes,
   formatMoney,
   formatUsd,
@@ -14,7 +16,7 @@ import {
 import { InvitePanel } from "@/components/console/invite"
 import { JobTable, RunningJobs } from "@/components/console/jobs"
 import { useLive } from "@/components/console/live"
-import { Panel, Snippet } from "@/components/console/panel"
+import { Panel } from "@/components/console/panel"
 
 /**
  * The pool, now. Everything here redraws from the polled snapshot; the
@@ -52,54 +54,79 @@ export function LiveDashboard({
     Math.floor(balance / 1_000_000 / privatePoolUsdPerMinute(size.vcpus).net)
   )
   const worked = lifetime.jobs > 0
+  // Until a job has started the checklist above is the page, so there is no
+  // total to show yet, no pane of running jobs to keep empty beside the hive,
+  // and no empty comb before the first Mac.
+  const started = worked || running.length > 0
+  const stale = machines.some((machine) =>
+    behind(machine.daemonVersion, released)
+  )
 
   return (
     <>
-      <Savings lifetime={lifetime} />
+      {worked ? <Savings lifetime={lifetime} /> : null}
 
-      <div className="grid gap-6 lg:grid-cols-5">
-        <Panel
-          title="hive"
-          aside={
-            <Link href="/machines" className="hover:text-foreground">
-              {machines.length} {machines.length === 1 ? "Mac" : "Macs"}
-            </Link>
-          }
-          className="lg:col-span-3"
-          bodyClassName="flex flex-col gap-5"
-        >
-          <PoolComb
-            machines={machines}
-            running={running}
-            seat={{ label: "+ invite", href: "#invite" }}
-            released={released}
-          />
-          <CombLegend machines={machines} />
-          <CombVersions machines={machines} released={released} />
-        </Panel>
-        <Panel
-          title="running now"
-          aside={<span className="tabular-nums">{running.length}</span>}
-          className="lg:col-span-2"
-        >
-          <RunningJobs jobs={running} earnsBack={earnsBack} />
-        </Panel>
-      </div>
-
-      <InvitePanel machines={machines} {...invite} />
+      {machines.length || started ? (
+        <div className={cn("grid gap-8", started && "lg:grid-cols-5")}>
+          <Panel
+            title="your hive"
+            aside={
+              <Link href="/machines" className="hover:text-foreground">
+                {machines.length} {machines.length === 1 ? "Mac" : "Macs"}
+              </Link>
+            }
+            className={started ? "lg:col-span-3" : undefined}
+            bodyClassName="flex flex-col gap-6"
+          >
+            <PoolComb
+              machines={machines}
+              running={running}
+              seat={
+                machines.length
+                  ? { label: "+ invite", href: "#invite" }
+                  : { label: "your Mac" }
+              }
+              released={released}
+            />
+            <CombLegend machines={machines} running={running} />
+            {stale ? (
+              <CombVersions machines={machines} released={released} />
+            ) : null}
+          </Panel>
+          {started ? (
+            <Panel
+              title="running now"
+              aside={<span className="tabular-nums">{running.length}</span>}
+              className="lg:col-span-2"
+            >
+              <RunningJobs jobs={running} earnsBack={earnsBack} />
+            </Panel>
+          ) : null}
+        </div>
+      ) : null}
 
       {worked ? (
         <Panel
           title="latest jobs"
           aside={
-            <Link href="/jobs" className="hover:text-foreground">
-              all jobs
-            </Link>
+            <>
+              <Link
+                href="/docs/labels-and-sizes"
+                className="hover:text-foreground"
+              >
+                runs-on labels
+              </Link>
+              <Link href="/jobs" className="hover:text-foreground">
+                all jobs
+              </Link>
+            </>
           }
         >
           <JobTable jobs={recent.slice(0, 6)} earnsBack={earnsBack} />
         </Panel>
       ) : null}
+
+      <InvitePanel machines={machines} {...invite} />
 
       <p className="text-sm text-muted-foreground">
         <span className="font-mono text-foreground tabular-nums">
@@ -114,16 +141,14 @@ export function LiveDashboard({
           {balance > 0 ? "Billing" : "Add funds"}
         </Link>
       </p>
-
-      {worked ? null : <Workflow />}
     </>
   )
 }
 
 /**
- * The one number the page is for: what this pool has kept, against the list
- * price of the same minutes on GitHub-hosted runners. Two bars to the same
- * scale say the rest.
+ * The one number the page is for once jobs have run: what this pool has
+ * kept, against the list price of the same minutes on GitHub-hosted runners.
+ * Two bars to the same scale say the rest.
  */
 function Savings({
   lifetime,
@@ -139,7 +164,7 @@ function Savings({
   return (
     <section
       aria-label="Savings"
-      className="grid items-end gap-x-12 gap-y-6 py-4 lg:grid-cols-2"
+      className="grid items-end gap-x-12 gap-y-6 py-2 lg:grid-cols-2"
     >
       <div className="flex flex-col gap-2">
         <p className="font-mono text-sm text-muted-foreground">saved so far</p>
@@ -181,46 +206,5 @@ function Savings({
         </dl>
       ) : null}
     </section>
-  )
-}
-
-function Workflow() {
-  const size = RUNNER_SIZES[0]
-  return (
-    <Panel
-      title="use it in a workflow"
-      bodyClassName="grid gap-6 md:grid-cols-2"
-    >
-      <div className="flex flex-col gap-3">
-        <Snippet>{`jobs:\n  test:\n    runs-on: ${size.label}`}</Snippet>
-        <p className="text-sm text-muted-foreground">
-          Change one line. Jobs wait in GitHub&apos;s queue until a Mac in your
-          hive is free.
-        </p>
-      </div>
-      <table className="h-fit w-full font-mono text-xs">
-        <thead>
-          <tr className="text-left text-muted-foreground [&>th]:pb-2 [&>th]:font-normal">
-            <th>runs-on</th>
-            <th>vCPUs</th>
-            <th className="text-right">per minute</th>
-          </tr>
-        </thead>
-        <tbody>
-          {RUNNER_SIZES.map((runner) => (
-            <tr
-              key={runner.label}
-              className="border-t border-border [&>td]:py-2"
-            >
-              <td className="text-primary">{runner.label}</td>
-              <td>{runner.vcpus}</td>
-              <td className="text-right tabular-nums">
-                ${privatePoolUsdPerMinute(runner.vcpus).net.toFixed(5)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Panel>
   )
 }

@@ -16,15 +16,11 @@ export default async function Page() {
       <Panel title="profile" className="max-w-3xl">
         <AccountForm name={current.user.name} />
       </Panel>
-      <Panel
-        title="signed-in devices"
-        className="max-w-3xl"
-        bodyClassName="p-0"
-      >
+      <Panel title="signed-in devices" className="max-w-3xl" flush>
         <ul className="divide-y divide-border">
           {sessions.map((session) => (
             <li
-              className="flex flex-wrap items-center justify-between gap-3 p-4"
+              className="flex flex-wrap items-center justify-between gap-3 p-4 sm:px-6"
               key={session.id}
             >
               <div className="min-w-0 flex-1">

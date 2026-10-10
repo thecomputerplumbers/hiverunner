@@ -69,12 +69,12 @@ export default async function JobPage({
         <span className="text-muted-foreground">{job.id}</span>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="run" bodyClassName="p-0">
+        <Panel title="run" flush>
           <dl className="divide-y divide-border font-mono text-xs">
             {facts.map(([label, value]) => (
               <div
                 key={label}
-                className="flex justify-between gap-4 px-4 py-2.5"
+                className="flex justify-between gap-4 px-4 py-2.5 sm:px-6"
               >
                 <dt className="text-muted-foreground">{label}</dt>
                 <dd className="text-right tabular-nums">{value}</dd>

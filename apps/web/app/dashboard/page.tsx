@@ -6,10 +6,12 @@ import { getLiveSnapshot } from "@workspace/db/live"
 import { listUserMachines } from "@workspace/db/machines"
 import { getPoolSettings } from "@workspace/db/settings"
 import { roleAtLeast } from "@workspace/auth"
+import { cn } from "@workspace/ui/lib/utils"
 
 import { AccountPage } from "@/components/account-page"
 import { ActionButton } from "@/components/action-button"
 import { Notice, Panel, Snippet } from "@/components/console/panel"
+import { RunnerSizes } from "@/components/console/runner-sizes"
 import { getDb } from "@/db"
 import { NoHiveSteps } from "@/components/no-hive-steps"
 import {
@@ -58,7 +60,7 @@ export default async function DashboardPage({
         <Notice>
           HiveWorker is installed on{" "}
           <strong>{installation.accountLogin}</strong>, with ${TRIAL_GRANT_USD}{" "}
-          of credit to start. Two steps to your first job.
+          of credit to start. The steps to your first job are below.
         </Notice>
       )}
       {installation.status !== "active" && (
@@ -97,6 +99,7 @@ export default async function DashboardPage({
           organization={installation.accountLogin}
           organizationId={organizationId}
           elsewhere={elsewhere}
+          owner={owner}
         />
       )}
 
@@ -142,6 +145,7 @@ function FirstJob({
   organization,
   organizationId,
   elsewhere,
+  owner,
 }: {
   machines: number
   online: number
@@ -150,15 +154,20 @@ function FirstJob({
   organizationId: string
   /** The caller's own machines, serving other hives and not this one. */
   elsewhere: Array<{ id: string; name: string; model: string }>
+  /** Credit and cards are the owners' business; a member is not told of them. */
+  owner: boolean
 }) {
   const steps = [
     {
       done: true,
-      title: `HiveWorker is installed on ${organization}, with $${TRIAL_GRANT_USD} of credit and no card needed`,
+      title: owner
+        ? `HiveWorker is installed on ${organization}, with $${TRIAL_GRANT_USD} of credit and no card needed`
+        : `HiveWorker is installed on ${organization}`,
       body: null,
     },
     {
-      done: machines > 0,
+      // A Mac that is not connected takes no job, so it is not done yet.
+      done: online > 0,
       title:
         machines > 0
           ? online > 0
@@ -226,16 +235,23 @@ function FirstJob({
       title: "Change one line in a workflow",
       body: (
         <>
-          <Snippet>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</Snippet>
+          <div className="grid items-start gap-6 md:grid-cols-2">
+            <Snippet>{`jobs:\n  test:\n    runs-on: ${RUNNER_SIZES[0].label}`}</Snippet>
+            <RunnerSizes />
+          </div>
           <p>
-            Push it, and the job runs on your Mac. This page updates when it
-            does.
+            Push it, and the job runs on a Mac in your hive. This page updates
+            when it does. If it is still queued after a minute, check the label
+            and that a Mac shows ready below.
           </p>
         </>
       ),
     },
   ]
   const done = steps.filter((step) => step.done).length
+  // One thing to do at a time: only the next step is open. The rest can be
+  // opened, so the workflow line is there for someone preparing it early.
+  const next = steps.findIndex((step) => !step.done)
   return (
     <Panel
       title="Get your first job running"
@@ -244,11 +260,11 @@ function FirstJob({
           {done} of {steps.length} done
         </span>
       }
-      bodyClassName="p-0"
+      flush
     >
       <ol className="divide-y divide-border">
         {steps.map((step, index) => (
-          <li key={step.title} className="flex gap-3 p-4">
+          <li key={step.title} className="flex gap-4 px-4 py-5 sm:px-6">
             <span
               aria-hidden="true"
               className={
@@ -259,21 +275,39 @@ function FirstJob({
             >
               {step.done ? "✓" : index + 1}
             </span>
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <p
-                className={step.done ? "text-muted-foreground" : "font-medium"}
-              >
+            {step.body ? (
+              <details open={index === next} className="group min-w-0 flex-1">
+                <summary
+                  className={cn(
+                    "flex cursor-pointer list-none items-baseline justify-between gap-3 outline-none focus-visible:underline [&::-webkit-details-marker]:hidden",
+                    index === next ? "font-medium" : "text-muted-foreground"
+                  )}
+                >
+                  <span>
+                    <span className="sr-only">
+                      {step.done ? "Done: " : "To do: "}
+                    </span>
+                    {step.title}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="font-mono text-xs font-normal text-muted-foreground group-open:hidden"
+                  >
+                    show
+                  </span>
+                </summary>
+                <div className="mt-3 flex max-w-3xl flex-col gap-3 text-sm text-muted-foreground">
+                  {step.body}
+                </div>
+              </details>
+            ) : (
+              <p className="min-w-0 flex-1 text-muted-foreground">
                 <span className="sr-only">
                   {step.done ? "Done: " : "To do: "}
                 </span>
                 {step.title}
               </p>
-              {step.body && (!step.done || (index === 1 && online === 0)) ? (
-                <div className="flex max-w-2xl flex-col gap-2 text-sm text-muted-foreground">
-                  {step.body}
-                </div>
-              ) : null}
-            </div>
+            )}
           </li>
         ))}
       </ol>
