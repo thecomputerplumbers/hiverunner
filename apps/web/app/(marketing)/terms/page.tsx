@@ -178,11 +178,11 @@ export default function TermsPage() {
 
           <h2>16. Governing law</h2>
           <p>
-            These terms are governed by the laws of the state in which {COMPANY}{" "}
-            is organized, without regard to its conflict of laws rules, and the
-            courts located there have exclusive jurisdiction over disputes about
-            them, except where the law of your own place gives you rights that
-            cannot be waived.
+            These terms are governed by the laws of the State of Utah, without
+            regard to its conflict of laws rules, and the state and federal
+            courts located in Utah have exclusive jurisdiction over disputes
+            about them, except where the law of your own place gives you rights
+            that cannot be waived.
           </p>
 
           <h2>17. Changes to these terms</h2>
