@@ -46,8 +46,9 @@ export function Faq() {
       <dt>What happens if a laptop closes in the middle of a job?</dt>
       <dd>
         The job is stopped. It shows as failed in GitHub and can be re-run. If
-        the developer only starts using the machine, the job is slowed down and
-        allowed to finish.
+        the developer only starts using the machine, the job keeps running:
+        every job leaves two cores for the Mac's owner. <Code>hived pause</Code>{" "}
+        stops new jobs, and a job already running finishes.
       </dd>
 
       <dt>What happens when no machine is free?</dt>

@@ -33,8 +33,7 @@ export function StartTimeline({ className }: { className?: string }) {
         <span aria-hidden="true" className="hidden sm:block sm:flex-5" />
       </Track>
       <figcaption className="text-sm leading-6 text-muted-foreground">
-        The order of steps, not a benchmark. Each Mac keeps one VM booted, so
-        there is nothing to provision when a job arrives.
+        The order of steps, not a benchmark.
       </figcaption>
     </figure>
   )

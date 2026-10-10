@@ -68,6 +68,26 @@ export function Prose({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** A two-column list of short facts, or of questions and their answers. */
+export function Facts({ children }: { children: React.ReactNode }) {
+  return <dl className="grid gap-x-10 gap-y-6 sm:grid-cols-2">{children}</dl>
+}
+
+export function Fact({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="border-t border-border pt-4">
+      <dt className="font-mono text-sm font-medium">{title}</dt>
+      <dd className="mt-1.5 leading-7 text-muted-foreground">{children}</dd>
+    </div>
+  )
+}
+
 /** The link style for text outside `Prose`. */
 export const textLink =
   "underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground"

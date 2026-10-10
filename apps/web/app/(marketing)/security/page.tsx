@@ -1,7 +1,13 @@
 import { Container } from "@workspace/ui-shell/components/page-header"
 import { Code } from "@/components/marketing/code"
 import { IsolationDiagram } from "@/components/marketing/isolation-diagram"
-import { Band, PageIntro, textLink } from "@/components/marketing/page-parts"
+import {
+  Band,
+  Fact,
+  Facts,
+  PageIntro,
+  textLink,
+} from "@/components/marketing/page-parts"
 import product from "@/config/product.json"
 import { APP_EVENTS, APP_PERMISSIONS } from "@/components/marketing/site"
 
@@ -168,24 +174,5 @@ export default function SecurityPage() {
         </p>
       </Band>
     </>
-  )
-}
-
-function Facts({ children }: { children: React.ReactNode }) {
-  return <dl className="grid gap-x-10 gap-y-6 sm:grid-cols-2">{children}</dl>
-}
-
-function Fact({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="border-t border-border pt-4">
-      <dt className="font-mono text-sm font-medium">{title}</dt>
-      <dd className="mt-1.5 leading-7 text-muted-foreground">{children}</dd>
-    </div>
   )
 }
