@@ -168,8 +168,8 @@ agree before one runs:
   probes for it with no.
 
 The label's kind is `macos` in `@workspace/pricing`, beside the two
-architectures, and `serves()` in the coordinator's schedule is the one place
-that decides which machine is which kind. A job is billed as 4 vCPUs, the size
+architectures, and `machineServes` there is the one place that decides which
+machine is which kind; the coordinator's `serves()` calls it. A job is billed as 4 vCPUs, the size
 of GitHub's standard macOS runner, and compared with GitHub's price for it.
 
 Each job gets an APFS clone of the runner directory, GitHub's runner in it

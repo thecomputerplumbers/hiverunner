@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers"
 import { and, eq } from "drizzle-orm"
 import { account } from "@workspace/auth/schema"
 import { createGitHubApp, type GitHubApp } from "@workspace/github"
+import { safeReturnPath } from "@workspace/stripe"
 
 import { getDb } from "@/db"
 import { auth } from "@/lib/auth"
@@ -32,10 +33,25 @@ export function getGitHubApp() {
   }))
 }
 
-export function installUrl() {
-  return env.GITHUB_APP_SLUG
-    ? `https://github.com/apps/${encodeURIComponent(env.GITHUB_APP_SLUG)}/installations/new`
-    : null
+/**
+ * Where the App is installed. `state` comes back, untouched and so
+ * untrusted, on the setup URL GitHub returns the browser to.
+ */
+export function installUrl(state?: string) {
+  if (!env.GITHUB_APP_SLUG) return null
+  const url = `https://github.com/apps/${encodeURIComponent(env.GITHUB_APP_SLUG)}/installations/new`
+  return state ? `${url}?state=${encodeURIComponent(state)}` : url
+}
+
+/**
+ * The one place an install may return to other than the dashboard: the
+ * consent page of an agent's connection, which is where the person was when
+ * they found they had no hive. Anything else is ignored. The page checks the
+ * signed query itself, so a made-up one gets nowhere.
+ */
+export function consentReturnPath(value: string | null) {
+  const path = safeReturnPath(value, "")
+  return path.startsWith("/connect?") ? path : null
 }
 
 /**

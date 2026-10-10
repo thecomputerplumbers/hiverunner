@@ -4,32 +4,7 @@ import { Code, CodeBlock } from "../code"
 import { RouteDiagram } from "../route-diagram"
 import { DAEMON_RELEASED, INSTALL_COMMAND } from "../site"
 import { RouteLink } from "@/components/route-link"
-
-/**
- * The recommended workflow: ask for a free machine first, and use the
- * GitHub-hosted runner when there is none.
- */
-const ROUTED_WORKFLOW = `jobs:
-  route:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    outputs:
-      runner: \${{ steps.hive.outputs.runner }}
-    steps:
-      - id: hive
-        uses: thecomputerplumbers/hive-route@v1
-        with:
-          label: hive
-          fallback: ubuntu-latest
-
-  test:
-    needs: route
-    runs-on: \${{ needs.route.outputs.runner }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-      - run: bun test`
+import { ROUTED_WORKFLOW } from "@/lib/workflow"
 
 export function Quickstart() {
   return (

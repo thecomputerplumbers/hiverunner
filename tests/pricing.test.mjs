@@ -8,7 +8,9 @@ import {
   computeUnits,
   FLOOR_RATE,
   MACOS_RUNNER_SIZES,
+  machineServes,
   microTokensToUsd,
+  OWNER_CORES,
   priceJob,
   privatePoolUsdPerMinute,
   RUNNER_SIZES,
@@ -137,4 +139,24 @@ test("a top-up is any whole number of dollars within the limits", () => {
     Infinity,
   ])
     assert.equal(topUpAllowed(dollars), false, String(dollars))
+})
+
+test("a machine serves the kind its label names, and nothing else", () => {
+  assert.equal(OWNER_CORES, 2)
+  assert.equal(machineServes({ arch: "arm64" }, "arm64"), true)
+  assert.equal(machineServes({ arch: "arm64" }, "x64"), false)
+  assert.equal(machineServes({ arch: "x64" }, "x64"), true)
+  assert.equal(machineServes({ arch: "x64" }, "arm64"), false)
+  // A machine that does not say is arm64: all there was before there were two.
+  assert.equal(machineServes({}, "arm64"), true)
+  assert.equal(machineServes({ arch: null }, "arm64"), true)
+  assert.equal(machineServes({}, "x64"), false)
+  // macOS jobs need an Apple Silicon Mac whose owner opted in.
+  assert.equal(machineServes({ arch: "arm64", macos: true }, "macos"), true)
+  assert.equal(machineServes({ macos: true }, "macos"), true)
+  assert.equal(machineServes({ arch: "arm64" }, "macos"), false)
+  assert.equal(machineServes({ arch: "arm64", macos: false }, "macos"), false)
+  assert.equal(machineServes({ arch: "x64", macos: true }, "macos"), false)
+  // Opting in to macOS jobs does not stop a Mac taking Linux ones.
+  assert.equal(machineServes({ arch: "arm64", macos: true }, "arm64"), true)
 })

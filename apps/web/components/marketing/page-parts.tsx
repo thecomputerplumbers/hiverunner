@@ -55,6 +55,7 @@ export function Prose({ className, ...props }: React.ComponentProps<"div">) {
       className={cn(
         "max-w-[68ch] text-base leading-7",
         "[&_p]:my-4 [&_p]:text-pretty",
+        "[&_h3]:mt-7 [&_h3]:mb-2 [&_h3]:scroll-mt-28 [&_h3]:font-medium [&_h3]:text-foreground",
         "[&_h2]:mt-10 [&_h2]:mb-3 [&_h2]:scroll-mt-28 [&_h2]:font-heading [&_h2]:text-lg [&_h2]:font-medium [&_h2]:tracking-tight",
         "[&_li]:my-1.5 [&_li]:pl-1 [&_ol]:my-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-4 [&_ul]:list-disc [&_ul]:pl-5",
         "[&_li_a]:underline [&_li_a]:decoration-primary [&_li_a]:decoration-2 [&_li_a]:underline-offset-4 [&_p_a]:underline [&_p_a]:decoration-primary [&_p_a]:decoration-2 [&_p_a]:underline-offset-4",

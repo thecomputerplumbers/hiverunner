@@ -44,20 +44,20 @@ packages/pricing    Compute-unit math, floor, competitor rates        (new)
 packages/ui*        Unchanged
 packages/email      Kept for low-balance and revocation notices
 packages/stripe     Kept, reshaped in step 2 (see §9)
-packages/mcp        Kept, switched off
+packages/mcp        On: the MCP transport; the hive's tools are in apps/web/mcp
 ```
 
 ### What changes from the starter
 
-| Starter piece                                    | Action                                                                          |
-| ------------------------------------------------ | ------------------------------------------------------------------------------- |
-| Email + password, sign-up, verify, forgot, reset | Remove. GitHub is the only way in                                               |
-| Invitations, create/select organization, `/team` | Remove. Organizations come from GitHub App installs, members from GitHub        |
-| Projects example                                 | `features.projects: false` now; delete once `/machines` exists as the pattern   |
-| MCP + OAuth provider                             | `features.mcp: false`. Leave the code; revisit after v1                         |
-| Stripe subscriptions, plans, `/billing`          | `features.billing: false` in step 1. Becomes one-time token purchases in step 2 |
-| `apps/web/db/schema`                             | Move to `packages/db` so the coordinator shares it                              |
-| `AppDatabase` Durable Object                     | Keep in web for rate limits                                                     |
+| Starter piece                                    | Action                                                                              |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Email + password, sign-up, verify, forgot, reset | Remove. GitHub is the only way in                                                   |
+| Invitations, create/select organization, `/team` | Remove. Organizations come from GitHub App installs, members from GitHub            |
+| Projects example                                 | `features.projects: false` now; delete once `/machines` exists as the pattern       |
+| MCP + OAuth provider                             | On. `/mcp` serves a hive's state, prices and settings to agents, one hive per grant |
+| Stripe subscriptions, plans, `/billing`          | `features.billing: false` in step 1. Becomes one-time token purchases in step 2     |
+| `apps/web/db/schema`                             | Move to `packages/db` so the coordinator shares it                                  |
+| `AppDatabase` Durable Object                     | Keep in web for rate limits                                                         |
 
 `packages/pricing` is the single source for the floor, the rate, and the
 GitHub/Blacksmith comparison figures. The coordinator charges from it and the

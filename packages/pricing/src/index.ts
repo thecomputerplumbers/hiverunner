@@ -216,6 +216,26 @@ export function runnerArch(reported: unknown): RunnerArch | null {
   return null
 }
 
+/** Cores every job leaves for the machine's owner. */
+export const OWNER_CORES = 2
+
+/**
+ * Whether a machine is the kind a label names. An x64 job needs an x64
+ * machine; a macOS job needs an arm64 Mac whose owner opted in to running
+ * jobs on the Mac itself. A machine that does not say is arm64, which is all
+ * there was before there were two. This is the one place the rule is
+ * written: the coordinator's `serves` and the web's `get_hive` both call it,
+ * so everything that asks what a machine can take gets the same answer.
+ */
+export function machineServes(
+  machine: { arch?: RunnerArch | null; macos?: boolean },
+  arch: RunnerArch
+): boolean {
+  const own = machine.arch ?? "arm64"
+  if (arch === "macos") return own === "arm64" && machine.macos === true
+  return own === arch
+}
+
 export function usdToMicroTokens(usd: number) {
   return Math.round((usd / REFERENCE_USD_PER_TOKEN) * MICRO)
 }

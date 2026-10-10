@@ -1,6 +1,7 @@
 "use client"
 
 import type { LiveMachine } from "@workspace/db/live"
+import { OWNER_CORES } from "@workspace/pricing"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { ActionButton } from "@/components/action-button"
@@ -13,9 +14,6 @@ import {
 } from "@/components/console/format"
 import { ResultGlyph } from "@/components/console/jobs"
 import { useLive, useNow } from "@/components/console/live"
-
-/** Cores a Mac keeps for the person using it, as the coordinator does. */
-const OWNER_CORES = 2
 
 const dot: Record<string, string> = {
   busy: "bg-primary motion-safe:animate-pulse",

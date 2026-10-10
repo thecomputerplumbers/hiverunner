@@ -12,6 +12,10 @@ const states: Record<string, { title: string; body: string; retry?: boolean }> =
       title: "Waiting for an owner",
       body: "Your request was sent to your organization's owners on GitHub. HiveWorker is ready as soon as one of them approves it.",
     },
+    "requested-connection": {
+      title: "Waiting for an owner",
+      body: "Your request was sent to your organization's owners on GitHub. HiveWorker is ready as soon as one of them approves it. The connection you were approving will have expired by then: once an owner approves, restart it from your MCP client and sign in again.",
+    },
     personal: {
       title: "Organizations only, for now",
       body: "HiveWorker runs on GitHub organizations. Personal accounts are not supported yet. Install it on an organization instead.",

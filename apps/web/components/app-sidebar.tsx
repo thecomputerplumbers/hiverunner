@@ -4,6 +4,7 @@ import product from "@/config/product.json"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  Bot,
   Building2,
   CreditCard,
   LayoutDashboard,
@@ -38,6 +39,7 @@ const icons: Record<string, typeof Building2> = {
   projects: Folder,
   machines: Laptop,
   jobs: ListChecks,
+  agents: Bot,
 }
 const nav: NavItem[] = (
   product.navigation as Array<{

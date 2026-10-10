@@ -116,8 +116,45 @@ await redirectsTo(
   await fetch(`${origin}/install`, { redirect: "manual" }),
   "https://github.com/apps/hiveworker-smoke/installations/new"
 )
-for (const path of ["/billing", "/projects", "/mcp", "/connections"])
+// An install begun on an agent's consent page asks GitHub to carry the way
+// back; nothing else may ride along.
+const installAt = "https://github.com/apps/hiveworker-smoke/installations/new"
+await redirectsTo(
+  await fetch(
+    `${origin}/install?next=${encodeURIComponent("/connect?client_id=x")}`,
+    { redirect: "manual" }
+  ),
+  `${installAt}?state=%2Fconnect%3Fclient_id%3Dx`
+)
+for (const next of ["https://evil.example", "/dashboard", "//evil.example"])
+  await redirectsTo(
+    await fetch(`${origin}/install?next=${encodeURIComponent(next)}`, {
+      redirect: "manual",
+    }),
+    installAt
+  )
+for (const path of ["/billing", "/projects"])
   assert.equal((await fetch(`${origin}${path}`)).status, 404, path)
+// MCP is on: its pages want a session and its endpoint wants a token, and
+// says where a client finds out how to get one.
+await redirectsTo(
+  await fetch(`${origin}/connections`, { redirect: "manual" }),
+  "/sign-in",
+  307
+)
+{
+  const response = await fetch(`${origin}/mcp`, { method: "POST" })
+  assert.equal(response.status, 401)
+  assert.match(response.headers.get("www-authenticate"), /resource_metadata/)
+  // The body tells the agent behind the client what happens next.
+  const { error } = await response.json()
+  assert.equal(error.code, -32000)
+  assert.match(error.message, /Sign in required/)
+  assert.equal(error.data.docs, `${origin}/docs/agents`)
+  assert.equal(error.data.llms, `${origin}/llms.txt`)
+  assert.ok(error.data.steps.length > 0 && error.data.steps.length < 10)
+  assert.ok(error.data.steps.some((step) => step.includes("/install")))
+}
 // Returning before consuming a POST body made the local Workers proxy drop
 // about 5% of these requests. Exercise the actual HTTP boundary repeatedly;
 // a single request rarely catches it. None of these routes may mutate D1.
@@ -526,7 +563,7 @@ assert.equal(
   403
 )
 await tellGitHub({ teams: { "acme/ci": ["member"] } })
-const memberMachine = await json(
+let memberMachine = await json(
   await memberDaemon.daemon(
     "/api/machines",
     { ...mac, name: "Member's Mac mini", model: "Mac16,10" },
@@ -558,6 +595,373 @@ assert.equal(
 )
 console.log("Device sign-in, enrollment, team limits and removal rules passed.")
 
+// An agent connects over MCP: OAuth discovery, dynamic registration, PKCE and
+// consent bound to one hive, then real tool calls against the same state.
+const metadata = await json(
+  await fetch(`${origin}/.well-known/oauth-protected-resource`)
+)
+assert.equal(metadata.resource, `${origin}/mcp`)
+const serverMetadata = await json(
+  await fetch(`${origin}/.well-known/oauth-authorization-server/api/auth`)
+)
+const redirectUri = "https://client.example/callback"
+const readScope = "openid profile email offline_access hive:read"
+const fullScope = `${readScope} hive:write`
+const client = await json(
+  await fetch(serverMetadata.registration_endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Smoke client",
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      scope: fullScope,
+    }),
+  }),
+  201
+)
+/** Returns the tokens, or null when consent is expected to be refused. */
+async function connect(account, hive, scope = fullScope, consentStatus = 200) {
+  const verifier = crypto.randomUUID() + crypto.randomUUID()
+  const challenge = Buffer.from(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))
+  ).toString("base64url")
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: client.client_id,
+    redirect_uri: redirectUri,
+    scope,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    state: crypto.randomUUID(),
+    resource: `${origin}/mcp`,
+  })
+  const authorization = await account(
+    `${serverMetadata.authorization_endpoint}?${query}`
+  )
+  assert.ok([200, 302].includes(authorization.status))
+  const location =
+    authorization.status === 200
+      ? (await authorization.json()).url
+      : authorization.headers.get("location")
+  const consentUrl = new URL(location, origin)
+  assert.equal(consentUrl.pathname, "/connect")
+  // A hive the person is not in, and a scope the client did not sign.
+  assert.equal(
+    (
+      await account("/api/connect", {
+        accept: true,
+        organizationId: crypto.randomUUID(),
+        oauthQuery: consentUrl.search.slice(1),
+      })
+    ).status,
+    400
+  )
+  const tampered = new URLSearchParams(consentUrl.search)
+  tampered.set("scope", "hive:write")
+  assert.equal(
+    (
+      await account("/api/connect", {
+        accept: true,
+        organizationId: hive,
+        oauthQuery: tampered.toString(),
+      })
+    ).status,
+    400
+  )
+  const consented = await account("/api/connect", {
+    accept: true,
+    organizationId: hive,
+    oauthQuery: consentUrl.search.slice(1),
+  })
+  if (consentStatus !== 200) {
+    assert.equal(consented.status, consentStatus)
+    return null
+  }
+  const consent = await json(consented)
+  const code = new URL(consent.url).searchParams.get("code")
+  assert.ok(code)
+  const tokens = await json(
+    await fetch(serverMetadata.token_endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: client.client_id,
+        redirect_uri: redirectUri,
+        code,
+        code_verifier: verifier,
+        resource: `${origin}/mcp`,
+      }),
+    })
+  )
+  assert.ok(tokens.access_token)
+  return tokens
+}
+const refresh = (tokens) =>
+  fetch(serverMetadata.token_endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: client.client_id,
+      refresh_token: tokens.refresh_token,
+      resource: `${origin}/mcp`,
+    }),
+  })
+function rpc(token, name, args = {}) {
+  return fetch(`${origin}/mcp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": name === "list" ? "tools/list" : "tools/call",
+      ...(name === "list" ? {} : { "Mcp-Name": name }),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: crypto.randomUUID(),
+      method: name === "list" ? "tools/list" : "tools/call",
+      params: {
+        ...(name === "list" ? {} : { name, arguments: args }),
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
+    }),
+  })
+}
+/** A tool's structured result, which must not be an error. */
+async function tool(tokens, name, args) {
+  const { result } = await json(await rpc(tokens.access_token, name, args))
+  assert.equal(result.isError, undefined, JSON.stringify(result))
+  return result.structuredContent
+}
+/** A tool call that must come back as an error with this code. */
+async function refusedTool(tokens, name, args, code) {
+  const { result } = await json(await rpc(tokens.access_token, name, args))
+  assert.equal(result.isError, true, `${name} should have been refused`)
+  assert.equal(result.structuredContent.code, code, name)
+  assert.ok(result.structuredContent.requestId)
+}
+
+// Someone signed in but in no hive is shown the way to one, and back.
+{
+  const html = await page(outsider, `/connect?client_id=${client.client_id}`)
+  assert.ok(html.includes("/install?next="))
+  assert.ok(html.includes("/github/sync?next="))
+  assert.ok(
+    html.includes(encodeURIComponent(`/connect?client_id=${client.client_id}`))
+  )
+  const allow = html.match(/<button[^>]*>(?:<!-- -->)?Allow access/)
+  assert.ok(allow && /\sdisabled/.test(allow[0]), "Allow is disabled")
+  // The owner, who has a hive, is not sent anywhere.
+  assert.ok(
+    !(await page(owner, `/connect?client_id=${client.client_id}`)).includes(
+      "/install?next="
+    )
+  )
+}
+let tokens = await connect(owner, organizationId)
+const listed = (await json(await rpc(tokens.access_token, "list"))).result.tools
+for (const name of ["get_hive", "update_settings"])
+  assert.ok(
+    listed.some((each) => each.name === name),
+    name
+  )
+assert.ok(listed.every((each) => each.title && each.description))
+assert.ok(!listed.some((each) => each.name === "rename_organization"))
+assert.equal((await tool(tokens, "get_current_user")).user.id, "owner")
+assert.equal(
+  (await rpc(`${tokens.access_token.slice(0, -10)}invalidjwt`, "get_hive"))
+    .status,
+  401
+)
+
+let hive = await tool(tokens, "get_hive")
+assert.equal(hive.hive.login, "acme")
+assert.equal(hive.hive.id, organizationId)
+assert.equal(hive.hive.yourRole, "owner")
+assert.equal(hive.balance.usd, 5)
+assert.equal(hive.balance.microTokens, 5_000_000)
+assert.deepEqual(hive.settings.allowedTeams, ["ci"])
+assert.equal(hive.settings.version, 2)
+assert.equal(hive.machines.total, 2)
+assert.equal(hive.machines.offline, 2)
+assert.equal(hive.jobs.canStartNow, false)
+assert.equal(hive.jobs.blockedBy, "no-machine-online")
+assert.equal(hive.budget, null)
+// No card processor here, so automatic top-up is not offered at all.
+assert.equal("autoTopUp" in hive, false)
+assert.equal(hive.labels[0].label, "hive")
+assert.equal(hive.labels[0].machinesAbleNow, 0)
+assert.ok(!hive.labels.some((each) => each.label === "hive-macos"))
+assert.ok(hive.nextSteps.some((step) => step.includes("hived run")))
+assert.ok(hive.nextSteps.some((step) => step.includes("runs-on: hive")))
+assert.equal(hive.urls.wallet, `${origin}/wallet`)
+
+const machines = (await tool(tokens, "list_machines")).machines
+assert.deepEqual(machines.map((machine) => machine.name).sort(), [
+  "Ada's MacBook Pro",
+  "Member's Mac mini",
+])
+assert.ok(
+  machines.every(
+    (machine) => machine.arch === "arm64" && machine.os === "darwin"
+  )
+)
+assert.deepEqual((await tool(tokens, "list_jobs")).jobs, [])
+assert.deepEqual(
+  (await tool(tokens, "list_jobs", { status: "running", limit: 5 })).jobs,
+  []
+)
+await refusedTool(tokens, "get_job", { id: "gh-999:1" }, "NOT_FOUND")
+assert.equal((await tool(tokens, "get_usage")).totals.jobs, 0)
+assert.equal(
+  (await tool(tokens, "get_leaderboard", { period: "month" })).period,
+  "month"
+)
+
+let pricing = await tool(tokens, "get_pricing")
+assert.equal(pricing.labels[0].label, "hive")
+assert.equal("month" in pricing, false)
+pricing = await tool(tokens, "get_pricing", { minutes: 10000 })
+assert.ok(pricing.month.hiveUsd < pricing.month.blacksmithUsd)
+assert.ok(pricing.month.blacksmithUsd < pricing.month.githubUsd)
+assert.ok(pricing.month.cheaperThanGithubBy > 0)
+assert.ok(pricing.month.cheaperThanBlacksmithBy > 0)
+
+const workflow = await tool(tokens, "get_workflow", { label: "hive-4cpu" })
+assert.ok(workflow.yaml.includes("label: hive-4cpu"))
+assert.ok(workflow.yaml.includes("thecomputerplumbers/hive-route@v1"))
+assert.ok(
+  (
+    await tool(tokens, "get_workflow", { label: "hive", routed: false })
+  ).yaml.includes("runs-on: hive")
+)
+assert.equal(
+  (await tool(tokens, "set_budget", { monthlyUsd: 50, atLimit: "pause" }))
+    .budget.monthlyUsd,
+  50
+)
+hive = await tool(tokens, "get_hive")
+assert.equal(hive.budget.monthlyUsd, 50)
+assert.equal(hive.budget.atLimit, "pause")
+assert.equal(hive.budget.held, false)
+assert.equal(
+  (await tool(tokens, "set_budget", { monthlyUsd: null })).budget,
+  null
+)
+assert.equal((await tool(tokens, "get_hive")).budget, null)
+
+const saved = await tool(tokens, "update_settings", { routing: "spread" })
+assert.equal(saved.settings.version, 3)
+assert.equal(saved.settings.routing, "spread")
+// Only what was passed changed.
+assert.deepEqual(saved.settings.allowedTeams, ["ci"])
+assert.equal(saved.settings.earningsDestination, "developer")
+await refusedTool(
+  tokens,
+  "update_settings",
+  { routing: "spread", version: 2 },
+  "CONFLICT"
+)
+await refusedTool(tokens, "set_auto_top_up", { enabled: true }, "CONFLICT")
+await refusedTool(
+  tokens,
+  "remove_machine",
+  { machineId: crypto.randomUUID() },
+  "NOT_FOUND"
+)
+console.log("OAuth discovery, PKCE, hive-bound consent and owner tools passed.")
+
+// Writing is for owners and admins, and it is refused when consent is given,
+// not left to each tool.
+assert.equal(await connect(member, organizationId, fullScope, 400), null)
+const memberTokens = await connect(member, organizationId, readScope)
+assert.equal((await tool(memberTokens, "get_hive")).hive.yourRole, "member")
+await refusedTool(
+  memberTokens,
+  "update_settings",
+  { routing: "fastest" },
+  "FORBIDDEN"
+)
+await refusedTool(memberTokens, "set_budget", { monthlyUsd: 1 }, "FORBIDDEN")
+// A read-only connection removes nothing, not even its own person's machine.
+for (const machineId of [enrolled.machineId, memberMachine.machineId])
+  await refusedTool(memberTokens, "remove_machine", { machineId }, "FORBIDDEN")
+assert.equal((await tool(tokens, "get_hive")).machines.total, 2)
+// An owner's does, from this hive only; the member enrolls again below so
+// the rest of the story has their machine in it.
+assert.equal(
+  (
+    await tool(tokens, "remove_machine", {
+      machineId: memberMachine.machineId,
+    })
+  ).removed,
+  true
+)
+assert.equal((await tool(tokens, "get_hive")).machines.total, 1)
+await refusedTool(
+  tokens,
+  "remove_machine",
+  { machineId: memberMachine.machineId },
+  "NOT_FOUND"
+)
+memberDaemon = await daemonSignIn(member)
+memberToken = (await json(memberDaemon.granted)).access_token
+memberMachine = await json(
+  await memberDaemon.daemon(
+    "/api/machines",
+    { ...mac, name: "Member's Mac mini", model: "Mac16,10" },
+    memberToken
+  ),
+  201
+)
+assert.equal((await tool(tokens, "get_hive")).machines.total, 2)
+
+const refreshed = await json(await refresh(tokens))
+assert.ok(refreshed.access_token)
+tokens = refreshed
+assert.equal((await tool(tokens, "get_hive")).hive.login, "acme")
+assert.ok((await page(owner, "/connections")).includes("Smoke client"))
+const claims = JSON.parse(
+  Buffer.from(tokens.access_token.split(".")[1], "base64url").toString()
+)
+assert.equal(claims.organization_id, organizationId)
+await json(await owner("/api/connections", { id: claims.grant_id }))
+assert.equal((await rpc(tokens.access_token, "get_hive")).status, 401)
+assert.ok((await refresh(tokens)).status >= 400)
+// Someone else's connection is untouched.
+assert.equal((await tool(memberTokens, "get_hive")).hive.login, "acme")
+
+const llms = await fetch(`${origin}/llms.txt`)
+assert.equal(llms.status, 200)
+assert.match(llms.headers.get("content-type"), /^text\/plain/)
+const llmsText = await llms.text()
+assert.ok(llmsText.startsWith("# HiveWorker\n"))
+for (const part of [
+  `${origin}/mcp`,
+  "runs-on",
+  "get_hive",
+  "claude mcp add",
+  "From nothing to a first job",
+])
+  assert.ok(llmsText.includes(part), part)
+const agentsDoc = await fetch(`${origin}/docs/agents`)
+assert.equal(agentsDoc.status, 200)
+const agentsHtml = await agentsDoc.text()
+assert.ok(agentsHtml.includes("get_hive"))
+assert.ok(agentsHtml.includes("From nothing to a first job"))
+console.log(
+  "Member limits, refresh, revocation and the pages agents read passed."
+)
+
 // GitHub being down is not the same as GitHub saying no.
 await tellGitHub({ down: true })
 await redirectsTo(await member("/github/sync"), "/dashboard")
@@ -578,6 +982,8 @@ assert.equal(
   "member-removed"
 )
 assert.ok((await page(member, "/dashboard")).includes("No hive yet"))
+// So does their agent's: the grant is rechecked against membership each call.
+assert.equal((await rpc(memberTokens.access_token, "get_hive")).status, 401)
 assert.equal((await settings(member, { version: 2 })).status, 403)
 // Their machine left with them; the owner's is untouched.
 const remaining = await page(owner, "/machines")
@@ -613,6 +1019,32 @@ await json(await webhook("installation", installed("created", { id: 9002 })))
 await redirectsTo(
   await owner("/github/setup?installation_id=9002"),
   "/dashboard?installed=1"
+)
+// Begun from an agent's consent page, the install returns there, and only
+// there: `state` has been through GitHub and the address bar.
+await redirectsTo(
+  await owner(
+    `/github/setup?installation_id=9002&state=${encodeURIComponent("/connect?client_id=x")}`
+  ),
+  "/connect?client_id=x"
+)
+for (const state of ["https://evil.example", "/wallet", "//evil.example"])
+  await redirectsTo(
+    await owner(
+      `/github/setup?installation_id=9002&state=${encodeURIComponent(state)}`
+    ),
+    "/dashboard?installed=1"
+  )
+await redirectsTo(
+  await owner(
+    `/github/setup?setup_action=request&state=${encodeURIComponent("/connect?client_id=x")}`
+  ),
+  "/github/status?state=requested-connection"
+)
+assert.ok(
+  (await page(owner, "/github/status?state=requested-connection")).includes(
+    "restart it from your MCP client"
+  )
 )
 assert.equal(
   grants(await page(owner, "/wallet")),

@@ -82,8 +82,9 @@ Linux VMs on a machine of that architecture; `macos` is a job run on an Apple
 Silicon Mac itself as the `hiveworker` user (`daemon/internal/native`), which
 a Mac offers only while its owner's `macos-jobs` setting is on and the Mac is
 ready, and a hive accepts only while `pool_settings.macos_jobs` is on.
-`serves()` in `apps/coordinator/src/schedule.ts` is the one place that matches
-a machine to a kind; do not compare `arch` anywhere else.
+The rule that matches a machine to a kind lives in `@workspace/pricing` as
+`machineServes`; the coordinator's `serves()` and the web's `get_hive` both
+call it. Do not compare `arch` anywhere else.
 
 ## Stripe
 

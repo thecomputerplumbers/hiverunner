@@ -1,9 +1,8 @@
 import type { RoutingPolicy } from "@workspace/db/settings"
-import type { RunnerArch } from "@workspace/pricing"
+import { machineServes, OWNER_CORES, type RunnerArch } from "@workspace/pricing"
 import type { Presence } from "@workspace/protocol"
 
-/** Cores every job leaves for the machine's owner. */
-export const OWNER_CORES = 2
+export { OWNER_CORES }
 
 /** What a label asks of a machine: so many cores, of one kind of machine. */
 export type JobSize = { vcpus: number; arch: RunnerArch }
@@ -29,19 +28,16 @@ export type Candidate = {
 }
 
 /**
- * Whether a machine is the kind the job's label names. An x64 job needs an
- * x64 machine; a macOS job needs an arm64 Mac whose owner opted in to running
- * jobs on the Mac itself. This is checked here and nowhere else, so
+ * Whether a machine is the kind the job's label names. The rule itself is
+ * `machineServes` in `@workspace/pricing`, shared with the web app, so
  * everything that asks what a machine can take (an offer, capacity, which
- * listeners to wake) gets the same answer.
+ * listeners to wake, what an agent is told) gets the same answer.
  */
 export function serves(
   candidate: Pick<Candidate, "arch" | "macos">,
   arch: RunnerArch
 ) {
-  const machine = candidate.arch ?? "arm64"
-  if (arch === "macos") return machine === "arm64" && candidate.macos === true
-  return machine === arch
+  return machineServes(candidate, arch)
 }
 
 /**

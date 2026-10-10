@@ -6,6 +6,7 @@ import { UserRound } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
 import { useActiveOrganization } from "@workspace/auth/client"
+import { OWNER_CORES } from "@workspace/pricing"
 import { SignOutButton } from "@workspace/auth/react/sign-out-button"
 import { ThemeToggle } from "@workspace/ui-shell/components/theme-toggle"
 import { Button } from "@workspace/ui/components/button"
@@ -30,9 +31,6 @@ const nav = (
     item.href !== "/account" &&
     (!item.feature || product.features[item.feature])
 )
-
-/** Cores a Mac keeps for the person using it, as the coordinator does. */
-const OWNER_CORES = 2
 
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement &&

@@ -7,7 +7,7 @@ import {
 import { getDb } from "@/db"
 import { auth } from "@/lib/auth"
 import { logError } from "@/lib/diagnostics"
-import { getGitHubApp, githubUserToken } from "@/lib/github"
+import { consentReturnPath, getGitHubApp, githubUserToken } from "@/lib/github"
 import { seeOther } from "@/lib/redirect"
 
 const status = (state: string) => seeOther(`/github/status?state=${state}`)
@@ -27,9 +27,13 @@ export async function GET(request: Request) {
       `/sign-in?next=${encodeURIComponent(url.pathname + url.search)}`
     )
 
+  // Set by `/install?next=` when the install began on an agent's consent
+  // page. It has been through GitHub and the address bar: checked again here.
+  const consent = consentReturnPath(url.searchParams.get("state"))
+
   // A non-owner can only ask; an owner approves it on GitHub later.
   if (url.searchParams.get("setup_action") === "request")
-    return status("requested")
+    return status(consent ? "requested-connection" : "requested")
 
   const installationId = Number(url.searchParams.get("installation_id"))
   if (!Number.isSafeInteger(installationId) || installationId <= 0)
@@ -63,7 +67,7 @@ export async function GET(request: Request) {
       organizationIds,
       prefer: provisioned.organizationId,
     })
-    return seeOther("/dashboard?installed=1")
+    return seeOther(consent ?? "/dashboard?installed=1")
   } catch (error) {
     logError(error, "github.setup")
     return status("unavailable")

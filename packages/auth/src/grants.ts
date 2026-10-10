@@ -9,11 +9,8 @@ export const MCP_SCOPES = [
   "profile",
   "email",
   "offline_access",
-  "organization:read",
-  "organization:write",
-  "billing:read",
-  "projects:read",
-  "projects:write",
+  "hive:read",
+  "hive:write",
 ] as const
 
 // A consent submission carries its own selection; another browser tab cannot

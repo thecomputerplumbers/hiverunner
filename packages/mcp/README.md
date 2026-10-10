@@ -9,9 +9,9 @@ Streamable HTTP and protocol negotiation; there is no separate Node server.
 
 - `packages/mcp`: transport and result helpers, with no application imports.
 - `packages/auth`: OAuth provider, signing keys, client registration, consent,
-  organization grants, token validation and revocation checks.
-- `apps/web/mcp/handler.ts`: authenticate, enforce origin and request budget,
-  then register the application's tools.
+  hive grants, token validation and revocation checks.
+- `apps/web/mcp/handler.ts`: authenticate, enforce origin and request budget.
+- `apps/web/mcp/tools.ts`: the hive's tools and the server instructions.
 - `apps/web/operations`: business operations used by MCP and browser routes.
   Put membership, scope, validation and mutation rules here, not in a tool.
 - `apps/web/worker/index.ts`: dispatch `/mcp` and discovery before vinext.
@@ -22,8 +22,13 @@ Point an OAuth-capable MCP client at `https://YOUR_APP/mcp`. Discovery is at
 `/.well-known/oauth-protected-resource` and
 `/.well-known/oauth-authorization-server/api/auth`. The provider supports
 public dynamic client registration, authorization code with PKCE, and refresh
-tokens. Users sign in, verify their email, select an organization and approve
-the listed scopes. Clients must explicitly request `organization:write` or `projects:write`.
+tokens. A person signs in with GitHub, selects one hive and approves the
+listed scopes. A client is given `hive:read` by default and must explicitly
+request `hive:write`; only a hive owner or admin can approve it.
+
+`/docs/agents` on the site has the command for each client, and `/llms.txt`
+says the same to a model. The server's `instructions` are written from
+`@workspace/pricing` in `apps/web/mcp/tools.ts`.
 
 CIMD URL client IDs are not enabled. Add them only with a Worker-compatible
 SSRF-safe metadata fetch implementation; ordinary `fetch` is insufficient.
@@ -33,24 +38,41 @@ product needs browser-hosted external clients.
 
 ## Tools and scopes
 
-| Tool                               | Required scope       | Role           |
-| ---------------------------------- | -------------------- | -------------- |
-| `get_current_user`                 | `organization:read`  | Member         |
-| `list_organizations`               | `organization:read`  | Member         |
-| `get_billing_status`               | `billing:read`       | Member         |
-| `list_projects`, `get_project`     | `projects:read`      | Member         |
-| `create_project`, `update_project` | `projects:write`     | Admin or owner |
-| `rename_organization`              | `organization:write` | Admin or owner |
+| Tool               | Required scope | Role                        |
+| ------------------ | -------------- | --------------------------- |
+| `get_hive`         | `hive:read`    | Member                      |
+| `get_current_user` | `hive:read`    | Member                      |
+| `list_machines`    | `hive:read`    | Member                      |
+| `list_jobs`        | `hive:read`    | Member                      |
+| `get_job`          | `hive:read`    | Member                      |
+| `get_usage`        | `hive:read`    | Member                      |
+| `get_leaderboard`  | `hive:read`    | Member                      |
+| `get_pricing`      | `hive:read`    | Member                      |
+| `get_workflow`     | `hive:read`    | Member                      |
+| `update_settings`  | `hive:write`   | Owner                       |
+| `set_budget`       | `hive:write`   | Admin or owner              |
+| `set_auto_top_up`  | `hive:write`   | Admin or owner              |
+| `remove_machine`   | `hive:write`   | Machine owner or hive owner |
 
-`profile` and `email` govern whether the account tool returns those fields.
-`list_organizations` lists only the organization approved for this grant.
-Rename requires a caller-generated `requestId`; retry the same payload with the
-same ID. Its audit receipt and write commit atomically in D1. Reusing an ID for
-a different payload fails. Tool annotations describe read/write and retry behavior.
+Names, titles and descriptions live in `apps/web/mcp/tool-list.ts`, which the
+docs page and `llms.txt` render too. Every tool delegates to
+`apps/web/operations/hive.ts`; nothing in a tool touches the database.
+
+`get_hive` is the one call that answers most questions: balance, whether a
+job can start and what blocks it, machines, labels with prices, budget,
+settings and `nextSteps`. `profile` and `email` govern whether
+`get_current_user` returns those fields. `update_settings` takes the
+`version` from `get_hive` and refuses a stale one with `CONFLICT`.
+`remove_machine` takes a machine out of the granted hive only; it never
+retires the machine. No tool takes a payment or saves a card. Because consent
+refuses `hive:write` to anyone below admin, a plain member cannot remove
+their own machine through an agent; they can in the browser or with
+`hived unlink`. Tool annotations describe read/write and retry behavior, and
+a failed tool returns `isError` with the app's error code and a request id.
 
 JWT access tokens expire after five minutes. Every request also checks the
-stored grant, consent, verified account and current organization membership.
-Changing a browser's active organization cannot change a grant. `/connections`
+stored grant, consent, verified account and current hive membership.
+Changing a browser's active hive cannot change a grant. `/connections`
 revokes the grant, consent and refresh tokens; already-issued JWTs stop working
 immediately. The Durable Object limits authenticated MCP requests per user.
 

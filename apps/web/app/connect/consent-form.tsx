@@ -9,11 +9,10 @@ const labels: Record<string, string> = {
   profile: "Read your name",
   email: "Read your email address",
   offline_access: "Stay connected until revoked",
-  "organization:read": "Read the selected organization",
-  "organization:write": "Rename the selected organization (admin only)",
-  "projects:read": "Read projects in the selected organization",
-  "projects:write": "Create and edit projects (admin only)",
-  "billing:read": "Read subscription status",
+  "hive:read":
+    "Read the selected hive: machines, jobs, balance, settings and receipts",
+  "hive:write":
+    "Change the selected hive's settings, budget and machines (owners and admins only)",
 }
 export function ConsentForm({
   organizations,
@@ -53,7 +52,7 @@ export function ConsentForm({
         ))}
       </ul>
       <Field>
-        <FieldLabel htmlFor="organization">Organization</FieldLabel>
+        <FieldLabel htmlFor="organization">Hive</FieldLabel>
         <select
           className={selectClass}
           id="organization"
@@ -69,8 +68,8 @@ export function ConsentForm({
         </select>
       </Field>
       <p className="text-sm text-muted-foreground">
-        This connection can access only the organization you select. You can
-        revoke it from Connected apps.
+        This connection can access only the hive you select. You can revoke it
+        from Agents.
       </p>
       {error && <FieldError>{error}</FieldError>}
       <div className="flex gap-3">

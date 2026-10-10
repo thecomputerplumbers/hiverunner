@@ -42,17 +42,18 @@ pnpm cf:typegen      # Regenerate Cloudflare binding and runtime types
 
 ## Layout
 
-| Path                                                | What it holds                                                       |
-| --------------------------------------------------- | ------------------------------------------------------------------- |
-| `apps/web`                                          | Marketing site, dashboard, sign-in, GitHub App endpoints (vinext)   |
-| `apps/coordinator`                                  | Machine tunnels, scale-set listeners, dispatch and job metering     |
-| `daemon`                                            | macOS daemon and isolated Linux VM runner                           |
-| `packages/db`                                       | HiveWorker's D1 tables and the operations on them                   |
-| `packages/github`                                   | GitHub App over `fetch` and WebCrypto                               |
-| `packages/pricing`                                  | Compute-unit math, the floor, comparison rates. Every price is here |
-| `packages/auth`                                     | Better Auth on D1: GitHub sign-in, sessions, hive membership        |
-| `packages/ui*`                                      | Primitives, app chrome, data display, forms                         |
-| `packages/stripe`, `packages/mcp`, `packages/email` | From the starter; switched off until needed                         |
+| Path                                | What it holds                                                       |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| `apps/web`                          | Marketing site, dashboard, sign-in, GitHub App endpoints (vinext)   |
+| `apps/coordinator`                  | Machine tunnels, scale-set listeners, dispatch and job metering     |
+| `daemon`                            | macOS daemon and isolated Linux VM runner                           |
+| `packages/db`                       | HiveWorker's D1 tables and the operations on them                   |
+| `packages/github`                   | GitHub App over `fetch` and WebCrypto                               |
+| `packages/pricing`                  | Compute-unit math, the floor, comparison rates. Every price is here |
+| `packages/auth`                     | Better Auth on D1: GitHub sign-in, sessions, hive membership        |
+| `packages/ui*`                      | Primitives, app chrome, data display, forms                         |
+| `packages/mcp`                      | MCP transport; the hive's tools are in `apps/web/mcp`               |
+| `packages/stripe`, `packages/email` | From the starter; card top-ups and billing notices                  |
 
 ## Status
 
@@ -69,6 +70,14 @@ the new execution path still requires release and coordinator secrets.
 The daemon is released for Apple Silicon Macs: `curl -fsSL
 https://get.hiveworkr.thecomputerplumbers.com/install.sh | sh`. Building and
 publishing a release is in [deployment](docs/deployment.md).
+
+### Agents
+
+An agent reaches HiveWorker through its MCP server at `/mcp`: OAuth with
+dynamic client registration, one hive per connection, and tools to read the
+hive, write the workflow change and set a budget. `/docs/agents` has the
+command for each client and `/llms.txt` says the same to a model. See
+[`packages/mcp`](packages/mcp/README.md).
 
 Still planned: container jobs, the menu bar item, Keychain storage, and
 on-chain payments.

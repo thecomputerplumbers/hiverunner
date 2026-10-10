@@ -29,6 +29,27 @@ export async function releasedDaemonVersion(): Promise<string | null> {
 
 export const INSTALL_COMMAND = `curl -fsSL ${INSTALL_SCRIPT_URL} | sh`
 
+/** Where the product itself is served: the site, the console and `/mcp`. */
+export const PRODUCT_ORIGIN = "https://hiveworkr.thecomputerplumbers.com"
+
+/** The one URL an agent is given. Sign-in is OAuth; there is no key. */
+export const MCP_URL = `${PRODUCT_ORIGIN}/mcp`
+
+/**
+ * How each client is pointed at the MCP endpoint, in that client's own words.
+ * Check a client's documentation before changing its line. The console
+ * passes its own origin, so a staging deployment hands out its own URL.
+ */
+export function mcpClients(url = MCP_URL) {
+  return {
+    claudeCode: `claude mcp add --transport http --scope user hiveworker ${url}`,
+    claudeCodeLogin: "claude mcp login hiveworker",
+    cursor: JSON.stringify({ mcpServers: { hiveworker: { url } } }, null, 2),
+    codex: `codex mcp add hiveworker --url ${url}`,
+    codexLogin: "codex mcp login hiveworker",
+  }
+}
+
 /** The coordinator's public origin, and the OIDC audience a capacity probe asks for. */
 export const COORDINATOR_ORIGIN =
   "https://connect.hiveworkr.thecomputerplumbers.com"
@@ -53,6 +74,7 @@ export const MARKETING_NAV = [
   { href: "/pricing", label: "Pricing" },
   { href: "/security", label: "Security" },
   { href: "/docs", label: "Docs" },
+  { href: "/docs/agents", label: "Agents" },
   { href: "/download", label: "Download" },
 ] as const
 

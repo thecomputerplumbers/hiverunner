@@ -1,3 +1,4 @@
+import { Agents } from "./agents"
 import { Daemon } from "./daemon"
 import { Faq } from "./faq"
 import { LabelsAndSizes } from "./labels-and-sizes"
@@ -15,6 +16,13 @@ export const DOCS = [
     title: "Quickstart",
     description: "Install the GitHub App, add a machine, route a workflow.",
     Body: Quickstart,
+  },
+  {
+    slug: "agents",
+    title: "Agents and MCP",
+    description:
+      "Connect Claude Code, Cursor or any MCP client and let it run your CI.",
+    Body: Agents,
   },
   {
     slug: "labels-and-sizes",

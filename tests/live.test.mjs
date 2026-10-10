@@ -8,7 +8,11 @@ import {
 } from "../packages/db/src/installations.ts"
 import { settleJob, startJob } from "../packages/db/src/jobs.ts"
 import { getLeaderboard } from "../packages/db/src/leaderboard.ts"
-import { getBalanceHistory, getLiveSnapshot } from "../packages/db/src/live.ts"
+import {
+  getBalanceHistory,
+  getLiveSnapshot,
+  listLiveJobs,
+} from "../packages/db/src/live.ts"
 import { createReceiptSigner } from "../packages/db/src/receipts.ts"
 import { updatePoolSettings } from "../packages/db/src/settings.ts"
 
@@ -223,4 +227,38 @@ test("the leaderboard credits whoever's Mac ran the job, by window", async (t) =
     board.machines.map((mac) => [mac.name, mac.scores.all.jobs]),
     [["Mac", 3]]
   )
+})
+
+test("jobs are listed newest first, and narrowed by state and repository in SQL", async (t) => {
+  const { db } = await pool(t)
+  const first = await run(db, 1, at("2026-10-07T10:00:00Z"), 10)
+  const second = await run(db, 2, at("2026-10-07T11:00:00Z"), 10, "failed")
+  const running = await run(db, 3, at("2026-10-07T12:00:00Z"), null)
+  const elsewhere = await startJob(db, {
+    organizationId: orgId,
+    runnerRequestId: 4,
+    machineId: "mac",
+    label: "hive",
+    vcpus: 2,
+    repository: "acme/site",
+    startedAt: at("2026-10-07T12:10:00Z"),
+  })
+  const ids = async (limit, filter) =>
+    (await listLiveJobs(db, orgId, limit, filter)).map((job) => job.id)
+
+  // Without a filter, as the console has always called it.
+  assert.deepEqual(await ids(), [elsewhere, running, second, first])
+  assert.deepEqual(await ids(200, {}), [elsewhere, running, second, first])
+  assert.deepEqual(await ids(200, { running: true }), [elsewhere, running])
+  assert.deepEqual(await ids(200, { running: false }), [second, first])
+  assert.deepEqual(await ids(200, { repository: "acme/site" }), [elsewhere])
+  assert.deepEqual(
+    await ids(200, { running: false, repository: "acme/site" }),
+    []
+  )
+  // The limit is applied after the filter, not before it.
+  assert.deepEqual(await ids(1, { running: false }), [second])
+  // A machine in the snapshot says what kind it is.
+  const [mac] = (await getLiveSnapshot(db, orgId, now)).machines
+  assert.deepEqual([mac.os, mac.arch], ["darwin", "arm64"])
 })

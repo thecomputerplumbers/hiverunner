@@ -120,14 +120,9 @@ export function createAuth(options: CreateAuthOptions) {
           "profile",
           "email",
           "offline_access",
-          "organization:read",
-          "billing:read",
-          "projects:read",
+          "hive:read",
         ],
-        clientRegistrationAllowedScopes: [
-          "organization:write",
-          "projects:write",
-        ],
+        clientRegistrationAllowedScopes: ["hive:write"],
         accessTokenExpiresIn: 300,
         postLogin: {
           page: "/connect",

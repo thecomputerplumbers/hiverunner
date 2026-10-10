@@ -6,7 +6,7 @@
   "features": {
     "billing": false,
     "funding": true,
-    "mcp": false,
+    "mcp": true,
     "projects": false
   },
   "navigation": [
@@ -44,6 +44,12 @@
       "href": "/account",
       "label": "Account",
       "icon": "account"
+    },
+    {
+      "href": "/connections",
+      "label": "Agents",
+      "icon": "agents",
+      "feature": "mcp"
     },
     {
       "href": "/hives",

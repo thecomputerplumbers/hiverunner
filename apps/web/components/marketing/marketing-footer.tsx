@@ -26,6 +26,7 @@ const COLUMNS = [
     heading: "Docs",
     links: [
       { href: "/docs/quickstart", label: "Quickstart" },
+      { href: "/docs/agents", label: "Agents and MCP" },
       { href: "/docs/labels-and-sizes", label: "Labels and sizes" },
       { href: "/docs/daemon", label: "The daemon" },
       { href: "/docs/faq", label: "FAQ" },

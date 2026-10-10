@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { SiteHeaderLink } from "@workspace/ui-shell/components/site-header"
+import { MARKETING_NAV } from "./site"
 
 /** A header link that knows whether it points at the section being read. */
 export function NavLink({
@@ -15,7 +16,14 @@ export function NavLink({
   className?: string
 }) {
   const pathname = usePathname()
-  const active = pathname === href || pathname.startsWith(`${href}/`)
+  const under = (path: string) =>
+    pathname === path || pathname.startsWith(`${path}/`)
+  // A page under two items, as /docs/agents is, belongs to the closer one.
+  const active =
+    under(href) &&
+    !MARKETING_NAV.some(
+      (item) => item.href.length > href.length && under(item.href)
+    )
   return (
     <SiteHeaderLink
       active={active}

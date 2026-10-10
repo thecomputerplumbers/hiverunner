@@ -60,7 +60,18 @@ export async function authenticateMcp(
   }
 }
 
-export function mcpAuthError(error: unknown, resource: string) {
+/**
+ * The answer to a request without a usable token. The status and the
+ * `WWW-Authenticate` challenge are what clients act on and are the provider's
+ * own. The body is for the agent behind the client: it says what happens
+ * next and where to read more, so a cold request is not a dead end.
+ */
+export function mcpAuthError(
+  error: unknown,
+  resource: string,
+  /** The way in, as a few short lines an agent can relay. */
+  steps: string[] = []
+) {
   const challenge =
     createResourceServerChallenge(error, resource) ??
     createResourceServerChallenge(
@@ -69,13 +80,22 @@ export function mcpAuthError(error: unknown, resource: string) {
       }),
       resource
     )!
+  const origin = resource.replace(/\/mcp$/, "")
   return Response.json(
     {
       jsonrpc: "2.0",
       id: null,
       error: {
         code: -32000,
-        message: "Authorization required or insufficient scope",
+        message:
+          challenge.statusCode === 403
+            ? "This connection lacks the permission this needs. Connect again and approve it; changing a hive needs an owner or admin."
+            : "Sign in required. Your MCP client opens a browser: sign in with GitHub and pick a hive. If you are not in a hive yet, that page says how to install HiveWorker on your organization.",
+        data: {
+          docs: `${origin}/docs/agents`,
+          llms: `${origin}/llms.txt`,
+          steps,
+        },
       },
     },
     { status: challenge.statusCode, headers: challenge.headers }

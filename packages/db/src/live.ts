@@ -58,6 +58,10 @@ export type LiveMachine = {
   id: string
   name: string
   model: string
+  /** `darwin` or `linux`, as the daemon reported it. */
+  os: string
+  /** The architecture of the jobs it runs: `arm64` or `x64`. */
+  arch: string
   cores: number
   memoryBytes: number
   speedScore: number
@@ -123,16 +127,33 @@ const toJob = (row: {
     price: row.completedAt ? Number(row.price ?? 0) : null,
   }) as LiveJob
 
+/**
+ * A pool's jobs, newest first. `filter` narrows them in SQL: to the ones
+ * still running or the ones finished, and to one repository.
+ */
 export async function listLiveJobs(
   db: AuthDb,
   organizationId: string,
-  limit = 200
+  limit = 200,
+  filter: { running?: boolean; repository?: string } = {}
 ) {
   const rows = await db
     .select(jobColumns)
     .from(job)
     .innerJoin(machine, eq(machine.id, job.machineId))
-    .where(eq(job.organizationId, organizationId))
+    .where(
+      and(
+        eq(job.organizationId, organizationId),
+        filter.running === undefined
+          ? undefined
+          : filter.running
+            ? isNull(job.completedAt)
+            : isNotNull(job.completedAt),
+        filter.repository === undefined
+          ? undefined
+          : eq(job.repository, filter.repository)
+      )
+    )
     .orderBy(desc(job.startedAt))
     .limit(Math.min(Math.max(limit, 1), 500))
   return rows.map(toJob)
@@ -268,6 +289,8 @@ export async function getLiveSnapshot(
       id: row.id,
       name: row.name,
       model: row.model,
+      os: row.os,
+      arch: row.arch,
       cores: row.cores,
       memoryBytes: row.memoryBytes,
       speedScore: row.speedScore,
