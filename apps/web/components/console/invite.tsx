@@ -99,7 +99,7 @@ export function InvitePanel({
         {lonely ? (
           <>
             <strong>{machines[0]!.name}</strong> is the whole hive. When its lid
-            closes, every job waits.
+            closes, you&apos;re losing money on every job.
           </>
         ) : (
           <>
