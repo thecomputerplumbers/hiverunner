@@ -11,7 +11,11 @@ import {
 } from "@workspace/pricing"
 import { HexMark } from "@/components/hex-mark"
 import { Code, CodeBlock } from "@/components/marketing/code"
-import { formatRate, formatUsd } from "@/components/marketing/format"
+import {
+  formatMultiple,
+  formatRate,
+  formatUsd,
+} from "@/components/marketing/format"
 import { HiveComb } from "@/components/marketing/hive-comb"
 import { IsolationDiagram } from "@/components/marketing/isolation-diagram"
 import { Fact, Facts, textLink } from "@/components/marketing/page-parts"
@@ -37,6 +41,7 @@ export const metadata = {
 const base = RUNNER_SIZES[0]
 const ours = privatePoolUsdPerMinute(base.vcpus)
 const github = competitorUsdPerMinute("github", base.vcpus)
+const blacksmith = competitorUsdPerMinute("blacksmith", base.vcpus)
 const percent = new Intl.NumberFormat("en-US", { style: "percent" })
 
 export default function HomePage() {
@@ -46,14 +51,17 @@ export default function HomePage() {
         <Container className="grid gap-12 py-14 sm:py-20 lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)] lg:items-center lg:gap-14">
           <div>
             <h1 className="font-heading text-[2rem] leading-[1.12] font-medium tracking-tight text-balance sm:text-5xl sm:leading-[1.1]">
-              Keep GitHub Actions. Stop renting the runners.
+              Keep GitHub Actions. Pay {formatMultiple(blacksmith / ours.net)}{" "}
+              less for the minutes.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-pretty text-muted-foreground">
               Change <Code>runs-on</Code> to <Code>hive</Code> and the job runs
               in a throwaway VM on a Mac your team already owns. Same workflows,
               same logs, same checks on the pull request. A {base.vcpus} vCPU
-              minute costs {formatRate(ours.net)} on your own Macs, against{" "}
-              {formatRate(github)} on a GitHub-hosted runner.
+              minute costs {formatRate(ours.net)} on your own Macs:{" "}
+              {formatMultiple(blacksmith / ours.net)} less than Blacksmith and{" "}
+              {formatMultiple(github / ours.net)} less than a GitHub-hosted
+              runner.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button
