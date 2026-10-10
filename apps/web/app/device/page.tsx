@@ -50,6 +50,7 @@ export default async function DevicePage({
         userCode={pending ? userCode : undefined}
         invalid={Boolean(userCode) && !pending}
         name={session.user.name}
+        hives={pools.map((pool) => pool.name)}
       />
     </AuthPage>
   )
