@@ -39,7 +39,7 @@ export default async function SignInPage({
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>
+          <CardTitle className="font-normal">
             {invited
               ? `Add your Mac to ${invited}`
               : `Sign in to ${product.name}`}

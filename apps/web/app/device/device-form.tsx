@@ -5,6 +5,7 @@ import { Field, FieldError, FieldLabel } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 
 import { post } from "@/components/action-button"
+import { fieldHeight } from "@/components/form-controls"
 
 export function DeviceForm({
   userCode,
@@ -53,6 +54,7 @@ export function DeviceForm({
           <Input
             id="user_code"
             name="user_code"
+            className={fieldHeight}
             autoComplete="off"
             autoCapitalize="characters"
             required
@@ -66,8 +68,8 @@ export function DeviceForm({
     <div className="flex flex-col gap-5">
       <p className="text-muted-foreground">
         A HiveWorker daemon is asking to add this machine to your hive as{" "}
-        <strong className="text-foreground">{name}</strong>. Approve only if
-        this code matches the one it is showing.
+        <strong className="font-medium text-foreground">{name}</strong>. Approve
+        only if this code matches the one it is showing.
       </p>
       <p className="text-center font-mono text-3xl tracking-widest">
         {userCode}

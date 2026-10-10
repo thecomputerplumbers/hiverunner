@@ -9,7 +9,9 @@ export default function ErrorPage({
 }) {
   return (
     <main className="mx-auto flex max-w-lg flex-col gap-4 p-8">
-      <h1 className="text-2xl font-semibold">Something went wrong</h1>
+      <h1 className="font-mono text-2xl font-medium tracking-tight">
+        Something went wrong
+      </h1>
       <p>
         Please try again. If this continues, contact{" "}
         <a className="underline" href={`mailto:${product.supportEmail}`}>

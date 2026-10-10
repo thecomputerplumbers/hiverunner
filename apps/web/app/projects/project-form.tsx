@@ -4,6 +4,7 @@ import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { Textarea } from "@workspace/ui/components/textarea"
 import { Field, FieldLabel, FieldError } from "@workspace/ui/components/field"
+import { fieldHeight, selectClass } from "@/components/form-controls"
 export function ProjectForm({
   organizationId,
   project,
@@ -65,6 +66,7 @@ export function ProjectForm({
         <Input
           id="project-name"
           name="name"
+          className={fieldHeight}
           defaultValue={project?.name}
           maxLength={100}
           required
@@ -90,7 +92,7 @@ export function ProjectForm({
             id="project-status"
             name="status"
             defaultValue={project.status}
-            className="rounded-md border bg-background p-2"
+            className={selectClass}
           >
             <option value="active">Active</option>
             <option value="archived">Archived</option>

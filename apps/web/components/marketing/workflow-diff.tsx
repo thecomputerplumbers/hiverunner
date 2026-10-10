@@ -9,7 +9,7 @@ export function WorkflowDiff({ className }: { className?: string }) {
     <figure
       aria-label={`Change ${BEFORE} to ${AFTER}`}
       className={cn(
-        "overflow-hidden border border-white/15 bg-code font-mono text-[0.8125rem] leading-8 text-code-foreground",
+        "overflow-hidden border border-code-foreground/15 bg-code font-mono text-[0.8125rem] leading-8 text-code-foreground",
         className
       )}
     >

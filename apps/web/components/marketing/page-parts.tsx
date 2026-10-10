@@ -60,7 +60,7 @@ export function Prose({ className, ...props }: React.ComponentProps<"div">) {
         "[&_li_a]:underline [&_li_a]:decoration-primary [&_li_a]:decoration-2 [&_li_a]:underline-offset-4 [&_p_a]:underline [&_p_a]:decoration-primary [&_p_a]:decoration-2 [&_p_a]:underline-offset-4",
         "[&_figure]:my-5",
         "[&_table]:my-5 [&_table]:w-full [&_table]:text-left [&_table]:text-sm [&_td]:border-t [&_td]:border-border [&_td]:py-2.5 [&_td]:pr-4 [&_td]:align-top [&_th]:py-2 [&_th]:pr-4 [&_th]:font-medium [&_th]:text-muted-foreground",
-        "[&_dd]:mt-1.5 [&_dd]:text-muted-foreground [&_dt]:mt-6 [&_dt]:font-semibold",
+        "[&_dd]:mt-1.5 [&_dd]:text-muted-foreground [&_dt]:mt-6 [&_dt]:font-medium",
         className
       )}
       {...props}

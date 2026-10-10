@@ -9,6 +9,7 @@ import { CombLegend, PoolComb } from "@/components/console/comb"
 import { CopyButton, parallelJobs } from "@/components/console/invite"
 import { useLive } from "@/components/console/live"
 import { Panel, Snippet } from "@/components/console/panel"
+import { HexMark } from "@/components/hex-mark"
 
 /**
  * The pool, with one cell held open for the person reading. The page keeps
@@ -92,13 +93,8 @@ export function JoinPool({
           >
             <ul className="flex flex-col gap-2 font-mono text-sm">
               {mine.map((machine) => (
-                <li key={machine.id} className="flex items-center gap-2">
-                  <span
-                    aria-hidden="true"
-                    className="flex size-5 items-center justify-center bg-primary text-xs text-primary-foreground"
-                  >
-                    ✓
-                  </span>
+                <li key={machine.id} className="flex items-center gap-3">
+                  <HexMark n={1} state="done" size="sm" />
                   {machine.name}
                   <span className="text-muted-foreground">
                     {machine.cores} cores
@@ -122,32 +118,38 @@ export function JoinPool({
             className="border-primary/60 lg:col-span-2"
             bodyClassName="flex flex-col gap-4"
           >
-            <ol className="flex flex-col gap-4 text-sm">
-              <li className="flex flex-col gap-2">
-                <p>
-                  <Step n={1} /> Paste this into a terminal on your Mac or Linux
-                  machine.
-                </p>
-                <Snippet prompt>{command}</Snippet>
-                <div>
-                  <CopyButton text={command}>Copy the command</CopyButton>
+            <ol className="flex flex-col gap-5 text-sm">
+              <li className="flex gap-3">
+                <HexMark n={1} state="next" size="sm" />
+                <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
+                  <p>
+                    Paste this into a terminal on your Mac or Linux machine.
+                  </p>
+                  <Snippet prompt>{command}</Snippet>
+                  <div>
+                    <CopyButton text={command}>Copy the command</CopyButton>
+                  </div>
                 </div>
               </li>
-              <li>
-                <Step n={2} /> A browser tab asks you to confirm with GitHub. No
-                password, no card.
+              <li className="flex gap-3">
+                <HexMark n={2} size="sm" />
+                <p className="min-w-0 flex-1 pt-0.5">
+                  A browser tab asks you to confirm with GitHub. No password, no
+                  card.
+                </p>
               </li>
-              <li className="flex items-start gap-2">
-                <span>
-                  <Step n={3} /> Leave this page open.
-                </span>
-                <span className="font-mono text-xs text-primary motion-safe:animate-pulse">
-                  watching for your Mac…
-                </span>
+              <li className="flex gap-3">
+                <HexMark n={3} size="sm" />
+                <p className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1 pt-0.5">
+                  <span>Leave this page open.</span>
+                  <span className="font-mono text-xs text-primary motion-safe:animate-pulse">
+                    watching for your Mac…
+                  </span>
+                </p>
               </li>
             </ol>
             {elsewhere.length > 0 && (
-              <div className="flex flex-col gap-2 border-t border-border pt-3">
+              <div className="flex flex-col gap-3 border-t border-border pt-4">
                 <p className="text-sm text-muted-foreground">
                   Already running HiveWorker for another organization? Nothing
                   to install:
@@ -167,7 +169,7 @@ export function JoinPool({
       </div>
 
       {!joined && (
-        <dl className="grid gap-px border border-border bg-border text-sm sm:grid-cols-3 [&_dd]:text-muted-foreground [&_dt]:mb-1 [&_dt]:font-mono [&_dt]:text-xs [&_dt]:font-medium [&>div]:bg-background [&>div]:p-4">
+        <dl className="grid gap-px border border-border bg-border text-sm sm:grid-cols-3 [&_dd]:text-muted-foreground [&_dt]:mb-1 [&_dt]:font-mono [&_dt]:text-xs [&_dt]:font-normal [&>div]:bg-background [&>div]:p-4 sm:[&>div]:p-6">
           <div>
             <dt>your cores come first</dt>
             <dd>
@@ -194,12 +196,3 @@ export function JoinPool({
     </>
   )
 }
-
-const Step = ({ n }: { n: number }) => (
-  <span
-    aria-hidden="true"
-    className="mr-1.5 inline-flex size-5 items-center justify-center border border-border font-mono text-xs"
-  >
-    {n}
-  </span>
-)

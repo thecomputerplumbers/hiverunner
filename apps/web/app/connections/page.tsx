@@ -2,6 +2,7 @@ import { and, eq, isNull, desc } from "drizzle-orm"
 import { agentGrant, oauthClient, organization } from "@workspace/auth/schema"
 import { AccountPage } from "@/components/account-page"
 import { ActionButton } from "@/components/action-button"
+import { Panel } from "@/components/console/panel"
 import { requireServerSession } from "@/lib/session"
 import { getDb } from "@/db"
 export default async function Page() {
@@ -28,10 +29,14 @@ export default async function Page() {
       </p>
       {!grants.length && <p>No connected apps.</p>}
       {grants.map((grant) => (
-        <section key={grant.id} className="rounded-lg border p-5">
-          <h2 className="font-semibold">{grant.client ?? "Application"}</h2>
+        <Panel
+          key={grant.id}
+          title={grant.client ?? "Application"}
+          className="max-w-3xl"
+          bodyClassName="flex flex-col gap-3"
+        >
           <p>{grant.organization}</p>
-          <p className="my-3 text-sm text-muted-foreground">
+          <p className="font-mono text-xs text-muted-foreground">
             {grant.scopes.join(", ")}
           </p>
           <ActionButton
@@ -39,7 +44,7 @@ export default async function Page() {
             path="/api/connections"
             body={{ id: grant.id }}
           />
-        </section>
+        </Panel>
       ))}
     </AccountPage>
   )

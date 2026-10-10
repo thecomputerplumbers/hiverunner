@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { Field, FieldLabel, FieldError } from "@workspace/ui/components/field"
 import { post } from "@/components/action-button"
+import { selectClass } from "@/components/form-controls"
 const labels: Record<string, string> = {
   openid: "Identify your account",
   profile: "Read your name",
@@ -46,7 +47,7 @@ export function ConsentForm({
   }
   return (
     <form className="flex flex-col gap-5" onSubmit={submit}>
-      <ul className="list-disc space-y-2 pl-5">
+      <ul className="list-disc space-y-2 pl-5 marker:text-primary">
         {scopes.map((scope) => (
           <li key={scope}>{labels[scope] ?? scope}</li>
         ))}
@@ -54,7 +55,7 @@ export function ConsentForm({
       <Field>
         <FieldLabel htmlFor="organization">Organization</FieldLabel>
         <select
-          className="h-10 rounded-md border bg-background px-3"
+          className={selectClass}
           id="organization"
           name="organizationId"
           required

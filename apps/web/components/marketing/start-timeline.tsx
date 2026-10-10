@@ -1,5 +1,7 @@
 import { cn } from "@workspace/ui/lib/utils"
 
+import { HexMark } from "@/components/hex-mark"
+
 /**
  * Why a job starts sooner: the VM it needs is already booted. The segments
  * show which steps happen, in order. Their widths are not measurements.
@@ -8,16 +10,24 @@ export function StartTimeline({ className }: { className?: string }) {
   return (
     <figure className={cn("flex flex-col gap-6", className)}>
       <Track label="A runner provisioned on demand">
-        <Segment className="sm:flex-2">Queued</Segment>
-        <Segment className="sm:flex-3">Provision a VM</Segment>
-        <Segment className="sm:flex-2">Boot</Segment>
-        <Segment className="sm:flex-5" job>
+        <Segment n={1} className="sm:flex-2">
+          Queued
+        </Segment>
+        <Segment n={2} className="sm:flex-3">
+          Provision a VM
+        </Segment>
+        <Segment n={3} className="sm:flex-2">
+          Boot
+        </Segment>
+        <Segment n={4} className="sm:flex-5" job>
           Your job
         </Segment>
       </Track>
       <Track label="A Mac in your hive">
-        <Segment className="sm:flex-2">Queued</Segment>
-        <Segment className="sm:flex-5" job>
+        <Segment n={1} className="sm:flex-2">
+          Queued
+        </Segment>
+        <Segment n={2} className="sm:flex-5" job>
           Your job
         </Segment>
         <span aria-hidden="true" className="hidden sm:block sm:flex-5" />
@@ -46,10 +56,13 @@ function Track({
 }
 
 function Segment({
+  n,
   job = false,
   className,
   children,
 }: {
+  /** Its place in the track, which is the point of the figure. */
+  n: number
   job?: boolean
   className?: string
   children: React.ReactNode
@@ -57,13 +70,20 @@ function Segment({
   return (
     <span
       className={cn(
-        "flex h-11 min-w-0 items-center px-3 font-mono text-xs whitespace-nowrap",
+        "flex h-11 min-w-0 items-center gap-2 px-3 font-mono text-xs whitespace-nowrap",
         job
           ? "bg-primary font-medium text-primary-foreground"
           : "border border-dashed border-foreground/30 text-muted-foreground",
         className
       )}
     >
+      <HexMark
+        n={n}
+        size="sm"
+        className={
+          job ? "bg-primary-foreground/15 text-primary-foreground" : ""
+        }
+      />
       {children}
     </span>
   )

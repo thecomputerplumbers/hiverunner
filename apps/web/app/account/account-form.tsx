@@ -4,6 +4,7 @@ import { authClient } from "@workspace/auth/client"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { Field, FieldLabel, FieldError } from "@workspace/ui/components/field"
+import { fieldHeight } from "@/components/form-controls"
 export function AccountForm({ name }: { name: string }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -35,6 +36,7 @@ export function AccountForm({ name }: { name: string }) {
           <Input
             id="name"
             name="name"
+            className={fieldHeight}
             defaultValue={name}
             required
             maxLength={100}

@@ -5,6 +5,8 @@ import { Button } from "@workspace/ui/components/button"
 import { FieldError } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 
+import { checkboxClass, fieldHeight } from "@/components/form-controls"
+
 /**
  * Starts a card payment: one click for an amount on offer, or any whole
  * number of dollars from `min` to `max`. `offerAuto` shows the box that also
@@ -63,7 +65,7 @@ export function AddFunds({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         <p className="font-mono text-xs text-muted-foreground">quick add</p>
         <div className="flex flex-wrap gap-2">
@@ -104,7 +106,7 @@ export function AddFunds({
             </span>
             <Input
               id={`${id}-own`}
-              className="pl-6 tabular-nums"
+              className={`${fieldHeight} pl-6 tabular-nums`}
               inputMode="numeric"
               autoComplete="off"
               placeholder={String(min)}
@@ -121,6 +123,7 @@ export function AddFunds({
           <Button
             type="submit"
             variant="outline"
+            className={fieldHeight}
             disabled={!ownAllowed || pending !== null}
           >
             {pending?.typed
@@ -138,11 +141,11 @@ export function AddFunds({
         </p>
       </form>
       {offerAuto && (
-        <label htmlFor={id} className="flex items-start gap-2 text-sm">
+        <label htmlFor={id} className="flex items-start gap-3 text-sm">
           <input
             id={id}
             type="checkbox"
-            className="mt-0.5 size-4 accent-primary"
+            className={`mt-0.5 ${checkboxClass}`}
             checked={auto}
             onChange={(event) => setAuto(event.target.checked)}
           />

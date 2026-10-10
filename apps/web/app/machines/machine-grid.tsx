@@ -61,11 +61,11 @@ export function MachineGrid({
             data-presence={presence}
             className="flex scroll-mt-20 flex-col border border-border bg-card/50 target:border-primary"
           >
-            <header className="flex items-center justify-between gap-3 border-b border-border px-3 py-2 font-mono text-xs">
-              <h2 className="flex min-w-0 items-center gap-2 text-sm font-medium">
+            <header className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 font-mono text-xs sm:px-6">
+              <h2 className="flex min-w-0 items-center gap-2.5 text-[0.8125rem] font-normal">
                 <span
                   aria-hidden="true"
-                  className={cn("size-2 shrink-0", dot[presence])}
+                  className={cn("size-2 shrink-0 rounded-full", dot[presence])}
                 />
                 <span className="truncate">{machine.name}</span>
               </h2>
@@ -77,13 +77,13 @@ export function MachineGrid({
                 {PRESENCE[presence] ?? presence}
               </span>
             </header>
-            <div className="flex flex-1 flex-col gap-4 p-3">
+            <div className="flex flex-1 flex-col gap-5 p-4 sm:p-6">
               <Cores machine={machine} inUse={inUse} />
               <dl className="grid grid-cols-3 gap-3 font-mono text-xs [&_dd]:text-sm [&_dd]:tabular-nums [&_dt]:text-muted-foreground">
                 <div>
                   <dt>speed</dt>
                   <dd>{machine.speedScore.toFixed(2)}×</dd>
-                  <span className="mt-1 block h-1 bg-foreground/10">
+                  <span className="mt-1.5 block h-1 bg-foreground/10">
                     <span
                       className="block h-full bg-foreground/50"
                       style={{
@@ -188,7 +188,7 @@ function Cores({ machine, inUse }: { machine: LiveMachine; inUse: number }) {
             className={cn(
               "size-3.5",
               index < inUse
-                ? "bg-primary"
+                ? "bee-stripes"
                 : index < forJobs
                   ? awake
                     ? "border border-primary/60 bg-primary/10"

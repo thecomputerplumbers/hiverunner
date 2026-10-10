@@ -104,7 +104,7 @@ export function Snippet({
   return (
     <pre
       className={cn(
-        "overflow-x-auto bg-code p-3 font-mono text-xs leading-6 text-code-foreground",
+        "overflow-x-auto bg-code px-4 py-3 font-mono text-xs leading-6 text-code-foreground",
         className
       )}
     >

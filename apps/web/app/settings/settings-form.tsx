@@ -12,6 +12,11 @@ import { Input } from "@workspace/ui/components/input"
 import type { RoutingPolicy } from "@workspace/db/schema"
 
 import { post } from "@/components/action-button"
+import {
+  checkboxClass,
+  fieldHeight,
+  selectClass,
+} from "@/components/form-controls"
 
 export function SettingsForm({
   organizationId,
@@ -65,6 +70,7 @@ export function SettingsForm({
         <Input
           id="allowedTeams"
           name="allowedTeams"
+          className={fieldHeight}
           defaultValue={allowedTeams.join(", ")}
           placeholder="Everyone in the organization"
           disabled={!editable || busy}
@@ -81,7 +87,7 @@ export function SettingsForm({
         <select
           id="earningsDestination"
           name="earningsDestination"
-          className="h-10 rounded-md border bg-background px-3"
+          className={selectClass}
           defaultValue={earningsDestination}
           disabled={!editable || busy}
         >
@@ -100,7 +106,7 @@ export function SettingsForm({
         <select
           id="routing"
           name="routing"
-          className="h-10 rounded-md border bg-background px-3"
+          className={selectClass}
           defaultValue={routing}
           disabled={!editable || busy}
         >
@@ -120,7 +126,7 @@ export function SettingsForm({
           <input
             type="checkbox"
             name="macosJobs"
-            className="mt-1 size-4"
+            className={`mt-0.5 ${checkboxClass}`}
             defaultChecked={macosJobs}
             disabled={!editable || busy}
           />

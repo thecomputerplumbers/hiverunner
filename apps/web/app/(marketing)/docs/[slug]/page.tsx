@@ -29,7 +29,7 @@ export default async function DocPage({
   const next = DOCS[index + 1]
   return (
     <article>
-      <h1 className="font-heading text-4xl leading-[1.05] font-semibold tracking-tight">
+      <h1 className="font-heading text-4xl leading-[1.05] font-medium tracking-tight">
         {doc.title}
       </h1>
       <Prose className="mt-4">

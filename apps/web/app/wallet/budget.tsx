@@ -5,8 +5,7 @@ import { Button } from "@workspace/ui/components/button"
 import { FieldError } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 
-const select =
-  "h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+import { fieldHeight, selectClass } from "@/components/form-controls"
 
 const money = (dollars: number) =>
   dollars.toLocaleString("en-US", { style: "currency", currency: "USD" })
@@ -83,10 +82,10 @@ export function Budget({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(share * 100)}
-            className="h-2 w-full bg-muted"
+            className="h-2.5 w-full bg-muted"
           >
             <div
-              className={over ? "h-full bg-destructive" : "h-full bg-primary"}
+              className={over ? "h-full bg-destructive" : "h-full bee-stripes"}
               style={{ width: `${share * 100}%` }}
             />
           </div>
@@ -99,7 +98,7 @@ export function Budget({
 
       {mayChange ? (
         <form
-          className="flex flex-col gap-3 text-sm"
+          className="flex flex-col gap-4 text-sm"
           onSubmit={(event) => {
             event.preventDefault()
             if (allowed && changed && !pending) void save(amount)
@@ -119,7 +118,7 @@ export function Budget({
               </span>
               <Input
                 id={`${id}-amount`}
-                className="pl-6 tabular-nums"
+                className={`${fieldHeight} pl-6 tabular-nums`}
                 inputMode="numeric"
                 autoComplete="off"
                 placeholder="none"
@@ -141,7 +140,7 @@ export function Budget({
             At the limit,
             <select
               id={`${id}-limit`}
-              className={select}
+              className={selectClass}
               value={limit}
               disabled={pending}
               onChange={(event) =>

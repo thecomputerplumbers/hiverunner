@@ -11,7 +11,7 @@ export const metadata = {
 export default function DocsIndexPage() {
   return (
     <>
-      <h1 className="font-heading text-4xl leading-[1.05] font-semibold tracking-tight">
+      <h1 className="font-heading text-4xl leading-[1.05] font-medium tracking-tight">
         Docs
       </h1>
       <p className="mt-4 max-w-2xl text-lg leading-8 text-muted-foreground">
@@ -25,7 +25,7 @@ export default function DocsIndexPage() {
               href={`/docs/${doc.slug}`}
               className="group flex flex-col gap-1 py-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <span className="font-heading text-lg font-semibold underline decoration-transparent decoration-2 underline-offset-4 group-hover:decoration-primary">
+              <span className="font-heading text-lg font-normal underline decoration-transparent decoration-2 underline-offset-4 group-hover:decoration-primary">
                 {doc.title}
               </span>
               <span className="text-muted-foreground">{doc.description}</span>

@@ -34,11 +34,11 @@ export default async function Page({
         {!items.length && <p>No projects here yet.</p>}
         {items.map((item) => (
           <Link
-            className="block rounded-lg border p-4 hover:bg-muted"
+            className="block border border-border bg-card/50 p-4 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 sm:p-6"
             key={item.id}
             href={`/projects/${item.id}`}
           >
-            <span className="font-medium">{item.name}</span>
+            <span>{item.name}</span>
             <span className="ml-3 text-sm text-muted-foreground">
               {item.status}
             </span>

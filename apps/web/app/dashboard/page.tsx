@@ -11,6 +11,7 @@ import { cn } from "@workspace/ui/lib/utils"
 import { AccountPage } from "@/components/account-page"
 import { ActionButton } from "@/components/action-button"
 import { Notice, Panel, Snippet } from "@/components/console/panel"
+import { HexMark } from "@/components/hex-mark"
 import { RunnerSizes } from "@/components/console/runner-sizes"
 import { WorkflowDiff } from "@/components/marketing/workflow-diff"
 import { getDb } from "@/db"
@@ -277,19 +278,10 @@ function FirstJob({
       <ol className="divide-y divide-border">
         {steps.map((step, index) => (
           <li key={step.title} className="flex gap-4 px-4 py-5 sm:px-6">
-            <span
-              aria-hidden="true"
-              className={cn(
-                "flex h-8 w-7 shrink-0 items-center justify-center font-mono text-sm hex",
-                step.done
-                  ? "bg-primary font-semibold text-primary-foreground"
-                  : index === next
-                    ? "bg-primary/25 text-primary"
-                    : "bg-muted text-muted-foreground"
-              )}
-            >
-              {step.done ? "✓" : index + 1}
-            </span>
+            <HexMark
+              n={index + 1}
+              state={step.done ? "done" : index === next ? "next" : "todo"}
+            />
             {step.body ? (
               <details
                 open={index === next}

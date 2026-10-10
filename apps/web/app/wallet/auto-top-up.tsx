@@ -4,8 +4,7 @@ import { useId, useState } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { FieldError } from "@workspace/ui/components/field"
 
-const select =
-  "h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+import { selectClass } from "@/components/form-controls"
 
 /**
  * The standing instruction to keep the balance up, written as the sentence
@@ -66,7 +65,7 @@ export function AutoTopUp({
   return (
     <div className="flex flex-col gap-4">
       <p>
-        <strong>{enabled ? "On." : "Off."}</strong>{" "}
+        <strong className="font-medium">{enabled ? "On." : "Off."}</strong>{" "}
         {enabled
           ? `Charges ${card}.`
           : `Nothing is charged unless you add funds yourself. ${card[0]!.toUpperCase()}${card.slice(1)} is saved.`}
@@ -79,7 +78,7 @@ export function AutoTopUp({
           When the balance falls below
           <select
             id={`${id}-below`}
-            className={select}
+            className={selectClass}
             value={draft.below}
             disabled={pending}
             onChange={(event) =>
@@ -100,7 +99,7 @@ export function AutoTopUp({
           add
           <select
             id={`${id}-amount`}
-            className={select}
+            className={selectClass}
             value={draft.amount}
             disabled={pending}
             onChange={(event) =>
@@ -121,7 +120,7 @@ export function AutoTopUp({
           and charge at most
           <select
             id={`${id}-cap`}
-            className={select}
+            className={selectClass}
             value={draft.cap ?? "none"}
             disabled={pending}
             onChange={(event) =>

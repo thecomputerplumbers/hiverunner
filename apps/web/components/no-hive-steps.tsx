@@ -1,6 +1,7 @@
 import { Button } from "@workspace/ui/components/button"
 
 import { Snippet } from "@/components/console/panel"
+import { HexMark } from "@/components/hex-mark"
 import { INSTALL_COMMAND } from "@/components/marketing/site"
 import { RouteLink } from "@/components/route-link"
 
@@ -22,9 +23,9 @@ export function NoHiveSteps({
         A hive belongs to a GitHub organization with HiveWorker installed on it.
         Your GitHub account is not in one yet. Three steps:
       </p>
-      <ol className="flex list-decimal flex-col gap-4 pl-5 text-muted-foreground marker:font-medium marker:text-foreground">
-        <li>
-          <strong className="text-foreground">
+      <ol className="flex flex-col gap-5 text-muted-foreground">
+        <Step n={1}>
+          <strong className="font-medium text-foreground">
             Have a GitHub organization.
           </strong>{" "}
           Any one you belong to works. If you have none,{" "}
@@ -37,23 +38,25 @@ export function NoHiveSteps({
             create a free one on GitHub
           </a>
           . A personal account cannot be a hive.
-        </li>
-        <li>
-          <strong className="text-foreground">
+        </Step>
+        <Step n={2}>
+          <strong className="font-medium text-foreground">
             Install HiveWorker on that organization.
           </strong>{" "}
           On GitHub&apos;s install screen, choose the organization, not your
           personal account. If you are not an owner of it, GitHub sends the
           owners a request instead, and HiveWorker is ready once one of them
           approves it.
-        </li>
-        <li>
-          <strong className="text-foreground">Add your machine.</strong> Run the
-          install command again, and approve the new code it shows.
-          <Snippet className="mt-2" prompt>
+        </Step>
+        <Step n={3}>
+          <strong className="font-medium text-foreground">
+            Add your machine.
+          </strong>{" "}
+          Run the install command again, and approve the new code it shows.
+          <Snippet className="mt-3" prompt>
             {INSTALL_COMMAND}
           </Snippet>
-        </li>
+        </Step>
       </ol>
       <div className="flex flex-wrap gap-3">
         <Button render={<RouteLink to="/install" />}>Install on GitHub</Button>
@@ -71,5 +74,15 @@ export function NoHiveSteps({
         their dashboard. That needs no installing on your side.
       </p>
     </div>
+  )
+}
+
+/** The first step is the one to do now; nothing here knows how far they got. */
+function Step({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-4">
+      <HexMark n={n} state={n === 1 ? "next" : "todo"} />
+      <div className="min-w-0 flex-1 pt-1">{children}</div>
+    </li>
   )
 }

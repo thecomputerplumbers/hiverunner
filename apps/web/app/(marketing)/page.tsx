@@ -7,6 +7,7 @@ import {
   competitorUsdPerMinute,
   privatePoolUsdPerMinute,
 } from "@workspace/pricing"
+import { HexMark } from "@/components/hex-mark"
 import { Code, CodeBlock } from "@/components/marketing/code"
 import { CostChart } from "@/components/marketing/cost-chart"
 import { EarlyAccessNote } from "@/components/marketing/early-access"
@@ -315,17 +316,8 @@ function Step({
   return (
     <li className="flex min-w-0 flex-col gap-4 border-r border-b border-border p-6 sm:p-8">
       <div className="flex items-center gap-3">
-        <span className="relative flex size-9 shrink-0 items-center justify-center font-mono text-sm font-medium">
-          <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            className="absolute inset-0 size-full fill-none stroke-primary stroke-[1.5]"
-          >
-            <path d="M12 1.5 21.1 6.75v10.5L12 22.5 2.9 17.25V6.75z" />
-          </svg>
-          <span className="relative">{number}</span>
-        </span>
-        <h3 className="font-heading text-base font-medium tracking-tight">
+        <HexMark n={number} state={number === 1 ? "next" : "todo"} />
+        <h3 className="font-heading text-base font-normal tracking-tight">
           {title}
         </h3>
       </div>

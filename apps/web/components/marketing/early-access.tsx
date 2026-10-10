@@ -18,7 +18,7 @@ export function EarlyAccessNote({
         className
       )}
     >
-      <strong className="font-semibold text-foreground">Early access.</strong>{" "}
+      <strong className="font-medium text-foreground">Early access.</strong>{" "}
       {children ??
         "HiveWorker is not generally available yet. These pages describe how it is designed to work."}
     </p>

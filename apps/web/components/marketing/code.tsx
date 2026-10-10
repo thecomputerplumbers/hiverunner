@@ -32,12 +32,12 @@ export function CodeBlock({
   return (
     <figure
       className={cn(
-        "overflow-hidden border border-white/15 bg-code text-code-foreground",
+        "overflow-hidden border border-code-foreground/15 bg-code text-code-foreground",
         className
       )}
     >
       {title ? (
-        <figcaption className="border-b border-white/10 px-4 py-2 font-mono text-xs text-code-foreground/60">
+        <figcaption className="border-b border-code-foreground/10 px-4 py-2 font-mono text-xs text-code-foreground/60">
           {title}
         </figcaption>
       ) : null}

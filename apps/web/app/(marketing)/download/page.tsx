@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { Container } from "@workspace/ui-shell/components/page-header"
+import { HexMark } from "@/components/hex-mark"
 import { Code, CodeBlock } from "@/components/marketing/code"
 import { Band, PageIntro, textLink } from "@/components/marketing/page-parts"
 import {
@@ -53,19 +54,31 @@ export default function DownloadPage() {
       </Container>
 
       <Band title="What the command does">
-        <ol className="flex list-decimal flex-col gap-3 pl-5 leading-7">
+        <ol className="flex flex-col gap-4 leading-7 [&>li]:flex [&>li]:gap-4">
           <li>
-            Downloads the daemon and the Linux image jobs run in, about 300 MB,
-            and checks both against their published checksums.
+            <HexMark n={1} size="sm" className="mt-0.5" />
+            <span>
+              Downloads the daemon and the Linux image jobs run in, about 300
+              MB, and checks both against their published checksums.
+            </span>
           </li>
           <li>
-            Installs them under your home directory. Nothing is installed
-            system-wide and it never asks for your password.
+            <HexMark n={2} size="sm" className="mt-0.5" />
+            <span>
+              Installs them under your home directory. Nothing is installed
+              system-wide and it never asks for your password.
+            </span>
           </li>
-          <li>Opens your browser to sign this Mac in with GitHub.</li>
           <li>
-            Starts the daemon as a background service for your user, so it comes
-            back after a restart.
+            <HexMark n={3} size="sm" className="mt-0.5" />
+            <span>Opens your browser to sign this Mac in with GitHub.</span>
+          </li>
+          <li>
+            <HexMark n={4} size="sm" className="mt-0.5" />
+            <span>
+              Starts the daemon as a background service for your user, so it
+              comes back after a restart.
+            </span>
           </li>
         </ol>
         <p className="leading-7 text-muted-foreground">
