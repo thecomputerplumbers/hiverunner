@@ -166,9 +166,9 @@ export default function SecurityPage() {
         </Facts>
         <p className="text-sm leading-7 text-muted-foreground">
           HiveWorker has not had an external security audit. To report a
-          problem, write to{" "}
-          <a href={`mailto:${product.supportEmail}`} className={textLink}>
-            {product.supportEmail}
+          problem, text{" "}
+          <a href={`sms:${product.supportSms}`} className={textLink}>
+            {product.supportSmsDisplay}
           </a>
           .
         </p>

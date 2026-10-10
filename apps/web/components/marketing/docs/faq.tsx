@@ -79,8 +79,8 @@ export function Faq() {
 
       <dt>How do I get help or report a problem?</dt>
       <dd>
-        Write to{" "}
-        <a href={`mailto:${product.supportEmail}`}>{product.supportEmail}</a>.
+        Text{" "}
+        <a href={`sms:${product.supportSms}`}>{product.supportSmsDisplay}</a>.
       </dd>
     </dl>
   )

@@ -81,11 +81,8 @@ export function MarketingFooter() {
       </SiteFooterColumns>
       <SiteFooterMeta>
         <span>The Computer Plumbers LLC</span>
-        <a
-          className="hover:text-foreground"
-          href={`mailto:${product.supportEmail}`}
-        >
-          {product.supportEmail}
+        <a className="hover:text-foreground" href={`sms:${product.supportSms}`}>
+          Text {product.supportSmsDisplay}
         </a>
       </SiteFooterMeta>
     </SiteFooter>

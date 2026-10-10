@@ -14,7 +14,7 @@ const EFFECTIVE = "October 9, 2026"
 
 export default function TermsPage() {
   const contact = (
-    <a href={`mailto:${product.supportEmail}`}>{product.supportEmail}</a>
+    <a href={`sms:${product.supportSms}`}>{product.supportSmsDisplay}</a>
   )
   return (
     <>
@@ -194,7 +194,7 @@ export default function TermsPage() {
           </p>
 
           <h2>18. Contact</h2>
-          <p>Questions about these terms: {contact}</p>
+          <p>Questions about these terms: text {contact}</p>
         </Prose>
       </Container>
     </>

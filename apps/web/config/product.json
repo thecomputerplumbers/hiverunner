@@ -3,6 +3,8 @@
   "slug": "hiveworker",
   "description": "GitHub Actions runners on your own developers' machines.",
   "supportEmail": "auth@thecomputerplumbers.com",
+  "supportSms": "+14357730209",
+  "supportSmsDisplay": "435-773-0209",
   "features": {
     "billing": false,
     "funding": true,

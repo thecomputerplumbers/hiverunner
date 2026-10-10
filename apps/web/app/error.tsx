@@ -13,9 +13,9 @@ export default function ErrorPage({
         Something went wrong
       </h1>
       <p>
-        Please try again. If this continues, contact{" "}
-        <a className="underline" href={`mailto:${product.supportEmail}`}>
-          {product.supportEmail}
+        Please try again. If this continues, text{" "}
+        <a className="underline" href={`sms:${product.supportSms}`}>
+          {product.supportSmsDisplay}
         </a>
         .
       </p>

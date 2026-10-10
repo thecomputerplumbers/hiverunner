@@ -14,7 +14,7 @@ const EFFECTIVE = "October 9, 2026"
 
 export default function PrivacyPage() {
   const contact = (
-    <a href={`mailto:${product.supportEmail}`}>{product.supportEmail}</a>
+    <a href={`sms:${product.supportSms}`}>{product.supportSmsDisplay}</a>
   )
   return (
     <>
@@ -154,8 +154,8 @@ export default function PrivacyPage() {
             uninstall the GitHub App at any time. Depending on where you live,
             you may have the right to see, correct, export or delete your
             personal information, to object to or restrict how we use it, and to
-            complain to your data protection authority. Write to {contact} and
-            we will answer within the time the law sets. We will not treat you
+            complain to your data protection authority. Text {contact} and we
+            will answer within the time the law sets. We will not treat you
             differently for using these rights.
           </p>
 
@@ -181,7 +181,7 @@ export default function PrivacyPage() {
           </p>
 
           <h2>Contact</h2>
-          <p>Questions or requests: {contact}</p>
+          <p>Questions or requests: text {contact}</p>
         </Prose>
       </Container>
     </>
