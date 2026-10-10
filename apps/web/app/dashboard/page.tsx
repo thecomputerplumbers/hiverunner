@@ -9,6 +9,7 @@ import { roleAtLeast } from "@workspace/auth"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { AccountPage } from "@/components/account-page"
+import { AgentPrompt } from "@/components/agent-prompt"
 import { ActionButton } from "@/components/action-button"
 import { Notice, Panel, Snippet } from "@/components/console/panel"
 import { HexMark } from "@/components/hex-mark"
@@ -22,6 +23,7 @@ import {
   releasedDaemonVersion,
 } from "@/components/marketing/site"
 import { getPool } from "@/lib/session"
+import { setupPrompt } from "@/mcp/journey"
 import { LiveDashboard } from "./live-dashboard"
 
 export const metadata = { title: "Dashboard" }
@@ -94,15 +96,18 @@ export default async function DashboardPage({
       )}
 
       {!ready && (
-        <FirstJob
-          machines={live.machines.length}
-          online={online}
-          jobs={live.recent.length}
-          organization={installation.accountLogin}
-          organizationId={organizationId}
-          elsewhere={elsewhere}
-          owner={owner}
-        />
+        <>
+          <FirstJob
+            machines={live.machines.length}
+            online={online}
+            jobs={live.recent.length}
+            organization={installation.accountLogin}
+            organizationId={organizationId}
+            elsewhere={elsewhere}
+            owner={owner}
+          />
+          <AgentPrompt prompt={setupPrompt(env.APP_URL)} />
+        </>
       )}
 
       <LiveDashboard
@@ -328,8 +333,9 @@ function FirstJob({
 function NoPool() {
   return (
     <AccountPage title="No hive yet">
-      <div className="max-w-2xl">
+      <div className="flex max-w-2xl flex-col gap-8 sm:gap-10">
         <NoHiveSteps />
+        <AgentPrompt prompt={setupPrompt(env.APP_URL)} />
       </div>
     </AccountPage>
   )

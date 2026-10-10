@@ -9,6 +9,7 @@ import {
   competitorUsdPerMinute,
   privatePoolUsdPerMinute,
 } from "@workspace/pricing"
+import { CopyButton } from "@/components/console/invite"
 import { HexMark } from "@/components/hex-mark"
 import { Code, CodeBlock } from "@/components/marketing/code"
 import {
@@ -26,9 +27,11 @@ import {
   DAEMON_RELEASED,
   INSTALL_COMMAND,
   mcpClients,
+  PRODUCT_ORIGIN,
 } from "@/components/marketing/site"
 import { StartTimeline } from "@/components/marketing/start-timeline"
 import { WorkflowDiff } from "@/components/marketing/workflow-diff"
+import { setupPrompt } from "@/mcp/journey"
 import { RouteLink } from "@/components/route-link"
 
 export const metadata = {
@@ -234,6 +237,11 @@ export default function HomePage() {
               bill. There is no API key: you sign in with GitHub.
             </p>
             <SectionLink href="/docs/agents">Connect an agent</SectionLink>
+            <div>
+              <CopyButton text={setupPrompt(PRODUCT_ORIGIN)} variant="outline">
+                Copy the setup prompt
+              </CopyButton>
+            </div>
           </SectionHeading>
           <div className="flex min-w-0 flex-col gap-6">
             <CodeBlock title="Claude Code" wrap>

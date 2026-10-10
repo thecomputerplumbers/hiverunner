@@ -12,7 +12,10 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 
+import { AgentPrompt } from "@/components/agent-prompt"
+import { PRODUCT_ORIGIN } from "@/components/marketing/site"
 import { getServerSession } from "@/lib/session"
+import { setupPrompt } from "@/mcp/journey"
 import product from "@/config/product.json"
 
 export const metadata = { title: "Sign in" }
@@ -65,6 +68,14 @@ export default async function SignInPage({
           )}
         </CardContent>
       </Card>
+      {/* Someone following a teammate's invite is adding a Mac, not setting up. */}
+      {!invited && (
+        <AgentPrompt
+          prompt={setupPrompt(env.APP_URL || PRODUCT_ORIGIN)}
+          quiet
+          className="w-full max-w-sm"
+        />
+      )}
       {local && (
         <div className="flex w-full max-w-sm flex-col gap-2">
           <p className="text-center text-sm text-muted-foreground">
