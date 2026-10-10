@@ -88,6 +88,11 @@ export function createAuth(options: CreateAuthOptions) {
         "/sign-in/email": { window: 60, max: 10 },
         "/sign-in/social": { window: 60, max: 20 },
         "/oauth2/register": { window: 3600, max: 20 },
+        // A daemon waiting for its owner to approve asks every 5 seconds for
+        // 10 minutes. The limiter starts a new count only after a pause as
+        // long as its window, which that never has, so the default of 100
+        // was reached after 8 minutes. Room for ten machines at one address.
+        "/device/token": { window: 10, max: 1200 },
       },
     },
 

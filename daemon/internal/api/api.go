@@ -190,6 +190,10 @@ var (
 	ErrExpired = errors.New("the code expired before it was approved")
 )
 
+// slower is how much longer to wait between polls each time the server asks
+// for fewer of them.
+var slower = 5 * time.Second
+
 // AwaitToken polls until the person approves, denies, or the code expires.
 func (c *Client) AwaitToken(ctx context.Context, code DeviceCode) (string, error) {
 	interval := time.Duration(code.Interval) * time.Second
@@ -227,6 +231,13 @@ func (c *Client) AwaitToken(ctx context.Context, code DeviceCode) (string, error
 		if status < 300 && granted.AccessToken != "" {
 			return granted.AccessToken, nil
 		}
+		// The server's limit on requests is not a refusal either. It counts
+		// every poll made without a pause as long as its window, so someone
+		// slow to approve, or signing in a second time, reaches it.
+		if status == http.StatusTooManyRequests {
+			interval += slower
+			continue
+		}
 		var refusal struct {
 			Error string `json:"error"`
 		}
@@ -234,7 +245,7 @@ func (c *Client) AwaitToken(ctx context.Context, code DeviceCode) (string, error
 		switch refusal.Error {
 		case "authorization_pending":
 		case "slow_down":
-			interval += 5 * time.Second
+			interval += slower
 		case "access_denied":
 			return "", ErrDenied
 		case "expired_token":

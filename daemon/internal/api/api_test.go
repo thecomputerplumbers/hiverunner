@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // server answers each path from a queue of canned responses.
@@ -151,6 +152,21 @@ func TestADroppedConnectionWhileWaitingIsRetried(t *testing.T) {
 				connection, _, _ := w.(http.Hijacker).Hijack()
 				connection.Close()
 			},
+			reply(200, map[string]string{"access_token": "session-token"}),
+		},
+	})
+	token, err := c.AwaitToken(context.Background(), DeviceCode{DeviceCode: "dc", ExpiresIn: 600})
+	if err != nil || token != "session-token" {
+		t.Fatalf("AwaitToken() = %q, %v", token, err)
+	}
+}
+
+func TestTooManyRequestsWhileWaitingIsWaitedOut(t *testing.T) {
+	slower = time.Millisecond
+	t.Cleanup(func() { slower = 5 * time.Second })
+	c := server(t, map[string][]func(http.ResponseWriter, *http.Request){
+		"/api/auth/device/token": {
+			reply(429, map[string]string{"message": "Too many requests. Please try again later."}),
 			reply(200, map[string]string{"access_token": "session-token"}),
 		},
 	})
