@@ -134,8 +134,8 @@ export default function HomePage() {
               A job sent straight to a <Code>hive</Code> label waits in GitHub's
               queue until a Mac is free, which suits jobs that can wait.
             </p>
-            <SectionLink href="/docs/quickstart#route-a-workflow">
-              The routed workflow, in the quickstart
+            <SectionLink href="/docs/routing">
+              How routing and fallback work
             </SectionLink>
           </SectionHeading>
           <RouteDiagram className="h-fit" />

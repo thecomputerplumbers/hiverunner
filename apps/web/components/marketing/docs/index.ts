@@ -5,6 +5,7 @@ import { LabelsAndSizes } from "./labels-and-sizes"
 import { Pools } from "./pools"
 import { Pricing } from "./pricing"
 import { Quickstart } from "./quickstart"
+import { Routing } from "./routing"
 
 /**
  * The docs, in sidebar order. Each page is a component in this folder, so
@@ -16,6 +17,13 @@ export const DOCS = [
     title: "Quickstart",
     description: "Install the GitHub App, add a machine, route a workflow.",
     Body: Quickstart,
+  },
+  {
+    slug: "routing",
+    title: "Routing and fallback",
+    description:
+      "Run a job on your hive when a machine is free, and on your current runner when none is.",
+    Body: Routing,
   },
   {
     slug: "agents",

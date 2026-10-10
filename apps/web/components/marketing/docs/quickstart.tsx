@@ -65,7 +65,9 @@ export function Quickstart() {
           one short file you can read
         </a>
         : it asks whether a machine is free, waits up to fifteen seconds for
-        one, and never fails your workflow.
+        one, and never fails your workflow.{" "}
+        <Link href="/docs/routing">Routing and fallback</Link> has its inputs
+        and what it checks.
       </p>
 
       <h2 id="good-to-know">Good to know</h2>

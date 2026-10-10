@@ -30,9 +30,9 @@ export function Pools() {
       </p>
       <p>
         To avoid the wait, check for a free machine before the job is queued and
-        use a GitHub-hosted runner when there is none. The{" "}
-        <Link href="/docs/quickstart#route-a-workflow">Quickstart</Link> shows
-        the workflow, and it is the setup we recommend.
+        use the runner you have now when there is none.{" "}
+        <Link href="/docs/routing">Routing and fallback</Link> shows the
+        workflow, and it is the setup we recommend.
       </p>
 
       <h2 id="empty-wallet">When the wallet is empty</h2>

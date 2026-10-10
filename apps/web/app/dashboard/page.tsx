@@ -10,6 +10,7 @@ import { cn } from "@workspace/ui/lib/utils"
 
 import { AccountPage } from "@/components/account-page"
 import { AgentPrompt } from "@/components/agent-prompt"
+import { CopyButton } from "@/components/console/invite"
 import { ActionButton } from "@/components/action-button"
 import { Notice, Panel, Snippet } from "@/components/console/panel"
 import { HexMark } from "@/components/hex-mark"
@@ -24,6 +25,7 @@ import {
   releasedDaemonVersion,
 } from "@/components/marketing/site"
 import { getPool } from "@/lib/session"
+import { ROUTED_WORKFLOW } from "@/lib/workflow"
 import { setupPrompt } from "@/mcp/journey"
 import { LiveDashboard } from "./live-dashboard"
 
@@ -241,9 +243,24 @@ function FirstJob({
     },
     {
       done: jobs > 0,
-      title: "Change one line in a workflow",
+      title: "Send a workflow to your hive",
       body: (
         <>
+          <p>
+            Add one small job in front of the ones you have. It asks whether a
+            Mac in your hive is free, and falls back to the runner you use now
+            when none is, so a closed lid never leaves a job waiting.
+          </p>
+          <Snippet>{ROUTED_WORKFLOW}</Snippet>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <CopyButton text={ROUTED_WORKFLOW} variant="outline">
+              Copy the workflow
+            </CopyButton>
+            <Link className="underline" href="/docs/routing">
+              How routing and fallback work
+            </Link>
+          </div>
+          <p>For a job that can wait for a Mac, change one line instead:</p>
           <div className="grid items-start gap-6 md:grid-cols-2">
             <WorkflowDiff />
             <RunnerSizes />
