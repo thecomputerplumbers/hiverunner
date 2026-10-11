@@ -90,6 +90,11 @@ curl.exe -fsSLo install.ps1 https://get.hiveworkr.thecomputerplumbers.com/instal
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
+Over SSH the script cannot keep the distribution alive itself, since what an
+SSH session starts ends with it. It has Windows start that on the desktop of
+the person signed in, through a scheduled task it removes straight after; if
+no one is signed in, the daemon starts at the next sign-in.
+
 ## On Linux
 
 The same daemon and the same jobs, on arm64 and on x86-64. An arm64 box runs
