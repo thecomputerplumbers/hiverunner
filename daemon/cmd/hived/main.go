@@ -208,7 +208,9 @@ func login(ctx context.Context, args []string) error {
 	enrollment, err := enrollChoosing(machine, func(machine api.Machine) (api.Enrollment, error) {
 		return client.Enroll(ctx, token, machine)
 	}, func(pools []api.Pool) ([]api.Pool, error) {
-		return askPools("You belong to more than one hive. Which should this machine serve?", pools)
+		return askPools("You belong to more than one hive. Which should this machine serve?", pools, func(pool api.Pool) string {
+			return fmt.Sprintf("hived login --hive %s    (%s)", pool.ID, pool.Name)
+		})
 	})
 	var refusal *api.Error
 	if errors.As(err, &refusal) && refusal.Code == "NO_HIVE" {

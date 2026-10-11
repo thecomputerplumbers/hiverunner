@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/thecomputerplumbers/hiveworker/daemon/internal/api"
@@ -55,5 +56,15 @@ func TestEnrollingAfterChoosingHivesReturnsWhatTheSecondAttemptSaid(t *testing.T
 	never := func([]api.Pool) ([]api.Pool, error) { t.Fatal("asked which hive"); return nil, nil }
 	if _, err := enrollChoosing(api.Machine{OrganizationIDs: []string{"gh-2"}}, enroll, never); err != nil || len(asked) != 1 {
 		t.Fatalf("asked %v, %v; want one attempt", asked, err)
+	}
+}
+
+func TestAQuestionNobodyAnswersSaysTheCommandForEachHive(t *testing.T) {
+	pools := []api.Pool{{ID: "gh-1", Name: "acme"}, {ID: "gh-2", Name: "globex"}}
+	err := unanswered(pools, func(pool api.Pool) string { return "hived login --hive " + pool.ID })
+	for _, want := range []string{"hived login --hive gh-1", "hived login --hive gh-2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q does not say %q", err, want)
+		}
 	}
 }

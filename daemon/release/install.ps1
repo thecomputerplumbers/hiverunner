@@ -62,11 +62,40 @@
     return ($names -contains $Distro)
   }
   # What keeps the Linux running: WSL stops one that nothing is attached to.
-  $KeepAlive = "conhost.exe --headless wsl.exe -d $Distro -u $User --exec sleep infinity"
-  function StopKeepAlive {
+  $KeepAliveArgs = "--headless wsl.exe -d $Distro -u $User --exec sleep infinity"
+  $KeepAlive = "conhost.exe $KeepAliveArgs"
+  function KeepAlives {
     Get-CimInstance Win32_Process -Filter "Name = 'wsl.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -like "*-d $Distro*sleep infinity*" } |
-      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      Where-Object { $_.CommandLine -like "*-d $Distro*sleep infinity*" }
+  }
+  function StopKeepAlive {
+    KeepAlives | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
+  # Starts it unless it is running, and returns whether it is running after.
+  # One started from a session with no desktop, as over SSH, ends with that
+  # session, so there Windows is asked to start it on the desktop of whoever
+  # is signed in, through a task that is removed again at once.
+  function StartKeepAlive {
+    if (KeepAlives) { return $true }
+    if ((Get-Process -Id $PID).SessionId -ne 0) {
+      Start-Process -FilePath 'conhost.exe' -ArgumentList $KeepAliveArgs -WindowStyle Hidden
+      return $true
+    }
+    $task = 'HiveWorker keep-alive'
+    try {
+      $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+      # Without these Windows would end it after three days, or on battery.
+      $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+      Register-ScheduledTask -TaskName $task -Force -Settings $settings `
+        -Action (New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $KeepAliveArgs) `
+        -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive) | Out-Null
+      Start-ScheduledTask -TaskName $task
+      for ($i = 0; $i -lt 10 -and -not (KeepAlives); $i++) { Start-Sleep -Milliseconds 500 }
+    } catch {
+    } finally {
+      Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    return [bool](KeepAlives)
   }
 
   try {
@@ -159,7 +188,7 @@ DEVICES
 chmod 0755 /usr/local/sbin/hive-devices
 # systemd, so the daemon is a service like on any Linux; the daemon's user by
 # default; Windows' own programs off the PATH.
-cat > /etc/wsl.conf <<'CONF'
+cat > /etc/wsl.conf.new <<'CONF'
 [boot]
 systemd=true
 command=/usr/local/sbin/hive-devices
@@ -170,12 +199,23 @@ default=hive
 [interop]
 appendWindowsPath=false
 CONF
+# Said to the script that called this one, which restarts the Linux for it.
+if cmp -s /etc/wsl.conf.new /etc/wsl.conf; then
+  rm /etc/wsl.conf.new
+else
+  mv /etc/wsl.conf.new /etc/wsl.conf
+  touch /run/hive-restart
+fi
 '@
     if (-not (RunScript 'root' $setup)) { Fail 'could not set up the Linux. Run this again to retry.' }
 
-    # Restarted, so it comes up with systemd and the devices as configured.
-    StopKeepAlive
-    & wsl.exe --terminate $Distro | Out-Null
+    # Restarted when that changed how it starts, so it comes up with systemd
+    # and the devices as configured. Otherwise left running: a restart would
+    # end a job it is running, or a sign-in someone is waiting on.
+    if (InLinux 'root' 'test -e /run/hive-restart || ! test -d /run/systemd/system') {
+      StopKeepAlive
+      & wsl.exe --terminate $Distro | Out-Null
+    }
     # "degraded" is a Linux with one unit unhappy, which is still running.
     [void](InLinux 'root' 'timeout 90 systemctl is-system-running --wait >/dev/null 2>&1; /usr/local/sbin/hive-devices; loginctl enable-linger hive')
     if (-not (InLinux $User 'test -r /dev/kvm && test -w /dev/kvm')) {
@@ -202,13 +242,16 @@ for i in $(seq 30); do
 done
 curl -fsSL "$HIVE_RELEASES/install.sh" | sh
 '@
-    if (-not (RunScript $User ("export HIVE_RELEASES='$Base'`n" + $install))) { Fail 'the install inside the Linux did not finish. Run this again to retry.' }
+    if (-not (RunScript $User ("export HIVE_RELEASES='$Base' HIVE_ON_WINDOWS=1`n" + $install))) { Fail 'the install inside the Linux did not finish. Run this again to retry.' }
 
     Step 'Keeping it running'
     Set-ItemProperty -Path $RunKey -Name 'HiveWorker' -Value $KeepAlive
-    StopKeepAlive
-    Start-Process -FilePath 'conhost.exe' -ArgumentList "--headless wsl.exe -d $Distro -u $User --exec sleep infinity" -WindowStyle Hidden
-    Say 'It starts when you sign in to Windows, and stops when you sign out.'
+    if (StartKeepAlive) {
+      Say 'It starts when you sign in to Windows, and stops when you sign out.'
+    } else {
+      Say 'No one is signed in at this PC, so it is not running yet. It starts when'
+      Say 'you sign in to Windows, and stops when you sign out.'
+    }
 
     # hived, from any Windows terminal.
     $shim = "@echo off`r`nwsl.exe -d $Distro -u $User -- /home/$User/.local/bin/hived %*`r`n"

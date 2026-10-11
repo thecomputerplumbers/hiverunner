@@ -69,7 +69,9 @@ func link(ctx context.Context, args []string) error {
 				open = append(open, pool)
 			}
 		}
-		chosen, err := askPools("Which other hives should this machine serve?", open)
+		chosen, err := askPools("Which other hives should this machine serve?", open, func(pool api.Pool) string {
+			return "hived link " + pool.Name
+		})
 		if err != nil {
 			return err
 		}
@@ -188,7 +190,7 @@ func ids(pools []api.Pool) []string {
 
 // askPools lets someone in several organizations choose which of them this
 // machine should serve. It can serve all of them at once.
-func askPools(question string, pools []api.Pool) ([]api.Pool, error) {
+func askPools(question string, pools []api.Pool, again func(api.Pool) string) ([]api.Pool, error) {
 	fmt.Println("\n" + question)
 	for i, pool := range pools {
 		fmt.Printf("  %d. %s\n", i+1, pool.Name)
@@ -196,9 +198,21 @@ func askPools(question string, pools []api.Pool) ([]api.Pool, error) {
 	fmt.Print("Numbers separated by commas, or \"all\": ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		return nil, errors.New("no hive chosen; run again and name it: hived login --hive, or hived link <hive>")
+		fmt.Println()
+		return nil, unanswered(pools, again)
 	}
 	return choosePools(strings.TrimSpace(line), pools)
+}
+
+// unanswered is what to say when nobody was there to choose, as when the
+// command was started by a script. The approval is spent by then, so it
+// gives the command that names each hive and needs no question.
+func unanswered(pools []api.Pool, again func(api.Pool) string) error {
+	lines := []string{"no hive was chosen, because there was no one to ask. Run it again and name the hive:"}
+	for _, pool := range pools {
+		lines = append(lines, "  "+again(pool))
+	}
+	return errors.New(strings.Join(lines, "\n"))
 }
 
 func choosePools(answer string, pools []api.Pool) ([]api.Pool, error) {

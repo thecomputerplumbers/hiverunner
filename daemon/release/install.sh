@@ -52,7 +52,9 @@ tips() { # what this machine is called, the shell's startup file
   say "  hived status     what $1 lends, and whether it is lending"
   say "  hived pause      stop taking jobs"
   say "  hived config     how many jobs, how large, and when"
-  case ":$PATH:" in
+  # Under Windows the commands are typed in Windows, where install.ps1 puts
+  # a hived of its own on the PATH.
+  case ":$PATH:${HIVE_ON_WINDOWS:+$BIN_DIR:}" in
     *":$BIN_DIR:"*) ;;
     *)
       say ""
