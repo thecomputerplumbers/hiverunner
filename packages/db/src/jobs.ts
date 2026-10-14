@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm"
 
 import type { AuthDb } from "@workspace/auth/db"
-import { FLOOR_RATE, priceJob } from "@workspace/pricing"
+import { FLOOR_RATE, outOfCredit, priceJob } from "@workspace/pricing"
 
 import { budgetHolds } from "@workspace/db/budget"
 import { getBalance } from "@workspace/db/ledger"
@@ -25,16 +25,18 @@ export const jobIdFor = (
 
 /**
  * Whether the pool may take another job. An organization that has spent its
- * balance gets no new jobs acquired: they wait in GitHub's queue, and the
- * dashboard says why. So does one that has spent a monthly budget it asked
+ * balance and its overdraft gets no new jobs acquired: they wait in GitHub's
+ * queue, and the dashboard says why. So does one that has spent a monthly budget it asked
  * to be held to. A job already running is never cut off.
  */
 export async function canAcquireJobs(db: AuthDb, organizationId: string) {
   return (
-    (await getBalance(db, {
-      accountType: "organization",
-      accountId: organizationId,
-    })) > 0 && !(await budgetHolds(db, organizationId))
+    !outOfCredit(
+      await getBalance(db, {
+        accountType: "organization",
+        accountId: organizationId,
+      })
+    ) && !(await budgetHolds(db, organizationId))
   )
 }
 

@@ -181,14 +181,21 @@ test("a machine cannot be billed to a pool it does not serve, and a clock skew c
   assert.equal(result.amount, 1_500)
 })
 
-test("an empty balance stops new jobs", async (t) => {
+test("a balance may go $5 below zero before new jobs stop", async (t) => {
   const { db, sqlite } = await pool(t)
+  const charge = sqlite.prepare(
+    "insert into ledger_entry (id,account_type,account_id,kind,amount,created_at) values (?,'organization',?,'charge',?,0)"
+  )
+  const balance = () =>
+    getBalance(db, { accountType: "organization", accountId: orgId })
   assert.equal(await canAcquireJobs(db, orgId), true)
-  sqlite
-    .prepare(
-      "insert into ledger_entry (id,account_type,account_id,kind,amount,created_at) values ('spent','organization',?,'charge',-5000000,0)"
-    )
-    .run(orgId)
+  charge.run("to-zero", orgId, -(await balance()))
+  assert.equal(await balance(), 0)
+  assert.equal(await canAcquireJobs(db, orgId), true)
+  charge.run("overdrawn", orgId, -4_990_000)
+  assert.equal(await canAcquireJobs(db, orgId), true)
+  charge.run("overdraft-spent", orgId, -10_000)
+  assert.equal(await balance(), -5_000_000)
   assert.equal(await canAcquireJobs(db, orgId), false)
 })
 

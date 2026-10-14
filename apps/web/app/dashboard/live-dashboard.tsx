@@ -3,7 +3,11 @@
 import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { RUNNER_SIZES, privatePoolUsdPerMinute } from "@workspace/pricing"
+import {
+  OVERDRAFT_USD,
+  RUNNER_SIZES,
+  privatePoolUsdPerMinute,
+} from "@workspace/pricing"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { CombLegend, CombVersions, PoolComb } from "@/components/console/comb"
@@ -132,10 +136,13 @@ export function LiveDashboard({
         <span className="font-mono text-foreground tabular-nums">
           {formatMoney(balance)}
         </span>{" "}
-        of credit left, about{" "}
-        {runway === null
-          ? `${minutesLeft.toLocaleString("en-US")} minutes on a ${size.vcpus}-vCPU runner`
-          : `${runway >= 365 ? "a year or more" : `${Math.max(1, Math.round(runway))} days`} at this week's pace`}
+        {balance < 0
+          ? `below zero. New jobs stop when it is $${OVERDRAFT_USD} below`
+          : `of credit left, about ${
+              runway === null
+                ? `${minutesLeft.toLocaleString("en-US")} minutes on a ${size.vcpus}-vCPU runner`
+                : `${runway >= 365 ? "a year or more" : `${Math.max(1, Math.round(runway))} days`} at this week's pace`
+            }`}
         .{" "}
         <Link className="text-foreground underline" href="/wallet">
           {balance > 0 ? "Billing" : "Add funds"}

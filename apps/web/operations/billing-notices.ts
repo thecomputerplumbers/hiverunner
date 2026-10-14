@@ -4,7 +4,11 @@ import {
   releaseBillingNotice,
   type BillingNotice,
 } from "@workspace/db/notices"
-import { BUDGET_WARNING_SHARE, microTokensToUsd } from "@workspace/pricing"
+import {
+  BUDGET_WARNING_SHARE,
+  microTokensToUsd,
+  OVERDRAFT_USD,
+} from "@workspace/pricing"
 
 /**
  * Tells a hive's owners and admins, by email, what has changed about its
@@ -38,13 +42,13 @@ export function billingNoticeMail(notice: BillingNotice) {
     case "empty":
       return {
         subject: `${hive}: the balance has run out and jobs are waiting`,
-        message: `The Hive Runner balance for ${hive} has run out, so new jobs are waiting in GitHub's queue. Jobs already running will finish. Add funds to start the queue moving again.`,
+        message: `The Hive Runner balance for ${hive} has run out, including the $${OVERDRAFT_USD} it may go below zero, so new jobs are waiting in GitHub's queue. Jobs already running will finish. Add funds to start the queue moving again.`,
         label: "Add funds",
       }
     case "low-balance":
       return {
         subject: `${hive}: the balance is down to ${money(notice.balance)}`,
-        message: `The Hive Runner balance for ${hive} is down to ${money(notice.balance)}. When it runs out, new jobs wait in GitHub's queue until funds are added. Automatic top-up is off; you can add funds, or turn it on so the balance refills itself.`,
+        message: `The Hive Runner balance for ${hive} is down to ${money(notice.balance)}. Jobs keep starting until it is $${OVERDRAFT_USD} below zero; then new jobs wait in GitHub's queue until funds are added. Automatic top-up is off; you can add funds, or turn it on so the balance refills itself.`,
         label: "Add funds",
       }
     case "auto-top-up-failed":

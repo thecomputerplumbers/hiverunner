@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers"
 import Link from "next/link"
-import { TRIAL_GRANT_USD } from "@workspace/pricing"
+import { OVERDRAFT_USD, outOfCredit, TRIAL_GRANT_USD } from "@workspace/pricing"
 import { budgetHolds } from "@workspace/db/budget"
 import { getLiveSnapshot } from "@workspace/db/live"
 import { joinedHives, listUserMachines } from "@workspace/db/machines"
@@ -140,7 +140,7 @@ export default async function DashboardPage({
           to start it moving again.
         </Notice>
       )}
-      {live.balance <= 0 && (
+      {outOfCredit(live.balance) ? (
         <Notice tone="alert">
           The balance has run out, so new jobs are waiting in GitHub&apos;s
           queue.{" "}
@@ -149,7 +149,16 @@ export default async function DashboardPage({
           </Link>{" "}
           to start it moving again.
         </Notice>
-      )}
+      ) : live.balance < 0 ? (
+        <Notice>
+          The balance is below zero. Jobs keep starting until it is $
+          {OVERDRAFT_USD} below.{" "}
+          <Link className="underline" href="/wallet">
+            Add funds
+          </Link>{" "}
+          to keep them running.
+        </Notice>
+      ) : null}
 
       {!ready && (
         <FirstJob

@@ -61,6 +61,19 @@ export function topUpAllowed(dollars: unknown): dollars is number {
  */
 export const LOW_BALANCE_USD = 2
 
+/**
+ * How far below zero a hive's balance may go before new jobs wait. A hive
+ * that runs out mid-afternoon keeps building until someone adds funds,
+ * instead of stopping on the cent. Jobs already running always finish, so
+ * the balance can end a little past this.
+ */
+export const OVERDRAFT_USD = 5
+
+/** Whether a balance has used all of its overdraft, so new jobs wait. */
+export function outOfCredit(balance: number) {
+  return balance <= -usdToMicroTokens(OVERDRAFT_USD)
+}
+
 /** The share of a monthly budget at which a hive's owners are first told. */
 export const BUDGET_WARNING_SHARE = 0.8
 

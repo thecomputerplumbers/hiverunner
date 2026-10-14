@@ -295,8 +295,8 @@ since the runner talks to GitHub directly.
   with the eventual token, so step 2 changes settlement and not the arithmetic.
 - The receipt is the job's priced facts signed with an Ed25519 key held by the
   coordinator, stored on the job row, and downloadable from the dashboard.
-- An org with a zero balance gets no new jobs acquired; they wait in GitHub's
-  queue and the dashboard says why.
+- An org may go $5 below zero (`OVERDRAFT_USD`). Past that it gets no new
+  jobs acquired; they wait in GitHub's queue and the dashboard says why.
 
 Speed scores come from the enrollment benchmark and are corrected against
 observed durations of repeated jobs. Step 1 records the data; automatic

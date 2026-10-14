@@ -7,6 +7,7 @@ import {
   BUDGET_WARNING_SHARE,
   LOW_BALANCE_USD,
   MICRO,
+  outOfCredit,
   usdToMicroTokens,
 } from "@workspace/pricing"
 
@@ -122,7 +123,7 @@ export async function claimBillingNotices(db: AuthDb, now = new Date()) {
     }
     const note = (kind: BillingNoticeKind, id: string) =>
       facts.set(id, { ...state, id, kind })
-    if (balance <= 0) note("empty", `empty:${organizationId}`)
+    if (outOfCredit(balance)) note("empty", `empty:${organizationId}`)
     // A hive that tops itself up is about to be refilled, not about to stop.
     else if (
       balance < usdToMicroTokens(LOW_BALANCE_USD) &&

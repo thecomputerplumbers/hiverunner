@@ -85,7 +85,13 @@ test("a paid top-up that cannot be credited fails loudly, so Stripe retries", as
 })
 
 test("adding funds starts the queue moving again", async (t) => {
-  const { db } = database(t)
+  const { db, sqlite } = database(t)
+  // The whole overdraft is spent.
+  sqlite
+    .prepare(
+      "insert into ledger_entry (id,account_type,account_id,kind,amount,created_at) values ('spent','organization','org_1','charge',-5000000,0)"
+    )
+    .run()
   assert.equal(await canAcquireJobs(db, "org_1"), false)
   await creditTopUp(db, paid())
   assert.equal(await canAcquireJobs(db, "org_1"), true)

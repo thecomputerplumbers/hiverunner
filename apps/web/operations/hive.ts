@@ -48,6 +48,8 @@ import {
   JOB_TAX_RATE,
   machineServes,
   microTokensToUsd,
+  outOfCredit,
+  OVERDRAFT_USD,
   OWNER_CORES,
   privatePoolUsdPerMinute,
   runnerArch,
@@ -298,7 +300,7 @@ export async function getHive(context: OperationContext) {
       : installation.status === "suspended"
         ? ("app-suspended" as const)
         : !acquirable
-          ? live.balance <= 0
+          ? outOfCredit(live.balance)
             ? ("empty-balance" as const)
             : ("budget-spent" as const)
           : connected === 0
@@ -361,9 +363,13 @@ export async function getHive(context: OperationContext) {
     nextSteps.push(
       `Change one line: runs-on: ${RUNNER_SIZES[0].label} in a workflow, and push. Call get_workflow for the YAML.`
     )
-  if (live.balance <= 0)
+  if (outOfCredit(live.balance))
     nextSteps.push(
-      `The balance has run out, so new jobs wait in GitHub's queue. Add funds at ${links.wallet}.`
+      `The balance has run out, including the $${OVERDRAFT_USD} it may go below zero, so new jobs wait in GitHub's queue. Add funds at ${links.wallet}.`
+    )
+  else if (live.balance < 0)
+    nextSteps.push(
+      `The balance is below zero. Jobs keep starting until it is $${OVERDRAFT_USD} below, then wait in GitHub's queue. Add funds at ${links.wallet}.`
     )
   if (held)
     nextSteps.push(

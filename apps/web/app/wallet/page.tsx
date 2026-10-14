@@ -15,6 +15,8 @@ import {
   TOP_UP_AMOUNTS_USD,
   TOP_UP_MAX_USD,
   TOP_UP_MIN_USD,
+  OVERDRAFT_USD,
+  outOfCredit,
   TRIAL_GRANT_USD,
   privatePoolUsdPerMinute,
   topUpAllowed,
@@ -130,13 +132,20 @@ export default async function WalletPage({
           also saves it.
         </Notice>
       )}
-      {balance <= 0 && (
+      {outOfCredit(balance) ? (
         <Notice tone="alert">
-          The balance has run out, so new jobs are waiting in GitHub&apos;s
-          queue. Jobs already running will finish. Add funds to start the queue
-          moving again.
+          The balance has run out, including the ${OVERDRAFT_USD} it may go
+          below zero, so new jobs are waiting in GitHub&apos;s queue. Jobs
+          already running will finish. Add funds to start the queue moving
+          again.
         </Notice>
-      )}
+      ) : balance < 0 ? (
+        <Notice>
+          The balance is below zero. Jobs keep starting until it is $
+          {OVERDRAFT_USD} below, then wait in GitHub&apos;s queue. Add funds to
+          keep them running.
+        </Notice>
+      ) : null}
       {budgetHeld && (
         <Notice tone="alert">
           This month&apos;s budget of {formatMoney(budgetMicro ?? 0)} is spent,

@@ -231,7 +231,7 @@ messages with request id zero use GitHub's stable job UUID for receipt identity.
 
 GitHub's start/finish messages determine charges; `job.exited` never does.
 The accepted speed quote is locked, and settlement writes a signed receipt
-and three idempotent ledger entries. Empty balances stop new acquisition;
+and three idempotent ledger entries. A balance $5 below zero (the overdraft) stops new acquisition;
 running jobs finish. Malformed lifecycle facts are held for repair in listener
 storage and do not block later queue messages.
 Unknown event kinds are ignored and acknowledged alongside known events.

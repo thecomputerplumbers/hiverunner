@@ -221,8 +221,12 @@ test("a low balance is told once, and again if it comes back", async (t) => {
   assert.match(mail[0].subject, /acme: the balance is down to \$1\.50/)
   assert.equal(await sweep(), 0)
 
-  // Running out is its own, more urgent, notice.
-  entry("charge", -1.5)
+  // Below zero is still low: jobs keep starting on the overdraft.
+  entry("charge", -3)
+  assert.equal(await sweep(), 0)
+
+  // Spending the overdraft too is its own, more urgent, notice.
+  entry("charge", -3.5)
   assert.equal(await sweep(), 1)
   assert.match(mail[2].subject, /the balance has run out and jobs are waiting/)
   assert.equal(await sweep(), 0)
@@ -231,7 +235,7 @@ test("a low balance is told once, and again if it comes back", async (t) => {
   await recordPurchase(db, {
     organizationId: "org_1",
     paymentId: "cs_more",
-    cents: 1000,
+    cents: 1500,
     now,
   })
   assert.equal(await sweep(), 0)
