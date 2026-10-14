@@ -368,7 +368,13 @@ try {
   assert.equal((await a.next()).type, "job.release")
   assert.equal(await available(), true)
   await sql("update ledger_entry set amount=0 where id='grant:gh-501'")
-  assert.equal(await available(), false, "zero credit cannot acquire jobs")
+  assert.equal(await available(), true, "zero credit runs on the overdraft")
+  await sql("update ledger_entry set amount=-5000000 where id='grant:gh-501'")
+  assert.equal(
+    await available(),
+    false,
+    "a spent overdraft cannot acquire jobs"
+  )
   await sql("update ledger_entry set amount=5000000 where id='grant:gh-501'")
   await sql("update machine set status='retired' where id='a'")
   assert.equal(
