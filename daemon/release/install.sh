@@ -440,6 +440,31 @@ apparmor() {
   say "  printf 'abi <abi/4.0>,\\ninclude <tunables/global>\\nprofile hiverunner-virtiofsd \"$DATA_DIR/bin/virtiofsd\" flags=(unconfined) {\\n  userns,\\n  include if exists <local/hiverunner-virtiofsd>\\n}\\n' | sudo tee $profile >/dev/null && sudo apparmor_parser -r $profile"
 }
 
+# Ubuntu's 73-seat-late.rules (uaccess) runs on a change event, which a VM
+# starting sends, and wipes a user ACL on /dev/kvm. A one-shot setfacl is
+# wiped the same way. A udev rule named 99-hiverunner-$user.rules runs after
+# uaccess and puts the ACL back. 70-hiverunner-$user.rules is ours from
+# before this and is removed: it ran too early. Printed, not run: this
+# script never asks for a password; hived doctor says the same.
+kvm_acl_cmd() {
+  user=$(id -un)
+  printf '%s' "printf 'KERNEL==\"kvm\", ACTION==\"add|change\", RUN+=\"/usr/bin/setfacl -m u:${user}:rw /dev/kvm\"\\nKERNEL==\"vhost-vsock\", ACTION==\"add|change\", RUN+=\"/usr/bin/setfacl -m u:${user}:rw /dev/vhost-vsock\"\\n' | sudo tee /etc/udev/rules.d/99-hiverunner-${user}.rules >/dev/null && sudo rm -f /etc/udev/rules.d/70-hiverunner-${user}.rules && sudo setfacl -m u:${user}:rw /dev/kvm /dev/vhost-vsock"
+}
+
+# A 70- rule of ours, from before this, still on disk: the installer owns
+# that name, and moving its contents after 73-seat-late.rules is the fix.
+kvm_acl() {
+  user=$(id -un)
+  early=/etc/udev/rules.d/70-hiverunner-$user.rules
+  late=/etc/udev/rules.d/99-hiverunner-$user.rules
+  [ -e "$early" ] && [ ! -e "$late" ] || return 0
+  say ""
+  say "A udev rule at $early grants you /dev/kvm, but Ubuntu's"
+  say "73-seat-late.rules (uaccess) runs after it and wipes that ACL when a VM"
+  say "starts. This writes the same rule so it runs after uaccess:"
+  say "  $(kvm_acl_cmd); systemctl --user restart hiveworker"
+}
+
 step "Checking this machine can run VMs"
 missing=""
 command -v "$qemu" >/dev/null 2>&1 || missing="$missing $qemu"
@@ -469,10 +494,11 @@ if [ -n "$missing" ]; then
 fi
 [ -e /dev/kvm ] || fail "there is no /dev/kvm. Virtualization is switched off in this machine's firmware, or this is a cloud VM without nested virtualization."
 if ! [ -r /dev/kvm ] || ! [ -w /dev/kvm ]; then
-  # The group is for good, from the next login. The ACL is for now, for
-  # this shell and the daemon's service alike, so nobody has to log out.
+  # The group is for good, from the next login. The udev rule is for now,
+  # for this shell and the daemon's service alike, so nobody has to log out,
+  # and it survives the change event a VM starting sends.
   say "Your user cannot use /dev/kvm yet. Run this, then this script again:"
-  say "  sudo usermod -aG kvm $(id -un) && sudo setfacl -m u:$(id -un):rw /dev/kvm /dev/vhost-vsock"
+  say "  sudo usermod -aG kvm $(id -un) && $(kvm_acl_cmd)"
   exit 1
 fi
 say "KVM, QEMU and passt are here."
@@ -596,6 +622,7 @@ if ! systemctl --user show-environment >/dev/null 2>&1; then
   say "This login has no systemd user session, so no service was set up."
   say "Start the daemon yourself, and keep it running however you keep things running:"
   say "  $BIN_DIR/hived run"
+  kvm_acl
   apparmor
   [ -n "$enrolled" ] || not_enrolled "this machine"
   exit 0
@@ -625,6 +652,7 @@ if [ -z "$enrolled" ]; then
   systemctl --user daemon-reload
   systemctl --user enable "$UNIT" >/dev/null 2>&1 || true
   loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
+  kvm_acl
   apparmor
   not_enrolled "this machine"
 fi
@@ -632,6 +660,7 @@ fi
 # would cancel a job it is in the middle of, for the same daemon again.
 if [ -z "$changed" ] && systemctl --user is-active --quiet "$UNIT"; then
   say "hived $version is already running, and was left as it is."
+  kvm_acl
   apparmor
   say ""
   say "Done. Nothing needed updating."
@@ -667,27 +696,43 @@ fi
 
 # The service belongs to this user's systemd, which took its groups when it
 # started. If the kvm group was added since, the shell has it and the
-# service does not yet, and the daemon says so in its first lines. Lending
-# the devices to the user directly fixes that until the next boot, when the
-# group is enough; restarting the user's systemd would also do it, and would
-# end every session they have, an agent's in tmux included.
+# service does not yet, and the daemon says so in its first lines. A udev
+# rule after Ubuntu's 73-seat-late.rules lends the devices without ending
+# any session; a one-shot setfacl, or a 70- rule of ours, is wiped when a
+# VM starts. Restarting the user's systemd would also do it, and would end
+# every session they have, an agent's in tmux included.
 sleep 3
 started=$(journalctl --user -u hiveworker -n 20 --no-pager 2>/dev/null || true)
-lend="sudo setfacl -m u:$(id -un):rw /dev/kvm /dev/vhost-vsock; systemctl --user restart hiveworker"
-if printf '%s' "$started" | grep -q "cannot open /dev/kvm"; then
+user=$(id -un)
+early=/etc/udev/rules.d/70-hiverunner-$user.rules
+late=/etc/udev/rules.d/99-hiverunner-$user.rules
+lend="$(kvm_acl_cmd); systemctl --user restart hiveworker"
+holds=""; id -nG | grep -qw kvm && holds=yes
+listed=""; id -nG "$user" | grep -qw kvm && listed=yes
+if [ -e "$early" ] && [ ! -e "$late" ]; then
+  : # kvm_acl, next to apparmor, says to replace the 70- rule.
+elif printf '%s' "$started" | grep -q "cannot open /dev/kvm"; then
   say ""
   say "The daemon is running but cannot use KVM yet: your login got the kvm group"
-  say "after your user's services started. This lends it the devices without ending"
-  say "any of your sessions, and lasts until a reboot, after which the group does:"
+  say "after your user's services started. This writes a udev rule that lasts"
+  say "through a VM starting, without ending any of your sessions:"
   say "  $lend"
   say "(sudo systemctl restart user@$(id -u) works too, but ends every session of yours.)"
 elif printf '%s' "$started" | grep -q "cannot open /dev/vhost-vsock" && [ -r /dev/vhost-vsock ] && [ -w /dev/vhost-vsock ]; then
   say ""
   say "Jobs will run, but without this machine's own Actions cache: your user's"
-  say "services started before your login got the kvm group. This lends the"
-  say "daemon the devices without ending any of your sessions, until a reboot:"
+  say "services started before your login got the kvm group. This writes a udev"
+  say "rule that lasts through a VM starting, without ending any of your sessions:"
   say "  $lend"
+elif [ -n "$listed" ] && [ -z "$holds" ] && [ ! -e "$late" ]; then
+  say ""
+  say "Your login is in the kvm group, but this session's services are not, so"
+  say "/dev/kvm is only an ACL that Ubuntu's 73-seat-late.rules (uaccess) wipes"
+  say "when a VM starts. This writes a udev rule that puts it back:"
+  say "  $lend"
+  say "(sudo systemctl restart user@$(id -u) works too, but ends every session of yours.)"
 fi
+kvm_acl
 apparmor
 
 say ""

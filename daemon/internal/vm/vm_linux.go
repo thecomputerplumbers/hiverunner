@@ -81,13 +81,20 @@ func kvmUsable() error {
 	if errors.Is(err, os.ErrNotExist) {
 		return errors.New("this machine has no /dev/kvm: virtualization is switched off in its firmware, or this is a cloud VM without nested virtualization")
 	}
+	found := denied("/dev/kvm")
 	if errors.Is(err, os.ErrPermission) {
-		return errors.New(denied("/dev/kvm").reason())
+		return errors.New(found.reason())
 	}
 	if err != nil {
 		return fmt.Errorf("/dev/kvm: %w", err)
 	}
-	return file.Close()
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if reason := found.wontLast(); reason != "" {
+		return errors.New(reason)
+	}
+	return nil
 }
 
 // vsockUsable reports whether this user may give a VM a socket to the host.
@@ -125,10 +132,12 @@ func denied(path string) deniedDevice {
 		}
 	}
 	if me, err := user.Current(); err == nil {
+		found.User = me.Username
 		if listed, err := me.GroupIds(); err == nil {
 			found.Listed = slices.Contains(listed, kvm.Gid)
 		}
 	}
+	found.Early, found.Late, found.Uaccess = inspectUdev(found.User, os.ReadFile, os.ReadDir)
 	if held, err := os.Getgroups(); err == nil {
 		gid, _ := strconv.Atoi(kvm.Gid)
 		found.Holds = slices.Contains(held, gid) || os.Getegid() == gid

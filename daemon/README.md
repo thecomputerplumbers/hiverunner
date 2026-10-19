@@ -117,11 +117,14 @@ CleanMount(PermissionDenied)`. The fix is a profile,
 - **The kvm group, added after the user's services started**: the service
   keeps the groups it started with. Rather than `sudo systemctl restart
 user@<uid>`, which ends every session of the user's (an agent in tmux
-  among them), lend the devices to the user and restart only the daemon:
-  `sudo setfacl -m u:$USER:rw /dev/kvm /dev/vhost-vsock; systemctl --user
-restart hiveworker`. That lasts until a reboot, when the group is enough.
-  `hived doctor` reads what the running daemon found, since the shell may
-  open what the service cannot.
+  among them), write a udev rule that lends the devices after Ubuntu's
+  `73-seat-late.rules` (uaccess) and restart only the daemon. A one-shot
+  `setfacl` is wiped when a VM starts: the kernel sends a change event, and
+  uaccess resets the ACL. A rule named `70-hiverunner-$USER.rules` runs
+  before uaccess and is wiped the same way; `99-hiverunner-$USER.rules`
+  runs after it. `hived doctor` and `hived status` say this when the user is
+  in `kvm` but the process is not, or when that early rule is what granted
+  access, and the installer removes a `70-` rule of ours.
 
 Building and publishing a release is in `docs/deployment.md`.
 

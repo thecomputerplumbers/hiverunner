@@ -11,11 +11,17 @@ import (
 
 func TestDoctorSaysWhatTheRunningDaemonCannotOpen(t *testing.T) {
 	// The shell joined the kvm group; the service started before it did.
-	denied := "this machine cannot run a VM: your user's services started before your user joined the kvm group, so cannot open /dev/kvm: run `sudo setfacl -m u:ada:rw /dev/kvm`"
+	denied := "this machine cannot run a VM: your user's services started before your user joined the kvm group, so cannot open /dev/kvm: run `sudo tee /etc/udev/rules.d/99-hiverunner-$USER.rules && sudo setfacl -m u:ada:rw /dev/kvm`"
 	daemon := connection.State{Unusable: denied, WrittenBy: os.Getpid()}
 	reason, fix := whyNoVMs(nil, daemon)
-	if !strings.Contains(reason, "the running daemon") || !strings.Contains(reason, "cannot open /dev/kvm") || !strings.Contains(fix, "setfacl") {
+	if !strings.Contains(reason, "the running daemon") || !strings.Contains(reason, "cannot open /dev/kvm") || !strings.Contains(fix, "99-hiverunner") || !strings.Contains(fix, "setfacl") {
 		t.Fatalf("said %q, %q", reason, fix)
+	}
+
+	wiped := "this machine cannot run a VM: your udev rule /etc/udev/rules.d/70-hiverunner-seth.rules grants /dev/kvm, but Ubuntu's 73-seat-late.rules (uaccess) runs after it and wipes that ACL when a VM starts: run `sudo rm -f /etc/udev/rules.d/70-hiverunner-$USER.rules`"
+	reason, fix = whyNoVMs(nil, connection.State{Unusable: wiped, WrittenBy: os.Getpid()})
+	if !strings.Contains(reason, "the running daemon") || !strings.Contains(reason, "70-hiverunner-seth.rules") || !strings.Contains(fix, "rm -f") {
+		t.Fatalf("wiped ACL said %q, %q", reason, fix)
 	}
 
 	// What this shell finds comes first: it is what the owner can check.
