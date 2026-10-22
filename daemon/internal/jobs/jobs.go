@@ -48,9 +48,25 @@ var ErrReleased = errors.New("job released")
 
 // Runner runs a job to completion in isolation and returns the runner's exit
 // code. It must destroy everything it created before returning, including
-// when ctx is cancelled.
+// when ctx is cancelled. A VM that will not stop is the one exception: its
+// runner may return without it, if it goes on counting it against what it
+// can take (see Limiter and Unusable) until it has gone.
 type Runner interface {
 	Run(ctx context.Context, job Job) (Result, error)
+}
+
+// Chooser is implemented by a runner with more than one way of running a
+// job. The way is chosen when the job is offered, and that way runs it: a
+// setting changed before the job starts does not change how it runs.
+type Chooser interface {
+	Choose() Runner
+}
+
+// Limiter is implemented by a runner with limits of its own, which it sets
+// on an offer's limits once it has been chosen to run the job: so the limits
+// are always those of the way the job will run.
+type Limiter interface {
+	Limit(*Limits)
 }
 
 // Unusable is implemented by a runner that can find out it will not be able
@@ -72,6 +88,7 @@ const (
 	// ReasonCoolingOff is declined while the machine waits out a host kill.
 	ReasonCoolingOff = "this machine is cooling off after the host killed a job for want of memory"
 	ReasonNoMacOS    = "this Mac does not take macOS jobs; its owner has not run hived macos setup"
+	ReasonMacOSVMs   = "this Mac is running as many macOS VMs as Apple's licence allows"
 )
 
 // hostArch is what this machine is. A variable so tests can be another.
@@ -95,9 +112,22 @@ type Limits struct {
 	// MacOS is whether hive-macos jobs are taken: the owner opted in and the
 	// Mac is ready for them.
 	MacOS bool
+	// MostMacOS is how many hive-macos jobs may run at once, within
+	// MaxJobs. Zero sets no limit of its own. A Mac that runs each one in a
+	// macOS VM is held to two: Apple's licence allows a Mac two macOS VMs.
+	MostMacOS int
+	// MacOSMemory is the memory a hive-macos job takes from the host: its
+	// VM's, or zero for one run on the Mac itself, which is not checked.
+	MacOSMemory uint64
 	// Available is the memory the host can give a new VM right now, in
-	// bytes. Zero means unknown, and no job is declined for want of memory.
+	// bytes. Zero means unknown: then Planned is the budget, if there is one.
 	Available uint64
+	// Planned is the memory the host's jobs may plan on, in bytes, where
+	// what is free cannot be read, as on a Mac, which reclaims what it
+	// caches as it is asked: a job is declined if it, every job held, the
+	// margin and Reserve would not fit in it. Zero means no budget, and no
+	// job is declined for want of memory.
+	Planned uint64
 	// Reserve is memory the owner keeps for everything else on the host: a
 	// job is declined if accepting it would leave Available below it.
 	Reserve uint64
@@ -107,6 +137,14 @@ type Limits struct {
 	// Hold declines every offer, as the reason it is giving: a machine
 	// waiting out a host kill that already runs one job at most.
 	Hold bool
+}
+
+// memory is what a job of this kind and size takes from the host.
+func (l Limits) memory(kind string, vcpus int) uint64 {
+	if kind == protocol.KindMacOS {
+		return l.MacOSMemory
+	}
+	return l.GuestMemory(vcpus)
 }
 
 // MemoryMargin is what a job leaves free on the host beyond its guest's
@@ -127,7 +165,12 @@ type slot struct {
 	vcpus        int
 	timeout      time.Duration
 	label        string
-	phase        phase
+	// runner is what runs it, chosen when it was offered.
+	runner Runner
+	// memory is what its guest takes from the host, as the limits had it
+	// when it was offered: a macOS VM's too, whatever the next offer is.
+	memory uint64
+	phase  phase
 	// cancel stops the start timer (accepted) or the runner (running).
 	cancel func()
 	// released means the coordinator backed out of a running job: its VM is
@@ -257,6 +300,9 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	if limits.Hold {
 		return ReasonCoolingOff
 	}
+	if chooser, ok := runner.(Chooser); ok {
+		runner = chooser.Choose()
+	}
 	if runner == nil {
 		return ReasonNoRunner
 	}
@@ -264,6 +310,9 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 		if reason := checked.Unusable(); reason != "" {
 			return reason
 		}
+	}
+	if limiter, ok := runner.(Limiter); ok {
+		limiter.Limit(&limits)
 	}
 	id := key(pool, offer.AssignmentID)
 	// The coordinator repeating itself is not a second job.
@@ -276,6 +325,17 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	if len(m.held) >= limits.MaxJobs {
 		return ReasonBusy
 	}
+	if kind == protocol.KindMacOS && limits.MostMacOS > 0 {
+		macOS := 0
+		for _, held := range m.held {
+			if held.kind == protocol.KindMacOS {
+				macOS++
+			}
+		}
+		if macOS >= limits.MostMacOS {
+			return ReasonMacOSVMs
+		}
+	}
 	used := 0
 	for _, held := range m.held {
 		used += held.vcpus
@@ -285,18 +345,26 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	if limits.Cores > 0 && used > 0 && used+offer.VCPUs+OwnerCores > limits.Cores {
 		return ReasonNoCores
 	}
-	// A guest's memory is taken as it touches it, so what the host reports
-	// free does not yet count jobs accepted but not started.
-	if limits.Available > 0 && limits.GuestMemory != nil && kind != protocol.KindMacOS {
-		pending := uint64(0)
+	memory := uint64(0)
+	if limits.GuestMemory != nil {
+		memory = limits.memory(kind, offer.VCPUs)
+	}
+	if memory > 0 {
+		// A guest's memory is taken as it touches it, so what the host
+		// reports free does not yet count jobs accepted but not started.
+		// A budget counts every job held.
+		budget, held := limits.Available, uint64(0)
+		if budget == 0 {
+			budget = limits.Planned
+		}
 		for _, other := range m.held {
-			if other.phase == accepted && other.kind != protocol.KindMacOS {
-				pending += limits.GuestMemory(other.vcpus)
+			if other.phase == accepted || limits.Available == 0 {
+				held += other.memory
 			}
 		}
-		need := limits.GuestMemory(offer.VCPUs) + pending + MemoryMargin + limits.Reserve
-		if limits.Available < need {
-			m.log.Warn("declining a job: not enough free memory", "assignment", offer.AssignmentID, "available_mb", limits.Available>>20, "needed_mb", need>>20)
+		need := memory + held + MemoryMargin + limits.Reserve
+		if budget > 0 && budget < need {
+			m.log.Warn("declining a job: not enough free memory", "assignment", offer.AssignmentID, "available_mb", budget>>20, "needed_mb", need>>20, "planned", limits.Available == 0)
 			return ReasonLowMemory
 		}
 	}
@@ -307,6 +375,8 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 		vcpus:        offer.VCPUs,
 		timeout:      time.Duration(offer.TimeoutMinutes) * time.Minute,
 		label:        offer.Label,
+		runner:       runner,
+		memory:       memory,
 		phase:        accepted,
 	}
 	// If the coordinator never follows up, the machine must not stay
@@ -365,16 +435,14 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		Timeout:      held.timeout,
 		Label:        held.label,
 	}
-	runner := m.runner
-	if held.kind == protocol.KindMacOS {
-		runner = m.native
-	}
+	runner := held.runner
 	m.running.Add(1)
 	go func() {
 		defer m.running.Done()
 		defer cancel(nil)
 		m.log.Info("job started", "assignment", job.AssignmentID, "runner", job.RunnerName, "kind", job.Kind, "vcpus", job.VCPUs, "label", job.Label)
-		// Run returns only once the VM and its files are gone.
+		// Run returns once the VM and its files are gone, or once a VM that
+		// will not stop is counted by its runner instead of this slot.
 		result, err := runner.Run(runCtx, job)
 		m.mu.Lock()
 		released := held.released

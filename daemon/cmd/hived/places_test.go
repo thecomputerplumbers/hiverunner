@@ -201,3 +201,31 @@ func TestACopyKeepsHolesAndContents(t *testing.T) {
 		t.Errorf("the copy differs: %d bytes against %d", len(got), len(want))
 	}
 }
+
+// The macOS image goes where the Linux one goes, since a job's VM is a
+// clone of it and a clone is only made within one volume.
+func TestTheMacOSImageMovesWithTheImage(t *testing.T) {
+	current, _, _ := aMachine(t)
+	macOS, err := macosImageDir(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(macOS, "manifest.json"), []byte("{}"))
+	write(t, filepath.Join(workDir(macOS), "job-1", "disk.img"), []byte("a job's clone"))
+	big := filepath.Join(t.TempDir(), "big disk")
+	current = set(t, current, "data-dir", big)
+	if _, err := settle(current); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := macosImageDir(current); got != filepath.Join(big, "macos-image") {
+		t.Errorf("the macOS image is looked for in %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(big, "macos-image", "manifest.json")); err != nil {
+		t.Errorf("not moved: %v", err)
+	}
+	for _, gone := range []string{macOS, workDir(macOS)} {
+		if _, err := os.Stat(gone); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s was left behind", gone)
+		}
+	}
+}

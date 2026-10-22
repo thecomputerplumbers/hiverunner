@@ -1,0 +1,90 @@
+#!/bin/bash
+# Runs one hive-macos job in a throwaway macOS VM, then shuts it down.
+#
+# Started as root at every boot by dev.hiverunner.agent.plist. The host
+# shares two directories with a job's VM. One, tagged hive, it can only
+# read: GitHub's runner, the job's one-time runner configuration and the
+# image's digest. The other, tagged hive-out, is for what it says back. This
+# script waits for the runner user's automatic login, unpacks the runner
+# onto the VM's own disk, runs it as that user in that session, writes the
+# exit code back and shuts down. The host deletes the VM's disk after.
+#
+# The owner's own sessions with the image (hived macos image open) have no
+# such shares, and this does nothing in them.
+#
+# Exit codes of its own, which the runner never uses: 120 no runner user,
+# 121 that user never logged in, 122 the runner or its configuration was
+# not there.
+#
+# NOT YET RUN ON REAL HARDWARE.
+set -u
+
+user=runner
+in=/private/var/hive
+out=/private/var/hive-out
+
+# The shares are there from boot or not at all; a few tries cover a device
+# that is slow to appear.
+mount_share() {
+  mkdir -p "$2"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    /sbin/mount_virtiofs "$1" "$2" 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+mount_share hive "$in" || exit 0
+mount_share hive-out "$out" || exit 0
+
+finish() {
+  # Written under another name first, so the host never reads half a file.
+  echo "$1" > "$out/exit.tmp" 2>/dev/null && mv "$out/exit.tmp" "$out/exit"
+  sync
+  /sbin/umount "$out" 2>/dev/null
+  /sbin/umount "$in" 2>/dev/null
+  /sbin/shutdown -h now
+  exit 0
+}
+
+uid=$(id -u "$user" 2>/dev/null) || finish 120
+home=$(dscacheutil -q user -a name "$user" 2>/dev/null | sed -n 's/^dir: //p')
+[ -n "$home" ] || finish 120
+
+# Simulators, the keychain and Xcode want the user's own login session, as
+# on GitHub's macOS runners. Automatic login makes one at boot.
+waited=0
+until [ "$(stat -f %Su /dev/console)" = "$user" ]; do
+  [ -e "$in/stop-reason" ] && finish 143
+  sleep 1
+  waited=$((waited + 1))
+  [ "$waited" -gt 240 ] && finish 121
+done
+[ -e "$in/stop-reason" ] && finish 143
+
+# The configuration is read before the host is told the boot is behind it,
+# since the host then removes it.
+jit=$(cat "$in/jitconfig" 2>/dev/null)
+[ -n "$jit" ] || finish 122
+: > "$out/ready"
+
+runner="$home/actions-runner"
+rm -rf "$runner"
+mkdir -p "$runner"
+tar -xzf "$in/runner.tar.gz" -C "$runner" || finish 122
+chown -R "$user" "$runner"
+
+digest=$(tr -cd 'a-z0-9:' < "$in/image-digest" 2>/dev/null)
+
+cd "$runner" || finish 122
+# A clean environment: nothing of the agent's leaks into the job but what is
+# listed. The one setting asks the runner to exit 7 when GitHub refuses its
+# version as too old.
+/bin/launchctl asuser "$uid" /usr/bin/sudo -u "$user" -H /usr/bin/env -i \
+  HOME="$home" USER="$user" LOGNAME="$user" SHELL=/bin/zsh LANG=en_US.UTF-8 \
+  PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin \
+  HIVE_IMAGE_DIGEST="$digest" \
+  ACTIONS_RUNNER_RETURN_VERSION_DEPRECATED_EXIT_CODE=1 \
+  "$runner/run.sh" --jitconfig "$jit"
+code=$?
+unset jit
+finish "$code"

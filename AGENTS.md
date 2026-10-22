@@ -79,7 +79,9 @@ The web app does not call the coordinator. It changes rows in D1 (revoking a mac
 
 A label names a kind of machine: `arm64`, `x64`, or `macos`. The first two are
 Linux VMs on a machine of that architecture; `macos` is a job run on an Apple
-Silicon Mac itself as the `hiveworker` user (`daemon/internal/native`), which
+Silicon Mac itself as the `hiveworker` user (`daemon/internal/native`), or in
+a throwaway macOS VM when the owner's `macos-isolation` setting is `vm`
+(`daemon/internal/macvm`), which
 a Mac offers only while its owner's `macos-jobs` setting is on and the Mac is
 ready, and a hive accepts only while `pool_settings.macos_jobs` is on.
 The rule that matches a machine to a kind lives in `@workspace/pricing` as

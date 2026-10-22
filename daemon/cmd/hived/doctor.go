@@ -199,8 +199,8 @@ func jobsFence(current settings.Settings) host.Fence {
 }
 
 // macOSInVM is whether a hive-macos job runs in a throwaway VM of its own
-// rather than as native.User on the Mac. It cannot yet.
-func macOSInVM(settings.Settings) bool { return false }
+// rather than as native.User on the Mac.
+func macOSInVM(current settings.Settings) bool { return current.MacOSInVM() }
 
 // macOSJobs is the macos jobs check. A macOS job runs as the one native.User
 // with the one home, so what a job leaves there, such as a package it

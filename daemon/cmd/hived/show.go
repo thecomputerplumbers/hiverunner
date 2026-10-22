@@ -19,6 +19,7 @@ import (
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/macvm"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/settings"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/ui"
@@ -142,6 +143,18 @@ const macosLabel = "hive-macos"
 // turning the setting on is refused until nothing is.
 func macosState(current settings.Settings) labelState {
 	state := labelState{Label: macosLabel, Kind: "macos"}
+	if current.MacOSInVM() {
+		problem := macosVMProblem(current)
+		switch {
+		case problem != "":
+			state.Reason, state.Detail = "needs its macOS image: hived macos image", problem
+		case !current.MacOSJobs:
+			state.Reason, state.Detail = "macos-jobs is off", "turn it on with: hived config set macos-jobs on"
+		default:
+			state.Takes = true
+		}
+		return state
+	}
 	runner, err := native.New(nil)
 	if err != nil {
 		state.Reason, state.Detail = "not available", err.Error()
@@ -166,6 +179,16 @@ func macosState(current settings.Settings) labelState {
 		state.Detail = report.Problem
 	}
 	return state
+}
+
+// macosVMProblem is why this Mac cannot run a macOS job in a VM, or "".
+func macosVMProblem(current settings.Settings) string {
+	dir, err := macosImageDir(current)
+	if err != nil {
+		return err.Error()
+	}
+	_, problem := (&macvm.Runner{Dir: dir, WorkDir: workDir(dir)}).Status()
+	return problem
 }
 
 func gather() (snapshot, host.Facts, settings.Settings, host.Power, error) {
@@ -554,7 +577,9 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		list("allow-network", allowNetworkText(current), "private places jobs may reach anyway"),
 		row("dns", cmp.Or(current.DNS, settings.DNSHost), "the resolvers jobs are given"),
 		row("ipv6-site", "/"+strconv.Itoa(cmp.Or(current.IPv6Site, fence.DefaultSite)), "the IPv6 site jobs are kept off"),
-		row("macos-jobs", onOff(current.MacOSJobs), "run hive-macos jobs on this Mac itself"),
+		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs"),
+		row("macos-isolation", cmp.Or(current.MacOSIsolation, settings.IsolationUser), "the "+native.User+" user, or a VM per job"),
+		row("max-macos-vms", strconv.Itoa(current.MacOSVMs()), "how many macOS VMs run at once"),
 		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
 		place("data-dir", current.DataDir, "where the image and job disks are kept"),
 		place("cache-dir", current.CacheDir, "where the Actions cache is kept"),
@@ -653,8 +678,15 @@ hived config set <name> <value>  Change one
   ipv6-site  48, 56 or 64        the IPv6 prefix this machine's site has; jobs
                                  are kept off all of it: 56 for most homes, 48
                                  for an office, 64 if the /64 is its own
-  macos-jobs on or off           take hive-macos jobs, run on this Mac itself
-                                 as a separate user; hived macos setup first
+  macos-jobs on or off           take hive-macos jobs; hived macos setup first,
+                                 or a macOS image for macos-isolation vm
+  macos-isolation user or vm     run each as a separate user on this Mac (user),
+                                 or in a throwaway macOS VM cloned from the image
+                                 hived macos image makes (vm); experimental, and
+                                 untested on real hardware so far
+  max-macos-vms 1 or 2           how many macOS VMs run at once; two share one
+                                 network, on which one job can come between the
+                                 other and its gateway
   auto-update on or off          update to new releases when no job is running;
                                  off, hived status and a notification say so
   data-dir   a path or default   where the Linux image and each job's disk are
@@ -697,7 +729,13 @@ func configure(args []string) error {
 		if err := current.Set(args[1], args[2]); err != nil {
 			return err
 		}
-		if args[1] == "macos-jobs" && current.MacOSJobs {
+		if args[1] == "macos-jobs" && current.MacOSJobs && current.MacOSInVM() {
+			// On means jobs run in clones of the owner's image, which
+			// has to be made and sealed first.
+			if problem := macosVMProblem(current); problem != "" {
+				return errors.New(problem)
+			}
+		} else if args[1] == "macos-jobs" && current.MacOSJobs {
 			// On means jobs run here as another user: the Mac has to be
 			// set up for that first, and the setup command is what says
 			// what it will do.
@@ -731,6 +769,11 @@ func configure(args []string) error {
 			case vm.FencesNetwork:
 				// A job already running keeps what it was given.
 				fmt.Println("It applies from the next job.")
+			}
+		}
+		if args[1] == "macos-isolation" && current.MacOSInVM() {
+			if problem := macosVMProblem(current); problem != "" {
+				fmt.Println("\nNo macOS job runs until that is put right: " + problem + "\nSee: hived macos image help")
 			}
 		}
 		if args[1] == "lid" {
@@ -784,6 +827,11 @@ func configurePlace(current settings.Settings, key, value string) error {
 // daemonRunning reports whether a hived holds this machine's work directory.
 func daemonRunning(current settings.Settings) bool {
 	dir, err := imageDir(current)
+	if err == nil && vm.WorkDirInUse(workDir(dir)) {
+		return true
+	}
+	// A daemon holds the macOS VMs' directory once it has run one.
+	dir, err = macosImageDir(current)
 	return err == nil && vm.WorkDirInUse(workDir(dir))
 }
 

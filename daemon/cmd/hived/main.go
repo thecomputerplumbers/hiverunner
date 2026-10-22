@@ -26,6 +26,7 @@ import (
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/macvm"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/pools"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/settings"
@@ -369,24 +370,6 @@ func run(ctx context.Context) error {
 		unlock()
 	}()
 
-	// macOS jobs, if the owner has set this Mac up for them. Built now,
-	// asked later: whether it is ready is checked when the setting is on.
-	var nativeRunner *native.Runner
-	if runtime.GOOS == "darwin" {
-		if built, err := native.New(log); err != nil {
-			log.Warn("macOS jobs are not available", "error", err)
-		} else {
-			nativeRunner = built
-		}
-	}
-	macOS := func() bool {
-		return nativeRunner != nil && live.Get().MacOSJobs && nativeRunner.Ready()
-	}
-	var native jobs.Runner
-	if nativeRunner != nil {
-		native = nativeRunner
-	}
-
 	// What the owner asked to be kept somewhere else is moved there now,
 	// before either place is opened.
 	moved, err := settle(live.Get())
@@ -397,6 +380,25 @@ func run(ctx context.Context) error {
 		log.Warn("could not move everything; carrying on from where it is", "error", err)
 	}
 	settled, gone := loadMoves(), absent(live.Get())
+
+	// macOS jobs, if the owner has set this Mac up for them, run either as
+	// the hiveworker user or in a throwaway macOS VM, as macos-isolation
+	// says. Built now, once anything waiting to move has moved, and asked
+	// later: whether it is ready is checked when the setting is on.
+	var macosJobs *macosRunner
+	if runtime.GOOS == "darwin" {
+		macosJobs = newMacOSRunner(log, live.Get)
+		if err := macosJobs.claim(); err != nil {
+			log.Warn("could not clear what a previous run's macOS VMs left behind", "error", err)
+		}
+	}
+	macOS := func() bool {
+		return macosJobs != nil && live.Get().MacOSJobs && macosJobs.Unusable() == ""
+	}
+	var native jobs.Runner
+	if macosJobs != nil {
+		native = macosJobs
+	}
 
 	// Without a guest image the machine still connects and reports presence;
 	// it declines jobs and says why.
@@ -464,8 +466,16 @@ func run(ctx context.Context) error {
 		if facts, err := host.ReadFacts(); err == nil {
 			maxJobs = min(maxJobs, memoryPlan(facts, current).Jobs)
 		}
-		return jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS(), Hold: hold,
+		// A macOS VM's own limits are set by its runner, once it is the
+		// one chosen for an offer: see jobs.Limiter. Its memory is set here
+		// too, so that a Linux offer counts the macOS VMs accepted.
+		limits := jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS(), Hold: hold,
 			Available: host.AvailableMemory(), Reserve: current.ReserveBytes(hostMemory()), GuestMemory: guestMemory}
+		if current.MacOSInVM() {
+			limits.MacOSMemory = macvm.Memory(hostMemory())
+		}
+		limits.Planned = plannedMemory(current, limits.Available, hostMemory())
+		return limits
 	}
 	slot := jobs.New(runner, log)
 	// Every job that stops with the host's kill reports it, and a restarted
@@ -863,4 +873,17 @@ func benchmark(args []string) error {
 	}
 	fmt.Printf("%.2f units/s on one core: speed score %.2f\n", unitsPerSecond, bench.Score(unitsPerSecond))
 	return nil
+}
+
+// plannedMemory is the memory budget jobs are admitted against where what
+// is free cannot be read: on a Mac, which reclaims its caches as it is
+// asked. Every job held counts against it, as if its guest had touched all
+// of its memory. It is the host's memory where the owner runs macOS VMs or
+// keeps a reserve, and nothing otherwise, so a Mac lending Linux jobs alone
+// takes as many as it always did.
+func plannedMemory(current settings.Settings, available, hostBytes uint64) uint64 {
+	if available > 0 || !current.MacOSInVM() && current.ReserveMemory == "" {
+		return 0
+	}
+	return hostBytes
 }
