@@ -92,8 +92,10 @@ func guestUsable(servers []string) []string {
 // guestResolvers is the resolvers a guest is given: those guestDNS chose,
 // or, where it chose none, the usable ones in the host's resolv.conf, which
 // is what passt then hands the guest. A guest may ask these on port 53
-// wherever they are, which is what keeps names resolving for a guest kept
-// off the LAN its router is on.
+// wherever they are, and no others, which is what keeps names resolving
+// for a guest kept off the LAN its router is on. That includes a resolver
+// on the LAN, which knows the LAN's names: dns public gives the guest
+// publicResolvers instead.
 func guestResolvers(chosen []string, resolvConf string) []netip.Addr {
 	if chosen == nil {
 		chosen = guestUsable(nameservers(resolvConf))
@@ -106,6 +108,10 @@ func guestResolvers(chosen []string, resolvConf string) []netip.Addr {
 	}
 	return resolvers
 }
+
+// publicResolvers is what a guest is given for dns public: Cloudflare's and
+// Google's in both families, so that passt reads nothing from resolv.conf.
+func publicResolvers() []string { return slices.Concat(publicDNS4, publicDNS6) }
 
 func nameservers(file string) []string {
 	handle, err := os.Open(file)

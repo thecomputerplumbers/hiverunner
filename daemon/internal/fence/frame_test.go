@@ -3,8 +3,10 @@ package fence
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -409,4 +411,89 @@ func upper4(protocol uint8, data []byte) (port uint16, icmp int) {
 		icmp = int(data[0])
 	}
 	return port, icmp
+}
+
+func TestRefusalsAreAnsweredAtARate(t *testing.T) {
+	now := time.Now()
+	replies := bucket{tokens: replyBurst}
+	for i := range replyBurst {
+		if !replies.take(now) {
+			t.Fatalf("refusal %d of the first %d went unanswered", i+1, replyBurst)
+		}
+	}
+	if replies.take(now) {
+		t.Error("a refusal past the burst was answered at once")
+	}
+	if !replies.take(now.Add(time.Second/replyRate + time.Millisecond)) {
+		t.Error("no refusal was answered after a token's worth of time")
+	}
+	if replies.take(now.Add(time.Second / replyRate)) {
+		t.Error("time going backwards made a token")
+	}
+	if replies = (bucket{tokens: replyBurst}); !replies.take(now) || replies.tokens > replyBurst {
+		t.Error("a full bucket overfilled")
+	}
+}
+
+func TestAGuestFloodingRefusedFramesIsAnsweredForSomeOfThem(t *testing.T) {
+	guest, guestCardEnd := net.Pipe()
+	network, networkEnd := net.Pipe()
+	policy := &Policy{}
+	go func() { _ = Relay(guest, network, func() *Policy { return policy }) }()
+
+	const sent = 3 * replyBurst
+	refused, allowed := tcp4("192.168.1.30", 22), tcp4("140.82.112.3", 443)
+	frames := make([][]byte, 0, sent+1)
+	for range sent {
+		frames = append(frames, refused)
+	}
+	go func() { _, _ = guestCardEnd.Write(stream(append(frames, allowed)...)) }()
+	answers := make(chan int)
+	go func() {
+		count, length := 0, make([]byte, 4)
+		for {
+			_ = guestCardEnd.SetReadDeadline(time.Now().Add(time.Second))
+			if _, err := readAll(guestCardEnd, length); err != nil {
+				answers <- count
+				return
+			}
+			if _, err := readAll(guestCardEnd, make([]byte, binary.BigEndian.Uint32(length))); err != nil {
+				answers <- count
+				return
+			}
+			count++
+		}
+	}()
+	_ = networkEnd.SetDeadline(time.Now().Add(5 * time.Second))
+	got := make([]byte, len(stream(allowed)))
+	if _, err := readAll(networkEnd, got); err != nil || !bytes.Equal(got, stream(allowed)) {
+		t.Fatalf("the allowed frame after the flood: % x, %v", got, err)
+	}
+	// The refusals took well under a second, in which a few more tokens
+	// come at most.
+	if count := <-answers; count < replyBurst || count > replyBurst+replyRate/2 {
+		t.Errorf("%d of %d refusals answered", count, sent)
+	}
+	guestCardEnd.Close()
+}
+
+func TestTheVMDyingMidFrameHangsUpOnTheNetwork(t *testing.T) {
+	guest, guestCardEnd := net.Pipe()
+	network, networkEnd := net.Pipe()
+	ended := make(chan error, 1)
+	go func() { ended <- Relay(guest, network, func() *Policy { return &Policy{} }) }()
+	// Half a frame, and then the VM is killed, as the host's OOM killer
+	// would.
+	whole := stream(tcp4("140.82.112.3", 443))
+	_, _ = guestCardEnd.Write(whole[:len(whole)/2])
+	guestCardEnd.Close()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the relay outlived the VM")
+	}
+	_ = networkEnd.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := networkEnd.Read(make([]byte, 1)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("the network was left open: %v", err)
+	}
 }

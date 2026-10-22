@@ -90,7 +90,6 @@ func doctor(args []string) error {
 	} else {
 		checks = append(checks, host.Check{Name: "jobs", Found: "taking jobs", OK: true})
 	}
-	checks = append(checks, networkOf(current, vm.FencesNetwork).check())
 	switch {
 	case !power.OnBattery:
 		checks = append(checks, host.Check{Name: "power", Found: "plugged in", OK: true})
@@ -194,9 +193,10 @@ func authorise() bool {
 }
 
 // jobsFence is what keeps a job's VM off the networks around this machine,
-// for the network check. Nothing does yet: a job's VM reaches whatever this
-// machine can. Fencing the private networks fills this in.
-func jobsFence(settings.Settings) host.Fence { return host.Fence{} }
+// for the network check: the one network row, in the Security box.
+func jobsFence(current settings.Settings) host.Fence {
+	return networkOf(current, vm.FencesNetwork).fenced()
+}
 
 // macOSInVM is whether a hive-macos job runs in a throwaway VM of its own
 // rather than as native.User on the Mac. It cannot yet.

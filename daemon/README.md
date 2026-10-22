@@ -225,22 +225,23 @@ the journal for the log (`journalctl --user -u hiveworker`).
 The machine's owner decides what it lends. `hived config` shows the settings
 and `hived config set <name> <value>` changes one:
 
-| Setting           | Values                | What it does                                        |
-| ----------------- | --------------------- | --------------------------------------------------- |
-| `max-jobs`        | `1` to `8`            | How many jobs run at once                           |
-| `max-vcpus`       | `2`, `4`, `8`, `auto` | The largest job this Mac takes                      |
-| `warm`            | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner    |
-| `battery`         | `on`, `off`           | Take jobs while unplugged                           |
-| `lid`             | `on`, `off`           | Take jobs with the lid closed                       |
-| `hours`           | `22:00-07:00`, `any`  | When jobs may start, in local time                  |
-| `cache`           | `on`, `off`           | Keep an Actions cache on this Mac                   |
-| `cache-size`      | `1` to `2000`, `auto` | The most disk the cache may use, in gigabytes       |
-| `reserve-memory`  | `24G`, `40%`, `off`   | Memory kept for everything else on this machine     |
-| `private-network` | `block`, `allow`      | Whether jobs reach this machine's LAN and tailnet   |
-| `allow-network`   | a list, `none`        | Private places jobs may reach anyway                |
-| `ipv6-site`       | `48`, `56`, `64`      | The IPv6 site around this machine jobs are kept off |
-| `data-dir`        | a path, `default`     | Where the image and each job's disk are kept        |
-| `cache-dir`       | a path, `default`     | Where the Actions cache is kept                     |
+| Setting             | Values                      | What it does                                               |
+| ------------------- | --------------------------- | ---------------------------------------------------------- |
+| `max-jobs`          | `1` to `8`                  | How many jobs run at once                                  |
+| `max-vcpus`         | `2`, `4`, `8`, `auto`       | The largest job this Mac takes                             |
+| `warm`              | `on`, `off`                 | Keep one VM booted so a `hive` job starts sooner           |
+| `battery`           | `on`, `off`                 | Take jobs while unplugged                                  |
+| `lid`               | `on`, `off`                 | Take jobs with the lid closed                              |
+| `hours`             | `22:00-07:00`, `any`        | When jobs may start, in local time                         |
+| `cache`             | `on`, `off`                 | Keep an Actions cache on this Mac                          |
+| `cache-size`        | `1` to `2000`, `auto`       | The most disk the cache may use, in gigabytes              |
+| `reserve-memory`    | `24G`, `40%`, `off`         | Memory kept for everything else on this machine            |
+| `network-isolation` | `block`, `lan-allow`, `off` | What of the networks around this machine jobs are kept off |
+| `allow-network`     | a list, `none`              | Private places jobs may reach anyway                       |
+| `dns`               | `host`, `public`            | The resolvers jobs are given                               |
+| `ipv6-site`         | `48`, `56`, `64`            | The IPv6 site around this machine jobs are kept off        |
+| `data-dir`          | a path, `default`           | Where the image and each job's disk are kept               |
+| `cache-dir`         | a path, `default`           | Where the Actions cache is kept                            |
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
@@ -601,7 +602,28 @@ still stopped, hived classifies why and sends `reason` and `detail` on
 peak) on MacBook-Pro-5` on the job.
 
 What the guest can reach: outbound, the internet, and on Linux not the
-networks around the machine that lends it. The guest is given the
+networks around the machine that lends it, as far as `network-isolation`
+says:
+
+| `network-isolation` | A job is kept off                                                             |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `block`             | the machine itself, its LAN and subnets, its tailnet, link-local and metadata |
+| `lan-allow`         | the machine itself, its tailnet, link-local and metadata; it reaches the LAN  |
+| `off`               | nothing, as before there was a fence                                          |
+
+A machine enrolled with `hived login` starts at `block`: it has no jobs yet
+that a fence could break. A machine that updates to a hived with the fence,
+whose owner has not chosen, is at `lan-allow`, so that jobs that pull from
+a registry or a cache on its LAN keep working, while they lose the machine
+itself, its tailnet and a cloud's metadata service, which a job has no
+business with. hived logs a warning the first time it starts that way,
+saying so and naming the commands below; `hived config` and `hived status`
+show the setting and whether it is the default. To keep jobs off the LAN
+too: `hived config set network-isolation block`. To have it as it was:
+`hived config set network-isolation off`. The rest of this section is
+`block`; `lan-allow` differs in letting through the private ranges, other
+than a tailnet's, and the machine's neighbours, and keeping off the
+machine's own addresses alone. The guest is given the
 machine's own address and routes by passt, which makes each of the guest's
 connections as the daemon's user; hived tells it not to map the machine's
 loopback into the guest. QEMU and passt are not joined directly: hived holds
@@ -641,7 +663,7 @@ may like:
   is fenced if the IPv4 address at any place RFC 6052 allows is. So on an
   IPv6-only network that reaches IPv4 through that prefix, internet traffic
   can be refused: 64:ff9b:1::808:808, which is 8.8.8.8, reads as 0.0.0.0 at
-  /64. `private-network allow` is the way round it there.
+  /64. `network-isolation off` is the way round it there.
 - The IPv4 addresses inside 6to4 and Teredo addresses are not read, nor
   those behind another network's own NAT64 prefix, which matters only on a
   machine with such a tunnel or gateway. Nor is a VPN fenced beyond its own
@@ -651,9 +673,35 @@ The owner can let jobs at something private on purpose, such as a database
 the machine serves them:
 `hived config set allow-network 192.168.1.20:5432,10.0.0.0/24` names
 addresses and ranges, each with a port or without, and `none` clears them.
-`hived config set private-network allow` lets jobs reach everything the
-machine can, as they could before. Either applies from the next job, and
+`0.0.0.0/0` and `::/0` are refused: everything is `network-isolation off`,
+which says so. An allowance wider than an IPv4 /8 or an IPv6 /32 is taken
+and warned about, and `hived status` and `hived doctor` say that it opens
+nearly everything. Allowances are checked before the machine's own
+addresses, so a wide one reaches the machine itself too.
+`hived config set network-isolation off` lets jobs reach everything the
+machine can, as they could before. Each applies from the next job, and
 `hived status` and `hived doctor` say what a job here can reach.
+
+Two more things the fence does not cover:
+
+- **Hairpin NAT.** The machine's public IPv4 address behind a home router
+  is on no interface of the machine's, so the fence does not know it. A job
+  that connects to it is turned around by the router to whatever on the LAN
+  has a port forwarded. That is only what the owner already exposed to the
+  internet, but such a service sees the connection come from inside.
+- **The resolvers.** The guest may ask the resolvers it was given on port
+  53, wherever they are, and no others. Under `dns host` those are the
+  machine's own, as passt reads them from `/etc/resolv.conf`, less a
+  loopback one and Tailscale's; so where the machine uses a resolver on its
+  LAN, such as a router or a Pi-hole, a job can ask it the LAN's names. That
+  is not reaching anything, but it tells a job what is there.
+  `hived config set dns public` gives the guest Cloudflare's and Google's
+  instead, in both families, and leaves the LAN's resolver out of reach; a
+  job then cannot resolve names only the LAN knows.
+
+A refused frame is answered at up to 100 a second per VM, after a first
+100: a guest sending refused frames as fast as it can costs hived little,
+and its connections still fail at once.
 
 On a Mac the guest is behind the system's NAT, which gives hived no say in
 where its packets go, so a job there can still reach the Mac's LAN and

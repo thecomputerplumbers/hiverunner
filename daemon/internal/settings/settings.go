@@ -5,6 +5,7 @@
 package settings
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,10 +59,18 @@ type Settings struct {
 	// the host, as "24G" or "40%". Empty means none is held back. Use
 	// ReserveBytes for what it comes to.
 	ReserveMemory string `json:"reserveMemory,omitempty"`
-	// PrivateNetwork lets jobs reach the networks around this machine as
-	// well as the internet: its LAN, its tailnet and the machine itself.
-	// It is off unless the owner turns it on: see package fence.
-	PrivateNetwork bool `json:"privateNetwork"`
+	// NetworkIsolation is how much of the networks around this machine a
+	// job is kept off, beyond the internet: IsolationBlock, its LAN, its
+	// tailnet and the machine itself; IsolationLAN, the tailnet and the
+	// machine but not the LAN; or IsolationOff, nothing, as it was before
+	// there was a fence. Empty is the owner having chosen nothing, which is
+	// IsolationLAN: see Isolation. See package fence.
+	NetworkIsolation string `json:"networkIsolation,omitempty"`
+	// DNS is the resolvers a job's guest is given: DNSHost, those this
+	// machine uses, as far as a guest can use them; or DNSPublic,
+	// Cloudflare's and Google's, which leaves a LAN's resolver and the names
+	// it knows out of reach. Empty is DNSHost.
+	DNS string `json:"dns,omitempty"`
 	// AllowNetwork is somewhere private that jobs may reach all the same,
 	// as `hived config set allow-network` takes it:
 	// "192.168.1.20:5432,10.0.0.0/24". Empty means nowhere.
@@ -79,6 +88,28 @@ type Settings struct {
 	// user's other caches.
 	CacheDir string `json:"cacheDir,omitempty"`
 }
+
+// What NetworkIsolation may be.
+const (
+	IsolationBlock = "block"
+	IsolationLAN   = "lan-allow"
+	IsolationOff   = "off"
+)
+
+// What DNS may be.
+const (
+	DNSHost   = "host"
+	DNSPublic = "public"
+)
+
+// Isolation is NetworkIsolation, the default for an owner who has chosen
+// nothing included. That default is lan-allow, so that a machine updating
+// to a hived with the fence keeps the jobs that use a registry or a cache on
+// its LAN working, while they lose the machine itself, its tailnet and a
+// cloud's metadata service, which a job has no business with. hived login
+// chooses block for a machine enrolled from then on, which has no jobs yet
+// to break.
+func (s Settings) Isolation() string { return cmp.Or(s.NetworkIsolation, IsolationLAN) }
 
 // Sizes are the job sizes a machine can be offered, by guest vCPUs.
 var Sizes = []int{2, 4, 8}
@@ -190,6 +221,12 @@ func (s Settings) validate() error {
 	if _, err := fence.ParseAllowances(s.AllowNetwork); err != nil {
 		return err
 	}
+	if s.NetworkIsolation != "" && !slices.Contains([]string{IsolationBlock, IsolationLAN, IsolationOff}, s.NetworkIsolation) {
+		return errIsolation
+	}
+	if s.DNS != "" && s.DNS != DNSHost && s.DNS != DNSPublic {
+		return errDNS
+	}
 	// Zero, from settings made before there was one, is the default.
 	if s.IPv6Site != 0 && !slices.Contains(fence.Sites, s.IPv6Site) {
 		return errIPv6Site
@@ -208,7 +245,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "private-network", "allow-network", "ipv6-site", "macos-jobs", "auto-update", "data-dir", "cache-dir"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "auto-update", "data-dir", "cache-dir"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -282,15 +319,16 @@ func (s *Settings) Set(key, value string) error {
 			return err
 		}
 		s.ReserveMemory = reserve.text()
-	case "private-network":
-		switch value {
-		case "allow":
-			s.PrivateNetwork = true
-		case "block":
-			s.PrivateNetwork = false
-		default:
-			return errors.New("private-network takes block or allow")
+	case "network-isolation":
+		if !slices.Contains([]string{IsolationBlock, IsolationLAN, IsolationOff}, value) {
+			return errIsolation
 		}
+		s.NetworkIsolation = value
+	case "dns":
+		if value != DNSHost && value != DNSPublic {
+			return errDNS
+		}
+		s.DNS = value
 	case "allow-network":
 		if value == "none" {
 			s.AllowNetwork = ""
@@ -475,12 +513,30 @@ func (s Settings) holding(power host.Power, now time.Time) (reason, fix string) 
 	return "", ""
 }
 
+var (
+	errIsolation = errors.New("network-isolation takes block, lan-allow or off")
+	errDNS       = errors.New("dns takes host or public")
+)
+
 var errIPv6Site = errors.New("ipv6-site takes 48, 56 or 64: the length of the IPv6 prefix this machine's site has")
 
 // Network is what the owner lets a job's guest reach beyond the internet.
 func (s Settings) Network() fence.Policy {
 	allowed, _ := fence.ParseAllowances(s.AllowNetwork)
-	return fence.Policy{Open: s.PrivateNetwork, Allow: allowed, Site: s.IPv6Site}
+	return fence.Policy{Open: s.Isolation() == IsolationOff, LAN: s.Isolation() == IsolationLAN, Allow: allowed, Site: s.IPv6Site}
+}
+
+// WideAllowances are the allowances that take in so much they all but open
+// the fence, as allow-network writes them.
+func (s Settings) WideAllowances() []string {
+	allowed, _ := fence.ParseAllowances(s.AllowNetwork)
+	var wide []string
+	for _, allowance := range allowed {
+		if allowance.Wide() {
+			wide = append(wide, allowance.String())
+		}
+	}
+	return wide
 }
 
 // Takes reports whether a job of this size is within the owner's limit.

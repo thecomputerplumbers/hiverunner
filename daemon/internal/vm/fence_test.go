@@ -68,10 +68,37 @@ func TestTheMachinesNetworksAreKeptWhenTheyCannotBeRead(t *testing.T) {
 	if got := vm.network.Load().Host; !slices.Equal(got, known) {
 		t.Errorf("a failed read at a handoff left %v", got)
 	}
-	// A VM that has never read them has only the private ranges to go on.
+	// A VM that has never read them is not started where it is fenced: it
+	// would reach the machine's public addresses and their neighbours. The
+	// read is tried again first.
+	hostRetry = time.Millisecond
+	defer func() { hostRetry = 200 * time.Millisecond }()
+	tries := 0
+	hostNetworks = func() ([]netip.Prefix, error) { tries++; return nil, errors.New("netlink is busy") }
 	fresh := &instance{ended: make(chan struct{})}
-	runner.refence(fresh)
-	if got := fresh.network.Load(); got == nil || got.Host != nil {
-		t.Errorf("a first read that failed: %+v", got)
+	err := runner.refence(fresh)
+	switch {
+	case FencesNetwork && (err == nil || fresh.network.Load() != nil || tries != hostTries):
+		t.Errorf("a first read that failed %d times: %v, %+v", tries, err, fresh.network.Load())
+	case !FencesNetwork && err != nil:
+		t.Errorf("unfenced, a first read that failed stopped the VM: %v", err)
+	}
+	// Under network-isolation off there is nothing of the machine's to keep
+	// the guest off.
+	open := &Runner{Network: func() fence.Policy { return fence.Policy{Open: true} }}
+	if err := open.refence(&instance{ended: make(chan struct{})}); err != nil {
+		t.Errorf("open, a first read that failed stopped the VM: %v", err)
+	}
+	// One that fails and then succeeds starts.
+	tries = 0
+	hostNetworks = func() ([]netip.Prefix, error) {
+		if tries++; tries < 2 {
+			return nil, errors.New("netlink is busy")
+		}
+		return known, nil
+	}
+	retried := &instance{ended: make(chan struct{})}
+	if err := runner.refence(retried); err != nil || !slices.Equal(retried.network.Load().Host, known) {
+		t.Errorf("a read that worked the second time: %v", err)
 	}
 }

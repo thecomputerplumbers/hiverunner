@@ -149,7 +149,7 @@ func TestTheOwnerSaysWhatElseAJobMayReach(t *testing.T) {
 	open := &Policy{Open: true, Host: host}
 	for _, address := range []string{"192.168.1.20", "100.100.100.100", "203.0.113.7", "169.254.169.254"} {
 		if !open.Reaches(protoTCP, netip.MustParseAddr(address), 22) {
-			t.Errorf("private-network allow did not reach %s", address)
+			t.Errorf("network-isolation off did not reach %s", address)
 		}
 	}
 	if (*Policy)(nil).Reaches(protoTCP, netip.MustParseAddr("10.0.0.1"), 80) {
@@ -283,5 +283,50 @@ func TestTheOwnerSaysHowBigTheHostsIPv6SiteIs(t *testing.T) {
 		if got := policy.Reaches(protoTCP, netip.MustParseAddr(test.address), 445); got != test.want {
 			t.Errorf("site /%d, %s: reached %v, want %v", test.site, test.address, got, test.want)
 		}
+	}
+}
+
+func TestLANAllowKeepsTheGuestOffTheMachineAndItsTailnetAlone(t *testing.T) {
+	policy := &Policy{LAN: true, Host: []netip.Prefix{netip.MustParsePrefix("192.168.1.10/24"), netip.MustParsePrefix("2001:db8:1:1::10/64"), netip.MustParsePrefix("100.101.102.103/32")}}
+	for address, want := range map[string]bool{
+		"192.168.1.30":        true, // a registry on the LAN
+		"10.20.0.5":           true, // another private network
+		"2001:db8:1:1::5":     true, // a neighbour on the machine's /64
+		"2001:db8:1:2::5":     true, // the rest of its site
+		"fd00::5":             true,
+		"140.82.112.3":        true,
+		"192.168.1.10":        false, // the machine itself
+		"2001:db8:1:1::10":    false,
+		"100.101.102.103":     false, // its tailnet address
+		"100.90.1.1":          false, // the tailnet
+		"fd7a:115c:a1e0::9":   false,
+		"169.254.169.254":     false, // a cloud's metadata service
+		"127.0.0.1":           false,
+		"::ffff:192.168.1.10": false,
+	} {
+		if got := policy.Reaches(protoTCP, netip.MustParseAddr(address), 443); got != want {
+			t.Errorf("lan-allow, %s: reaches %v, want %v", address, got, want)
+		}
+	}
+}
+
+func TestEverythingIsNoAllowance(t *testing.T) {
+	for _, everything := range []string{"0.0.0.0/0", "::/0", "[::/0]:443", "0.0.0.0/0:53", "::ffff:0.0.0.0/96"} {
+		if _, err := ParseAllowances(everything); err == nil {
+			t.Errorf("%s was taken", everything)
+		}
+	}
+	allowed, err := ParseAllowances("10.0.0.0/8,0.0.0.0/1,2001:db8::/32,2000::/3,192.168.1.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wide []string
+	for _, allowance := range allowed {
+		if allowance.Wide() {
+			wide = append(wide, allowance.String())
+		}
+	}
+	if strings.Join(wide, ",") != "0.0.0.0/1,2000::/3" {
+		t.Errorf("wide: %v", wide)
 	}
 }

@@ -21,9 +21,11 @@ import (
 )
 
 // A Range is a block of addresses a guest is kept from, and what it is.
+// LAN is whether it is somebody's LAN, which lan-allow lets a guest reach.
 type Range struct {
 	Prefix netip.Prefix
 	What   string
+	LAN    bool
 }
 
 // Private is every range a guest is kept from unless the owner says
@@ -31,22 +33,22 @@ type Range struct {
 // LAN, a tailnet or VPN, a cloud's metadata service, and addresses that
 // mean the host itself.
 var Private = []Range{
-	{netip.MustParsePrefix("10.0.0.0/8"), "a private network"},
-	{netip.MustParsePrefix("172.16.0.0/12"), "a private network"},
-	{netip.MustParsePrefix("192.168.0.0/16"), "a private network"},
-	{netip.MustParsePrefix("100.64.0.0/10"), "a tailnet, or a carrier's NAT"},
-	{netip.MustParsePrefix("169.254.0.0/16"), "link-local, where a cloud keeps its metadata service"},
-	{netip.MustParsePrefix("168.63.129.16/32"), "Azure's host service: metadata, DNS and health probes"},
-	{netip.MustParsePrefix("224.0.0.0/4"), "multicast"},
-	{netip.MustParsePrefix("255.255.255.255/32"), "broadcast"},
-	{netip.MustParsePrefix("0.0.0.0/8"), "this host"},
-	{netip.MustParsePrefix("127.0.0.0/8"), "this host's loopback"},
-	{netip.MustParsePrefix("fc00::/7"), "a private IPv6 network, a tailnet's included"},
-	{netip.MustParsePrefix("fe80::/10"), "link-local IPv6"},
-	{netip.MustParsePrefix("fec0::/10"), "site-local IPv6, deprecated and still routed by some networks"},
-	{netip.MustParsePrefix("ff00::/8"), "IPv6 multicast"},
-	{netip.MustParsePrefix("::1/128"), "this host's loopback"},
-	{netip.MustParsePrefix("::/128"), "this host"},
+	{netip.MustParsePrefix("10.0.0.0/8"), "a private network", true},
+	{netip.MustParsePrefix("172.16.0.0/12"), "a private network", true},
+	{netip.MustParsePrefix("192.168.0.0/16"), "a private network", true},
+	{netip.MustParsePrefix("100.64.0.0/10"), "a tailnet, or a carrier's NAT", false},
+	{netip.MustParsePrefix("169.254.0.0/16"), "link-local, where a cloud keeps its metadata service", false},
+	{netip.MustParsePrefix("168.63.129.16/32"), "Azure's host service: metadata, DNS and health probes", false},
+	{netip.MustParsePrefix("224.0.0.0/4"), "multicast", false},
+	{netip.MustParsePrefix("255.255.255.255/32"), "broadcast", false},
+	{netip.MustParsePrefix("0.0.0.0/8"), "this host", false},
+	{netip.MustParsePrefix("127.0.0.0/8"), "this host's loopback", false},
+	{netip.MustParsePrefix("fc00::/7"), "a private IPv6 network, a tailnet's included", true},
+	{netip.MustParsePrefix("fe80::/10"), "link-local IPv6", false},
+	{netip.MustParsePrefix("fec0::/10"), "site-local IPv6, deprecated and still routed by some networks", false},
+	{netip.MustParsePrefix("ff00::/8"), "IPv6 multicast", false},
+	{netip.MustParsePrefix("::1/128"), "this host's loopback", false},
+	{netip.MustParsePrefix("::/128"), "this host", false},
 }
 
 // The prefixes a NAT64 gateway reaches IPv4 through. The well-known one
@@ -58,6 +60,9 @@ var (
 	nat64      = netip.MustParsePrefix("64:ff9b::/96")
 	nat64Local = netip.MustParsePrefix("64:ff9b:1::/48")
 )
+
+// tailnet6 is Tailscale's IPv6 range, inside fc00::/7: never a LAN.
+var tailnet6 = netip.MustParsePrefix("fd7a:115c:a1e0::/48")
 
 // translated is whether an IPv6 address stands for an IPv4 one.
 func translated(address netip.Addr) bool {
@@ -134,6 +139,15 @@ func (a Allowance) covers(address netip.Addr, port uint16) bool {
 	return a.Prefix.Contains(address) && (a.Port == 0 || a.Port == port)
 }
 
+// Wide reports whether an allowance takes in so much that it all but opens
+// the fence: wider than an IPv4 /8 or an IPv6 /32.
+func (a Allowance) Wide() bool {
+	if a.Prefix.Addr().Is4() {
+		return a.Prefix.Bits() < 8
+	}
+	return a.Prefix.Bits() < 32
+}
+
 var errAllowance = errors.New("allow-network takes addresses and ranges, each with a port if you like, separated by commas: 192.168.1.20:5432,10.0.0.0/24,[fd00::5]:80; or none")
 
 // ParseAllowances reads what `hived config set allow-network` was given:
@@ -186,6 +200,11 @@ func parseAllowance(entry string) (Allowance, error) {
 			prefix = netip.PrefixFrom(forms[0], prefix.Bits()-96)
 		}
 		allowance.Prefix = prefix.Masked()
+		// Everything, written as a range, is no fence at all, and would
+		// open the machine itself while the setting still said block.
+		if allowance.Prefix.Bits() == 0 {
+			return Allowance{}, fmt.Errorf("%q is every address: to let jobs reach everything, hived config set network-isolation off", entry)
+		}
 	} else {
 		address, err := netip.ParseAddr(place)
 		if err != nil || address.Zone() != "" {
@@ -240,8 +259,13 @@ func FormatAllowances(allowed []Allowance) string {
 // Policy is what one guest may reach.
 type Policy struct {
 	// Open lets the guest reach everything the machine can, as it could
-	// before there was a fence: the owner's private-network allow.
+	// before there was a fence: the owner's network-isolation off.
 	Open bool
+	// LAN lets the guest reach the private networks around the machine,
+	// and its neighbours on a public subnet, but not the machine itself,
+	// its tailnet, link-local addresses or a cloud's metadata service: the
+	// owner's network-isolation lan-allow.
+	LAN bool
 	// Allow is somewhere private the owner lets jobs reach all the same.
 	Allow []Allowance
 	// Resolvers are the name servers the guest was given. They are asked
@@ -313,11 +337,21 @@ func (p *Policy) reaches(address netip.Addr, port uint16) bool {
 	if port == 53 && slices.ContainsFunc(p.Resolvers, func(r netip.Addr) bool { return r.Unmap().WithZone("") == address }) {
 		return true
 	}
-	if slices.ContainsFunc(p.Host, func(h netip.Prefix) bool { return p.site(h).Contains(address) }) {
+	if slices.ContainsFunc(p.Host, func(h netip.Prefix) bool { return p.hostContains(h, address) }) {
 		return false
 	}
-	_, fenced := Fenced(address)
-	return !fenced
+	r, fenced := Fenced(address)
+	return !fenced || p.LAN && r.LAN && !tailnet6.Contains(address)
+}
+
+// hostContains is whether one of the machine's own networks keeps the
+// guest from an address: the whole network, or under LAN the machine's
+// own address alone, its neighbours being the LAN.
+func (p *Policy) hostContains(network netip.Prefix, address netip.Addr) bool {
+	if p.LAN {
+		return network.Addr() == address
+	}
+	return p.site(network).Contains(address)
 }
 
 // HostNetworks is every address this machine has, each with the network

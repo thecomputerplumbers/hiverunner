@@ -494,7 +494,7 @@ func lending(screen ui.Screen, facts host.Facts, current settings.Settings, taki
 }
 
 // keyWidth fits the longest setting name.
-const keyWidth = 16
+const keyWidth = 18
 
 func settingRows(screen ui.Screen, current settings.Settings) []string {
 	limit := "auto"
@@ -536,24 +536,25 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		}
 		return ui.Pad(key, keyWidth) + screen.Honey(value)
 	}
-	privateNetwork := "block"
-	if current.PrivateNetwork {
-		privateNetwork = "allow"
+	isolation := "what of the networks here jobs are kept off"
+	if current.NetworkIsolation == "" {
+		isolation = "the default, until you choose"
 	}
 	rows := []string{
 		row("max-jobs", strconv.Itoa(current.MaxJobs), "how many jobs run at once"),
 		row("max-vcpus", limit, "the largest job "+thisMachine+" takes"),
-		row("warm", onOff(current.Warm), "keep one VM booted so jobs start sooner"),
+		row("warm", onOff(current.Warm), "keep a VM booted so jobs start sooner"),
 		row("battery", onOff(current.Battery), "take jobs while unplugged"),
 		row("lid", onOff(current.Lid), "take jobs with the lid closed"),
 		row("hours", hours, "when jobs may start"),
 		row("cache", onOff(current.Cache), "keep an Actions cache on "+thisMachine),
 		row("cache-size", cacheSize, "the most disk the cache may use"),
 		row("reserve-memory", reserve, "memory kept for everything else"),
-		row("private-network", privateNetwork, "whether jobs reach the LAN and tailnet"),
+		row("network-isolation", current.Isolation(), isolation),
 		list("allow-network", allowNetworkText(current), "private places jobs may reach anyway"),
+		row("dns", cmp.Or(current.DNS, settings.DNSHost), "the resolvers jobs are given"),
 		row("ipv6-site", "/"+strconv.Itoa(cmp.Or(current.IPv6Site, fence.DefaultSite)), "the IPv6 site jobs are kept off"),
-		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs on this Mac itself"),
+		row("macos-jobs", onOff(current.MacOSJobs), "run hive-macos jobs on this Mac itself"),
 		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
 		place("data-dir", current.DataDir, "where the image and job disks are kept"),
 		place("cache-dir", current.CacheDir, "where the Actions cache is kept"),
@@ -635,12 +636,20 @@ hived config set <name> <value>  Change one
   cache      on or off           keep an Actions cache on this machine
   cache-size 1 to 2000 or auto   the most disk the cache may use, in GB
   reserve-memory 24G, 40% or off  memory kept for everything else; jobs get the rest
-  private-network block or allow  block keeps jobs to the internet: off this
+  network-isolation block, lan-allow or off
+                                 block keeps jobs to the internet: off this
                                  machine's LAN, its tailnet and the machine
-                                 itself; allow is how it was before (Linux only
-                                 so far: a Mac cannot keep jobs off yet)
+                                 itself; lan-allow lets them reach the LAN, and
+                                 is the default until you choose; off is how it
+                                 was before (Linux only so far: a Mac cannot
+                                 keep jobs off yet)
   allow-network a list or none   private places jobs may reach anyway, like
-                                 192.168.1.20:5432,10.0.0.0/24,[fd00::5]:80
+                                 192.168.1.20:5432,10.0.0.0/24,[fd00::5]:80;
+                                 not 0.0.0.0/0 or ::/0: that is
+                                 network-isolation off
+  dns        host or public      the resolvers jobs are given: this machine's,
+                                 or Cloudflare's and Google's, which keeps a
+                                 LAN resolver and its names out of reach
   ipv6-site  48, 56 or 64        the IPv6 prefix this machine's site has; jobs
                                  are kept off all of it: 56 for most homes, 48
                                  for an office, 64 if the /64 is its own
@@ -712,9 +721,12 @@ func configure(args []string) error {
 		if err := saved(current, args[1]+" is now "+now); err != nil {
 			return err
 		}
-		if args[1] == "private-network" || args[1] == "allow-network" || args[1] == "ipv6-site" {
+		if wide := current.WideAllowances(); args[1] == "allow-network" && len(wide) > 0 {
+			fmt.Println("\nBut " + strings.Join(wide, ", ") + " takes in nearly everything: jobs reach almost all of what " + thisMachine + " can, itself included.")
+		}
+		if args[1] == "network-isolation" || args[1] == "allow-network" || args[1] == "ipv6-site" || args[1] == "dns" {
 			switch {
-			case !vm.FencesNetwork && !current.PrivateNetwork:
+			case !vm.FencesNetwork && current.Isolation() != settings.IsolationOff:
 				fmt.Println("\nBut " + thisMachine + " cannot yet keep jobs off its LAN and tailnet: its VMs are behind the system's NAT, which hived has no say over.")
 			case vm.FencesNetwork:
 				// A job already running keeps what it was given.

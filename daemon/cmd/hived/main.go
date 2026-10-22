@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -258,6 +259,14 @@ func login(ctx context.Context, args []string) error {
 	}); err != nil {
 		return err
 	}
+	// A machine enrolled now has no jobs a fence could break, so it starts
+	// with the strictest; see settings.Isolation.
+	if current, err := settings.Load(); err == nil && current.NetworkIsolation == "" && vm.FencesNetwork {
+		current.NetworkIsolation = settings.IsolationBlock
+		if settings.Save(current) == nil {
+			fmt.Println("Jobs here reach the internet only, not this machine's LAN or tailnet. To change that: hived config set network-isolation lan-allow")
+		}
+	}
 	names := make([]string, len(enrollment.Pools))
 	for i, joined := range enrollment.Pools {
 		names[i] = joined.Name
@@ -407,6 +416,8 @@ func run(ctx context.Context) error {
 		vmRunner.OnUnusable = connections.Unusable
 		// What a job may reach is the owner's word when it starts.
 		vmRunner.Network = func() fence.Policy { return live.Get().Network() }
+		vmRunner.PublicDNS = func() bool { return live.Get().DNS == settings.DNSPublic }
+		fenceNotice(log, live.Get())
 		// Asked now so that it is in the log's first lines, where the
 		// installer and the owner both look.
 		vmRunner.Unusable()
@@ -665,7 +676,30 @@ func loadRunner(log *slog.Logger, current settings.Settings) (*vm.Runner, error)
 	if err != nil {
 		return nil, err
 	}
-	return &vm.Runner{Image: image, WorkDir: workDir(dir), Log: log, Network: current.Network}, nil
+	return &vm.Runner{Image: image, WorkDir: workDir(dir), Log: log, Network: current.Network,
+		PublicDNS: func() bool { return current.DNS == settings.DNSPublic }}, nil
+}
+
+// fenceNotice says once, on the first start of a hived that fences jobs'
+// networks, what that changed for an owner who has not chosen, and how to
+// choose otherwise. An owner who has chosen knows.
+func fenceNotice(log *slog.Logger, current settings.Settings) {
+	if !vm.FencesNetwork || current.NetworkIsolation != "" {
+		return
+	}
+	path, err := settings.Path()
+	if err != nil {
+		return
+	}
+	said := filepath.Join(filepath.Dir(path), "network-isolation-said")
+	if _, err := os.Stat(said); err == nil {
+		return
+	}
+	log.Warn("jobs are now kept off this machine itself, its tailnet and a cloud's metadata service, and still reach its LAN: network-isolation is lan-allow until you choose",
+		"stricter", "hived config set network-isolation block",
+		"as before", "hived config set network-isolation off",
+		"one place", "hived config set allow-network 100.101.102.103:5000")
+	_ = os.WriteFile(said, nil, 0o600)
 }
 
 func selftest(ctx context.Context) error {

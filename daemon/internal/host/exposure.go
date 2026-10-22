@@ -39,10 +39,15 @@ type Fence struct {
 	// On is whether jobs are kept off this machine's private networks, its
 	// tailnet, its own addresses and its subnets.
 	On bool
+	// LAN is whether, On, jobs reach the private networks and subnets
+	// around the machine all the same, kept off its tailnet and the machine
+	// itself alone.
+	LAN bool
 	// Allow is what jobs may reach there all the same.
 	Allow []string
 	// Why is why jobs are not kept off, where hived could keep them off,
-	// and Fix how to; "" where it cannot.
+	// or, with LAN, why they reach it; Fix is how to keep them off. "" where
+	// hived cannot.
 	Why, Fix string
 }
 
@@ -360,11 +365,16 @@ func network(addresses []address, fence Fence) []Check {
 		fixes = append(fixes, "keep on its bridges only the containers and VMs a job may reach")
 	}
 	where := "on " + strings.Join(on, " and ")
+	but := ""
+	if len(fence.Allow) > 0 {
+		but = " but for " + strings.Join(fence.Allow, ", ")
+	}
 	switch {
-	case len(on) > 0 && fence.On && len(fence.Allow) > 0:
-		return []Check{{Name: "network", Found: where + ", and jobs are kept off them but for " + strings.Join(fence.Allow, ", "), OK: true}}
+	case len(on) > 0 && fence.On && fence.LAN && len(private)+len(public)+len(bridges) > 0:
+		return []Check{{Name: "network", Found: where + ", and jobs are kept off " + "this machine and its tailnet, and reach the rest, as " + fence.Why,
+			Note: true, Fix: fence.Fix}}
 	case len(on) > 0 && fence.On:
-		return []Check{{Name: "network", Found: where + ", and jobs are kept off them", OK: true}}
+		return []Check{{Name: "network", Found: where + ", and jobs are kept off them" + but, OK: true}}
 	case len(on) > 0 && fence.Why != "":
 		return []Check{{Name: "network", Found: where + ", and a job can reach whatever this machine can there, as " + fence.Why,
 			Note: true, Fix: fence.Fix}}

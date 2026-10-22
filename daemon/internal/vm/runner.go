@@ -59,6 +59,9 @@ type Runner struct {
 	// the internet alone. Where FencesNetwork is false nothing holds a
 	// guest to it.
 	Network func() fence.Policy
+	// PublicDNS is whether a guest is given public resolvers rather than
+	// the machine's own, asked when a VM boots: the owner's dns public.
+	PublicDNS func() bool
 
 	mu      sync.Mutex
 	warm    *instance
@@ -164,21 +167,40 @@ type instance struct {
 
 // refence holds the VM's guest to what the owner allows now, the
 // resolvers it was given, and the machine's own addresses as they are now:
-// a warm VM may have been booted on another network.
-func (r *Runner) refence(vm *instance) {
+// a warm VM may have been booted on another network. What could not be
+// read is as it was last read. A VM whose machine's addresses have never
+// been read is not started, where its guest is held to the fence: it would
+// reach the machine's public addresses and their neighbours.
+func (r *Runner) refence(vm *instance) error {
 	var policy fence.Policy
 	if r.Network != nil {
 		policy = r.Network()
 	}
 	policy.Resolvers = vm.resolvers
-	// What could not be read is as it was last read.
-	if found, err := hostNetworks(); err == nil {
+	was := vm.network.Load()
+	found, err := hostNetworks()
+	for try := 1; err != nil && was == nil && try < hostTries; try++ {
+		time.Sleep(hostRetry)
+		found, err = hostNetworks()
+	}
+	switch {
+	case err == nil:
 		policy.Host = found
-	} else if was := vm.network.Load(); was != nil {
+	case was != nil:
 		policy.Host = was.Host
+	case FencesNetwork && !policy.Open:
+		return fmt.Errorf("read this machine's own addresses, to keep the job off them: %w", err)
 	}
 	vm.network.Store(&policy)
+	return nil
 }
+
+// How often, and how far apart, a VM's first read of the machine's own
+// addresses is tried.
+var (
+	hostTries = 3
+	hostRetry = 200 * time.Millisecond
+)
 
 // hostNetworks stands in for fence.HostNetworks in tests.
 var hostNetworks = fence.HostNetworks
@@ -285,7 +307,9 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 	defer vm.destroy()
 	// What the guest may reach is what the owner allows now, not when a
 	// warm VM booted. It is set before the job is.
-	r.refence(vm)
+	if err := r.refence(vm); err != nil {
+		return jobs.Result{ExitCode: -1}, err
+	}
 
 	// The VM now works for this pool, and is told where the host's service
 	// is before it is told about the job.

@@ -347,11 +347,16 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 	// and does not ask a public resolver about either.
 	network := []string{"--foreground", "--quiet", "--one-off", "--no-map-gw", "--no-dhcp-search", "--fd", inheritedFD}
 	chosen := upstreamDNS()
+	if r.PublicDNS != nil && r.PublicDNS() {
+		chosen = publicResolvers()
+	}
 	for _, server := range chosen {
 		network = append(network, "--dns", server)
 	}
 	vm.resolvers = guestResolvers(chosen, "/etc/resolv.conf")
-	r.refence(vm)
+	if err = r.refence(vm); err != nil {
+		return "", err
+	}
 	relay, err := run("passt.log", found.passt, relayEnd, network...)
 	if err != nil {
 		return "", err

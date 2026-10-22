@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 )
 
 // The largest frame either end sends: an IPv4 or IPv6 packet of 64 KiB,
@@ -47,6 +48,7 @@ func Relay(guest, network io.ReadWriteCloser, policy func() *Policy) error {
 		reader := bufio.NewReaderSize(guest, maxFrame)
 		buffer, scratch := make([]byte, maxFrame), make([]byte, 0, maxFrame+4)
 		var answers []byte
+		replies := bucket{tokens: replyBurst}
 		for {
 			frame, err := readFrame(reader, buffer)
 			if err != nil {
@@ -57,7 +59,7 @@ func Relay(guest, network io.ReadWriteCloser, policy func() *Policy) error {
 			switch {
 			case pass:
 				err = writeFrame(network, frame, &scratch)
-			case reply != nil:
+			case reply != nil && replies.take(time.Now()):
 				err = answer(reply, &answers)
 			}
 			if err != nil {
@@ -104,4 +106,33 @@ func writeFrame(writer io.Writer, frame []byte, scratch *[]byte) error {
 	*scratch = out
 	_, err := writer.Write(out)
 	return err
+}
+
+// How many refusals a guest is told of: replyRate a second, after a first
+// replyBurst. Each is built and written by hived, whose time every job
+// shares, so a guest sending refused frames as fast as it can is told of
+// some and not all: a connect() fails fast all the same, and the rest
+// time out.
+const (
+	replyRate  = 100
+	replyBurst = 100
+)
+
+// bucket is a token bucket of replies.
+type bucket struct {
+	tokens float64
+	last   time.Time
+}
+
+// take spends a token if there is one.
+func (b *bucket) take(now time.Time) bool {
+	if !b.last.IsZero() {
+		b.tokens = min(replyBurst, b.tokens+now.Sub(b.last).Seconds()*replyRate)
+	}
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
 }

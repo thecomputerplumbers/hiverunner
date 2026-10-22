@@ -80,3 +80,19 @@ func TestAGuestMayAskTheResolversItWasGiven(t *testing.T) {
 		t.Errorf("chosen: got %v, want %v", got, want)
 	}
 }
+
+func TestPublicDNSLeavesTheHostsResolversOut(t *testing.T) {
+	resolv := filepath.Join(t.TempDir(), "resolv.conf")
+	if err := os.WriteFile(resolv, []byte("nameserver 192.168.0.1\nnameserver fd00::1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := guestResolvers(publicResolvers(), resolv)
+	if len(got) != 4 || !slices.ContainsFunc(got, netip.Addr.Is4) || !slices.ContainsFunc(got, netip.Addr.Is6) {
+		t.Fatalf("public resolvers: %v", got)
+	}
+	for _, resolver := range got {
+		if resolver.IsPrivate() {
+			t.Errorf("a LAN resolver was given: %v", resolver)
+		}
+	}
+}

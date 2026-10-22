@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -209,8 +210,10 @@ func TestReserveMemory(t *testing.T) {
 
 func TestJobsAreKeptOffPrivateNetworksUnlessTheOwnerSays(t *testing.T) {
 	current := Default()
-	if policy := current.Network(); policy.Open || len(policy.Allow) != 0 {
-		t.Fatalf("a machine whose owner decided nothing lends its network: %+v", policy)
+	// An owner who chose nothing, as on a machine that updated to the
+	// fence, keeps the LAN and loses the machine and its tailnet.
+	if policy := current.Network(); policy.Open || !policy.LAN || len(policy.Allow) != 0 || current.Isolation() != IsolationLAN {
+		t.Fatalf("a machine whose owner decided nothing: %+v", policy)
 	}
 	if err := current.Set("allow-network", "192.168.1.20:5432, 10.0.0.9/24"); err != nil {
 		t.Fatal(err)
@@ -218,34 +221,51 @@ func TestJobsAreKeptOffPrivateNetworksUnlessTheOwnerSays(t *testing.T) {
 	if current.AllowNetwork != "192.168.1.20:5432,10.0.0.0/24" || len(current.Network().Allow) != 2 {
 		t.Errorf("allow-network stored as %q", current.AllowNetwork)
 	}
-	if err := current.Set("private-network", "allow"); err != nil || !current.Network().Open {
-		t.Errorf("private-network allow: %+v %v", current, err)
+	if err := current.Set("network-isolation", "off"); err != nil || !current.Network().Open {
+		t.Errorf("network-isolation off: %+v %v", current, err)
 	}
-	if err := current.Set("private-network", "block"); err != nil || current.Network().Open {
-		t.Errorf("private-network block: %+v %v", current, err)
+	if err := current.Set("network-isolation", "block"); err != nil || current.Network().Open || current.Network().LAN {
+		t.Errorf("network-isolation block: %+v %v", current, err)
 	}
-	for _, bad := range [][2]string{{"private-network", "on"}, {"allow-network", "printer.local"}, {"allow-network", "192.168.1.20:0"}} {
+	if err := current.Set("network-isolation", "lan-allow"); err != nil || current.Network().Open || !current.Network().LAN {
+		t.Errorf("network-isolation lan-allow: %+v %v", current, err)
+	}
+	for _, bad := range [][2]string{
+		{"network-isolation", "on"}, {"allow-network", "printer.local"}, {"allow-network", "192.168.1.20:0"},
+		// Everything is no allowance: it is network-isolation off.
+		{"allow-network", "0.0.0.0/0"}, {"allow-network", "::/0"}, {"allow-network", "10.0.0.0/8,::/0:443"}, {"allow-network", "::ffff:0.0.0.0/96"},
+		{"dns", "8.8.8.8"},
+	} {
 		before := current
 		if err := current.Set(bad[0], bad[1]); err == nil || current != before {
 			t.Errorf("set %s %s was accepted", bad[0], bad[1])
 		}
 	}
+	// A very wide one is taken, and said to be.
+	if err := current.Set("allow-network", "10.0.0.0/8,0.0.0.0/1,2000::/3"); err != nil || fmt.Sprint(current.WideAllowances()) != "[0.0.0.0/1 2000::/3]" {
+		t.Errorf("wide allowances: %v %v", current.WideAllowances(), err)
+	}
 	if err := current.Set("allow-network", "none"); err != nil || current.AllowNetwork != "" {
 		t.Errorf("allow-network none: %q %v", current.AllowNetwork, err)
+	}
+	if err := current.Set("dns", "public"); err != nil || current.DNS != DNSPublic {
+		t.Errorf("dns public: %q %v", current.DNS, err)
 	}
 
 	// A hand-edited file is checked like the command line.
 	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := os.WriteFile(path, []byte(`{"allowNetwork":"the office"}`), 0o600); err != nil {
+	for _, bad := range []string{`{"allowNetwork":"the office"}`, `{"allowNetwork":"0.0.0.0/0"}`, `{"networkIsolation":"allow"}`, `{"dns":"lan"}`} {
+		if err := os.WriteFile(path, []byte(bad), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := read(path); err == nil {
+			t.Errorf("%s was read", bad)
+		}
+	}
+	if err := os.WriteFile(path, []byte(`{"networkIsolation":"off","allowNetwork":"10.0.0.0/24"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := read(path); err == nil {
-		t.Error("an allowance that means nothing was read")
-	}
-	if err := os.WriteFile(path, []byte(`{"privateNetwork":true,"allowNetwork":"10.0.0.0/24"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := read(path); err != nil || !got.PrivateNetwork || got.AllowNetwork != "10.0.0.0/24" {
+	if got, err := read(path); err != nil || got.Isolation() != IsolationOff || got.AllowNetwork != "10.0.0.0/24" {
 		t.Errorf("read = %+v, %v", got, err)
 	}
 }

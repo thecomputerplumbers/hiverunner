@@ -478,8 +478,8 @@ func TestTheNetworkRowSaysWhatTheFenceKeepsJobsOff(t *testing.T) {
 	if got := network(lan, Fence{On: true, Allow: []string{"192.168.1.5:5432"}}); len(got) != 1 || !got[0].OK || !strings.Contains(got[0].Found, "kept off them but for 192.168.1.5:5432") {
 		t.Errorf("fenced, with an allowance: got %+v", got)
 	}
-	open := Fence{Why: "private-network is allow", Fix: "hived config set private-network block"}
-	if got := network(lan, open); len(got) != 1 || got[0].OK || !got[0].Note || !strings.Contains(got[0].Found, "whatever this machine can there, as private-network is allow") || got[0].Fix != open.Fix {
+	open := Fence{Why: "network-isolation is off", Fix: "hived config set network-isolation block"}
+	if got := network(lan, open); len(got) != 1 || got[0].OK || !got[0].Note || !strings.Contains(got[0].Found, "whatever this machine can there, as network-isolation is off") || got[0].Fix != open.Fix {
 		t.Errorf("opened by the owner: got %+v", got)
 	}
 	// Nothing to fence is said the same either way.
