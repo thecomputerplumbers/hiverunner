@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"net"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
@@ -86,6 +87,24 @@ func guestUsable(servers []string) []string {
 		usable = append(usable, server)
 	}
 	return usable
+}
+
+// guestResolvers is the resolvers a guest is given: those guestDNS chose,
+// or, where it chose none, the usable ones in the host's resolv.conf, which
+// is what passt then hands the guest. A guest may ask these on port 53
+// wherever they are, which is what keeps names resolving for a guest kept
+// off the LAN its router is on.
+func guestResolvers(chosen []string, resolvConf string) []netip.Addr {
+	if chosen == nil {
+		chosen = guestUsable(nameservers(resolvConf))
+	}
+	var resolvers []netip.Addr
+	for _, server := range chosen {
+		if address, err := netip.ParseAddr(server); err == nil {
+			resolvers = append(resolvers, address.WithZone(""))
+		}
+	}
+	return resolvers
 }
 
 func nameservers(file string) []string {

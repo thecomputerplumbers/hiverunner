@@ -22,6 +22,7 @@ import (
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/connection"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/cooldown"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
@@ -404,6 +405,8 @@ func run(ctx context.Context) error {
 		runner = vmRunner
 		hostKillAt = func() time.Time { return vm.HostKillTime(vmRunner.WorkDir) }
 		vmRunner.OnUnusable = connections.Unusable
+		// What a job may reach is the owner's word when it starts.
+		vmRunner.Network = func() fence.Policy { return live.Get().Network() }
 		// Asked now so that it is in the log's first lines, where the
 		// installer and the owner both look.
 		vmRunner.Unusable()
@@ -662,7 +665,7 @@ func loadRunner(log *slog.Logger, current settings.Settings) (*vm.Runner, error)
 	if err != nil {
 		return nil, err
 	}
-	return &vm.Runner{Image: image, WorkDir: workDir(dir), Log: log}, nil
+	return &vm.Runner{Image: image, WorkDir: workDir(dir), Log: log, Network: current.Network}, nil
 }
 
 func selftest(ctx context.Context) error {

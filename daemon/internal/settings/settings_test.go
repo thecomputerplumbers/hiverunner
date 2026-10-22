@@ -206,3 +206,46 @@ func TestReserveMemory(t *testing.T) {
 		t.Errorf("read = %+v, %v", got, err)
 	}
 }
+
+func TestJobsAreKeptOffPrivateNetworksUnlessTheOwnerSays(t *testing.T) {
+	current := Default()
+	if policy := current.Network(); policy.Open || len(policy.Allow) != 0 {
+		t.Fatalf("a machine whose owner decided nothing lends its network: %+v", policy)
+	}
+	if err := current.Set("allow-network", "192.168.1.20:5432, 10.0.0.9/24"); err != nil {
+		t.Fatal(err)
+	}
+	if current.AllowNetwork != "192.168.1.20:5432,10.0.0.0/24" || len(current.Network().Allow) != 2 {
+		t.Errorf("allow-network stored as %q", current.AllowNetwork)
+	}
+	if err := current.Set("private-network", "allow"); err != nil || !current.Network().Open {
+		t.Errorf("private-network allow: %+v %v", current, err)
+	}
+	if err := current.Set("private-network", "block"); err != nil || current.Network().Open {
+		t.Errorf("private-network block: %+v %v", current, err)
+	}
+	for _, bad := range [][2]string{{"private-network", "on"}, {"allow-network", "printer.local"}, {"allow-network", "192.168.1.20:0"}} {
+		before := current
+		if err := current.Set(bad[0], bad[1]); err == nil || current != before {
+			t.Errorf("set %s %s was accepted", bad[0], bad[1])
+		}
+	}
+	if err := current.Set("allow-network", "none"); err != nil || current.AllowNetwork != "" {
+		t.Errorf("allow-network none: %q %v", current.AllowNetwork, err)
+	}
+
+	// A hand-edited file is checked like the command line.
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"allowNetwork":"the office"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := read(path); err == nil {
+		t.Error("an allowance that means nothing was read")
+	}
+	if err := os.WriteFile(path, []byte(`{"privateNetwork":true,"allowNetwork":"10.0.0.0/24"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read(path); err != nil || !got.PrivateNetwork || got.AllowNetwork != "10.0.0.0/24" {
+		t.Errorf("read = %+v, %v", got, err)
+	}
+}

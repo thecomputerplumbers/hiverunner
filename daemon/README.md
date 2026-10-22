@@ -225,19 +225,21 @@ the journal for the log (`journalctl --user -u hiveworker`).
 The machine's owner decides what it lends. `hived config` shows the settings
 and `hived config set <name> <value>` changes one:
 
-| Setting          | Values                | What it does                                     |
-| ---------------- | --------------------- | ------------------------------------------------ |
-| `max-jobs`       | `1` to `8`            | How many jobs run at once                        |
-| `max-vcpus`      | `2`, `4`, `8`, `auto` | The largest job this Mac takes                   |
-| `warm`           | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner |
-| `battery`        | `on`, `off`           | Take jobs while unplugged                        |
-| `lid`            | `on`, `off`           | Take jobs with the lid closed                    |
-| `hours`          | `22:00-07:00`, `any`  | When jobs may start, in local time               |
-| `cache`          | `on`, `off`           | Keep an Actions cache on this Mac                |
-| `cache-size`     | `1` to `2000`, `auto` | The most disk the cache may use, in gigabytes    |
-| `reserve-memory` | `24G`, `40%`, `off`   | Memory kept for everything else on this machine  |
-| `data-dir`       | a path, `default`     | Where the image and each job's disk are kept     |
-| `cache-dir`      | a path, `default`     | Where the Actions cache is kept                  |
+| Setting           | Values                | What it does                                      |
+| ----------------- | --------------------- | ------------------------------------------------- |
+| `max-jobs`        | `1` to `8`            | How many jobs run at once                         |
+| `max-vcpus`       | `2`, `4`, `8`, `auto` | The largest job this Mac takes                    |
+| `warm`            | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner  |
+| `battery`         | `on`, `off`           | Take jobs while unplugged                         |
+| `lid`             | `on`, `off`           | Take jobs with the lid closed                     |
+| `hours`           | `22:00-07:00`, `any`  | When jobs may start, in local time                |
+| `cache`           | `on`, `off`           | Keep an Actions cache on this Mac                 |
+| `cache-size`      | `1` to `2000`, `auto` | The most disk the cache may use, in gigabytes     |
+| `reserve-memory`  | `24G`, `40%`, `off`   | Memory kept for everything else on this machine   |
+| `private-network` | `block`, `allow`      | Whether jobs reach this machine's LAN and tailnet |
+| `allow-network`   | a list, `none`        | Private places jobs may reach anyway              |
+| `data-dir`        | a path, `default`     | Where the image and each job's disk are kept      |
+| `cache-dir`       | a path, `default`     | Where the Actions cache is kept                   |
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
@@ -597,15 +599,33 @@ still stopped, hived classifies why and sends `reason` and `detail` on
 `job.exited` so the coordinator can store `runner killed: guest OOM (7.9/8 GB
 peak) on MacBook-Pro-5` on the job.
 
-What the guest can reach: outbound, whatever the machine it runs on can.
-That is the internet, and it is also the machine's own network: other
-machines on its LAN, and the peers of a VPN or tailnet the machine is on.
-Nothing here narrows that to the internet, so a job has the network position
-of the machine that lends it. On Linux the guest is given the machine's own
-address and routes by passt, which makes each of the guest's connections as
-the daemon's user; hived tells it not to map the machine's loopback into the
-guest. On a Mac the guest is behind the system's NAT. Nothing reaches in on
-either.
+What the guest can reach: outbound, the internet, and on Linux not the
+networks around the machine that lends it. The guest is given the
+machine's own address and routes by passt, which makes each of the guest's
+connections as the daemon's user; hived tells it not to map the machine's
+loopback into the guest. QEMU and passt are not joined directly: hived holds
+the middle, and a frame the guest sends to a private address goes no
+further. It is answered, as a router would answer it, with "administratively
+prohibited", so the connection fails at once instead of timing out. Private
+is 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16; 100.64.0.0/10, a tailnet's
+and a carrier's NAT's; 169.254.0.0/16, where a cloud keeps its metadata
+service; multicast and broadcast; fc00::/7, fe80::/10 and IPv6 multicast;
+the loopback and unspecified addresses; and the machine's own addresses on
+any network. The list is `fence.Private`. The resolvers the guest was given
+are the exception, on port 53 alone, so a router on the LAN still answers
+its names and nothing else.
+
+The owner can let jobs at something private on purpose, such as a database
+the machine serves them:
+`hived config set allow-network 192.168.1.20:5432,10.0.0.0/24` names
+addresses and ranges, each with a port or without, and `none` clears them.
+`hived config set private-network allow` lets jobs reach everything the
+machine can, as they could before. Either applies from the next job, and
+`hived status` and `hived doctor` say what a job here can reach.
+
+On a Mac the guest is behind the system's NAT, which gives hived no say in
+where its packets go, so a job there can still reach the Mac's LAN and
+tailnet; `hived status` says so. Nothing reaches in on either.
 
 Names are resolved by the machine's resolvers, except the ones only the
 machine can use. A resolver on its loopback is out of the guest's reach.
@@ -701,6 +721,7 @@ refuses, rather than sharing the machine with it.
 | `internal/host`     | Hardware facts, power and lid state, and what it leaves open |
 | `internal/bench`    | The speed score benchmark                                    |
 | `internal/config`   | The machine file                                             |
+| `internal/fence`    | What a job's guest may reach of the networks around it       |
 
 ## Tests
 

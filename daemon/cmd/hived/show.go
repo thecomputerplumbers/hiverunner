@@ -78,6 +78,8 @@ type snapshot struct {
 		Cooldown *cooldownState `json:"cooldown,omitempty"`
 	} `json:"jobs"`
 	Paused bool `json:"paused"`
+	// Network is what a job on this machine can reach.
+	Network networkState `json:"network"`
 	// Labels is every runs-on label, and whether this machine takes it.
 	Labels []labelState `json:"labels"`
 	Image  *struct {
@@ -243,6 +245,7 @@ func gather() (snapshot, host.Facts, settings.Settings, host.Power, error) {
 		s.Jobs.Reason, s.Jobs.Fix = cannotRunVMs()
 	}
 	s.Jobs.Taking = s.Jobs.Reason == ""
+	s.Network = networkOf(current, vm.FencesNetwork)
 
 	for _, vcpus := range settings.Sizes {
 		reason := refusal(vcpus, facts, current)
@@ -368,6 +371,7 @@ func status(args []string) error {
 	if wait := s.Jobs.Cooldown; wait != nil && !wait.Paused {
 		rows = append(rows, field("", screen.Honey(fmt.Sprintf("one job at a time until %s: the host killed a job", when(wait.Until, time.Now())))))
 	}
+	rows = append(rows, networkRows(screen, s.Network)...)
 	if problem, fix := asleep(current, power); problem != "" {
 		for _, line := range wrap(problem, ui.Inner-12) {
 			rows = append(rows, field("", screen.Honey(line)))
@@ -489,7 +493,7 @@ func lending(screen ui.Screen, facts host.Facts, current settings.Settings, taki
 }
 
 // keyWidth fits the longest setting name.
-const keyWidth = 15
+const keyWidth = 16
 
 func settingRows(screen ui.Screen, current settings.Settings) []string {
 	limit := "auto"
@@ -521,6 +525,20 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		}
 		return ui.Pad(key, keyWidth) + screen.Honey(dir)
 	}
+	// A list may be long: then it has the row to itself, as a path does.
+	list := func(key, value, meaning string) string {
+		if ui.Width(value) <= 13 {
+			return row(key, value, meaning)
+		}
+		if room := ui.Inner - keyWidth; ui.Width(value) > room {
+			value = value[:room-1] + "…"
+		}
+		return ui.Pad(key, keyWidth) + screen.Honey(value)
+	}
+	privateNetwork := "block"
+	if current.PrivateNetwork {
+		privateNetwork = "allow"
+	}
 	rows := []string{
 		row("max-jobs", strconv.Itoa(current.MaxJobs), "how many jobs run at once"),
 		row("max-vcpus", limit, "the largest job "+thisMachine+" takes"),
@@ -531,6 +549,8 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("cache", onOff(current.Cache), "keep an Actions cache on "+thisMachine),
 		row("cache-size", cacheSize, "the most disk the cache may use"),
 		row("reserve-memory", reserve, "memory kept for everything else"),
+		row("private-network", privateNetwork, "whether jobs reach the LAN and tailnet"),
+		list("allow-network", allowNetworkText(current), "private places jobs may reach anyway"),
 		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs on this Mac itself"),
 		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
 		place("data-dir", current.DataDir, "where the image and job disks are kept"),
@@ -540,6 +560,24 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 	pending := loadMoves()
 	if pending.Data != nil || pending.Cache != nil {
 		rows = append(rows, "", screen.Dim("A move is waiting for the daemon to have no job running."))
+	}
+	return rows
+}
+
+// networkRows say what a job here can reach, and whether this machine
+// holds it to that.
+func networkRows(screen ui.Screen, state networkState) []string {
+	colour := screen.Dim
+	if !state.Fenced {
+		colour = screen.Honey
+	}
+	var rows []string
+	for i, line := range wrap(state.reaches(), ui.Inner-12) {
+		name := ""
+		if i == 0 {
+			name = "Network"
+		}
+		rows = append(rows, field(name, colour(line)))
 	}
 	return rows
 }
@@ -595,6 +633,12 @@ hived config set <name> <value>  Change one
   cache      on or off           keep an Actions cache on this machine
   cache-size 1 to 2000 or auto   the most disk the cache may use, in GB
   reserve-memory 24G, 40% or off  memory kept for everything else; jobs get the rest
+  private-network block or allow  block keeps jobs to the internet: off this
+                                 machine's LAN, its tailnet and the machine
+                                 itself; allow is how it was before (Linux only
+                                 so far: a Mac cannot keep jobs off yet)
+  allow-network a list or none   private places jobs may reach anyway, like
+                                 192.168.1.20:5432,10.0.0.0/24,[fd00::5]:80
   macos-jobs on or off           take hive-macos jobs, run on this Mac itself
                                  as a separate user; hived macos setup first
   auto-update on or off          update to new releases when no job is running;
@@ -652,11 +696,23 @@ func configure(args []string) error {
 			}
 		}
 		now := strings.ToLower(args[2])
-		if args[1] == "reserve-memory" {
+		switch args[1] {
+		case "reserve-memory":
 			now = cmp.Or(current.ReserveMemory, "off")
+		case "allow-network":
+			now = allowNetworkText(current)
 		}
 		if err := saved(current, args[1]+" is now "+now); err != nil {
 			return err
+		}
+		if args[1] == "private-network" || args[1] == "allow-network" {
+			switch {
+			case !vm.FencesNetwork && !current.PrivateNetwork:
+				fmt.Println("\nBut " + thisMachine + " cannot yet keep jobs off its LAN and tailnet: its VMs are behind the system's NAT, which hived has no say over.")
+			case vm.FencesNetwork:
+				// A job already running keeps what it was given.
+				fmt.Println("It applies from the next job.")
+			}
 		}
 		if args[1] == "lid" {
 			if problem, fix := asleep(current, host.ReadPower()); problem != "" {

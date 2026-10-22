@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/config"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
 )
 
@@ -56,6 +57,14 @@ type Settings struct {
 	// the host, as "24G" or "40%". Empty means none is held back. Use
 	// ReserveBytes for what it comes to.
 	ReserveMemory string `json:"reserveMemory,omitempty"`
+	// PrivateNetwork lets jobs reach the networks around this machine as
+	// well as the internet: its LAN, its tailnet and the machine itself.
+	// It is off unless the owner turns it on: see package fence.
+	PrivateNetwork bool `json:"privateNetwork"`
+	// AllowNetwork is somewhere private that jobs may reach all the same,
+	// as `hived config set allow-network` takes it:
+	// "192.168.1.20:5432,10.0.0.0/24". Empty means nowhere.
+	AllowNetwork string `json:"allowNetwork,omitempty"`
 	// DataDir is where the guest image and each job's disk are kept, for an
 	// owner who wants them on another disk. Empty means beside the machine
 	// file. The two cannot be apart: a job's disk is a clone of the image.
@@ -169,6 +178,9 @@ func (s Settings) validate() error {
 	if _, err := parseReserve(s.ReserveMemory); err != nil {
 		return err
 	}
+	if _, err := fence.ParseAllowances(s.AllowNetwork); err != nil {
+		return err
+	}
 	_, _, err := parseHours(s.Hours)
 	return err
 }
@@ -183,7 +195,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "macos-jobs", "auto-update", "data-dir", "cache-dir"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "private-network", "allow-network", "macos-jobs", "auto-update", "data-dir", "cache-dir"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -257,6 +269,25 @@ func (s *Settings) Set(key, value string) error {
 			return err
 		}
 		s.ReserveMemory = reserve.text()
+	case "private-network":
+		switch value {
+		case "allow":
+			s.PrivateNetwork = true
+		case "block":
+			s.PrivateNetwork = false
+		default:
+			return errors.New("private-network takes block or allow")
+		}
+	case "allow-network":
+		if value == "none" {
+			s.AllowNetwork = ""
+			return nil
+		}
+		allowed, err := fence.ParseAllowances(value)
+		if err != nil {
+			return err
+		}
+		s.AllowNetwork = fence.FormatAllowances(allowed)
 	case "hours":
 		if value == "any" {
 			value = ""
@@ -423,6 +454,12 @@ func (s Settings) holding(power host.Power, now time.Time) (reason, fix string) 
 		return "outside " + s.Hours, "wait for the window or run hived config set hours any"
 	}
 	return "", ""
+}
+
+// Network is what the owner lets a job's guest reach beyond the internet.
+func (s Settings) Network() fence.Policy {
+	allowed, _ := fence.ParseAllowances(s.AllowNetwork)
+	return fence.Policy{Open: s.PrivateNetwork, Allow: allowed}
 }
 
 // Takes reports whether a job of this size is within the owner's limit.

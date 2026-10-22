@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
 )
 
@@ -52,6 +54,11 @@ type Runner struct {
 	// changes, with "" once it can again: hived doctor reads it from there,
 	// since what the service may open is not what the owner's shell may.
 	OnUnusable func(reason string)
+	// Network is what the owner lets a job reach beyond the internet,
+	// asked when a VM boots and again when it is given a job. Unset, it is
+	// the internet alone. Where FencesNetwork is false nothing holds a
+	// guest to it.
+	Network func() fence.Policy
 
 	mu      sync.Mutex
 	warm    *instance
@@ -149,6 +156,23 @@ type instance struct {
 	unserve func()
 	// release returns the VM's network identity for the next one to use.
 	release func()
+	// resolvers are the name servers the guest was given when it booted.
+	resolvers []netip.Addr
+	// network is what the guest may reach: see fence.
+	network atomic.Pointer[fence.Policy]
+}
+
+// refence holds the VM's guest to what the owner allows now, the
+// resolvers it was given, and the machine's own addresses as they are now:
+// a warm VM may have been booted on another network.
+func (r *Runner) refence(vm *instance) {
+	var policy fence.Policy
+	if r.Network != nil {
+		policy = r.Network()
+	}
+	policy.Resolvers = vm.resolvers
+	policy.Host = fence.HostAddresses()
+	vm.network.Store(&policy)
 }
 
 // owner reports whose job the VM is running, for the guest service.
@@ -208,6 +232,9 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 	}
 	// Whatever happens: the disk, the share and the credential go.
 	defer vm.destroy()
+	// What the guest may reach is what the owner allows now, not when a
+	// warm VM booted. It is set before the job is.
+	r.refence(vm)
 
 	// The VM now works for this pool, and is told where the host's service
 	// is before it is told about the job.
