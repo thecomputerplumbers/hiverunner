@@ -144,9 +144,10 @@ func parse4(datagram []byte) (packet, bool) {
 	if header < 20 || total < header || len(datagram) < header {
 		return packet{}, false
 	}
-	// A fragment is dropped, as passt drops it: the port the policy looks
-	// at is in the first one only, and passt reassembles none.
-	if flags := binary.BigEndian.Uint16(datagram[6:8]); flags&0x2000 != 0 || flags&0x1fff != 0 {
+	// A fragment is dropped, as passt drops it (tap4_is_fragment): the
+	// port the policy looks at is in the first one only, and passt
+	// reassembles none. Only "don't fragment" may be set.
+	if binary.BigEndian.Uint16(datagram[6:8])&^0x4000 != 0 {
 		return packet{}, false
 	}
 	datagram = datagram[:min(total, len(datagram))]

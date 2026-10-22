@@ -171,12 +171,17 @@ func (r *Runner) refence(vm *instance) {
 		policy = r.Network()
 	}
 	policy.Resolvers = vm.resolvers
-	policy.Host = hostAddresses()
+	// What could not be read is as it was last read.
+	if found, err := hostNetworks(); err == nil {
+		policy.Host = found
+	} else if was := vm.network.Load(); was != nil {
+		policy.Host = was.Host
+	}
 	vm.network.Store(&policy)
 }
 
-// hostAddresses stands in for fence.HostAddresses in tests.
-var hostAddresses = fence.HostAddresses
+// hostNetworks stands in for fence.HostNetworks in tests.
+var hostNetworks = fence.HostNetworks
 
 // hostEvery is how often a running VM's fence takes up the machine's own
 // addresses again. One the machine gains during a job, a new temporary
@@ -186,14 +191,19 @@ const hostEvery = 10 * time.Second
 // rehost takes up the machine's addresses as they are now, and leaves the
 // rest of what the guest may reach as it is: the owner's word applies from
 // the next job, not halfway through this one.
+// The machine's networks that cannot be read now are those last read.
 func (vm *instance) rehost() {
+	found, err := hostNetworks()
+	if err != nil {
+		return
+	}
 	for {
 		was := vm.network.Load()
 		var next fence.Policy
 		if was != nil {
 			next = *was
 		}
-		next.Host = hostAddresses()
+		next.Host = found
 		// A job handed over meanwhile set a whole new policy; this one
 		// is then taken up again from that.
 		if vm.network.CompareAndSwap(was, &next) {

@@ -1,6 +1,7 @@
 package fence
 
 import (
+	"net"
 	"net/netip"
 	"strings"
 	"testing"
@@ -39,9 +40,13 @@ func TestTheGuestIsKeptOffWhatIsNotTheInternet(t *testing.T) {
 		{"::ffff:192.168.1.1", true},
 		{"64:ff9b::c0a8:0101", true},
 		{"64:ff9b::808:808", false},
-		// A network's own NAT64 prefix is read the same way.
+		// A network's own NAT64 prefix is read at every place the IPv4
+		// address may be, and fenced if any of them is private: here
+		// 8.8.8.8 at /96 but 10.0.0.1 at /56, or 0.0.0.0 at /64.
+		{"64:ff9b:1:808:8:808:808:808", false},
+		{"64:ff9b:1:80a:0:1:808:808", true},
+		{"64:ff9b:1:abcd::808:808", true},
 		{"64:ff9b:1::c0a8:101", true},
-		{"64:ff9b:1:abcd::808:808", false},
 		{"64:ff9b:2::c0a8:101", false},
 		{"::ffff:8.8.8.8", false},
 		// The internet, right up to each range's edges.
@@ -82,8 +87,14 @@ func TestTheOwnerSaysWhatElseAJobMayReach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router, host := netip.MustParseAddr("192.168.1.1"), netip.MustParseAddr("203.0.113.7")
-	policy := &Policy{Allow: allowed, Resolvers: []netip.Addr{router}, Host: []netip.Addr{host, netip.MustParseAddr("192.168.1.5")}}
+	router := netip.MustParseAddr("192.168.1.1")
+	host := []netip.Prefix{
+		netip.MustParsePrefix("203.0.113.7/32"),
+		netip.MustParsePrefix("192.168.1.5/24"),
+		netip.MustParsePrefix("198.51.100.5/24"),
+		netip.MustParsePrefix("2001:db8:1:1::5/64"),
+	}
+	policy := &Policy{Allow: allowed, Resolvers: []netip.Addr{router}, Host: host}
 	for _, test := range []struct {
 		name     string
 		protocol uint8
@@ -107,6 +118,12 @@ func TestTheOwnerSaysWhatElseAJobMayReach(t *testing.T) {
 		{"the host's own public address", protoTCP, "203.0.113.7", 22, false},
 		{"the host's own LAN address", protoTCP, "192.168.1.5", 22, false},
 		{"the host's own address written as IPv6", protoTCP, "::ffff:203.0.113.7", 22, false},
+		// The machine's neighbours on a public network are its LAN all the
+		// same, and it reaches them past the router.
+		{"a neighbour on the host's public IPv4 subnet", protoTCP, "198.51.100.50", 445, false},
+		{"a neighbour in the host's global IPv6 /64", protoTCP, "2001:db8:1:1::50", 445, false},
+		{"the next IPv6 /64 along, which is the internet", protoTCP, "2001:db8:1:2::50", 443, true},
+		{"the next IPv4 subnet along", protoTCP, "198.51.101.50", 443, true},
 		{"the internet", protoTCP, "140.82.112.3", 443, true},
 	} {
 		if got := policy.Reaches(test.protocol, netip.MustParseAddr(test.address), test.port); got != test.want {
@@ -115,11 +132,16 @@ func TestTheOwnerSaysWhatElseAJobMayReach(t *testing.T) {
 	}
 	// The owner's own allowance covers the host too: it is how a job is
 	// let at something the machine serves on purpose.
-	policy.Allow = append(policy.Allow, Allowance{Prefix: netip.MustParsePrefix("192.168.1.5/32"), Port: 5432})
+	policy.Allow = append(policy.Allow,
+		Allowance{Prefix: netip.MustParsePrefix("192.168.1.5/32"), Port: 5432},
+		Allowance{Prefix: netip.MustParsePrefix("2001:db8:1:1::50/128"), Port: 631})
 	if !policy.Reaches(protoTCP, netip.MustParseAddr("192.168.1.5"), 5432) {
 		t.Error("an allowance for the host's own address was not honoured")
 	}
-	open := &Policy{Open: true, Host: []netip.Addr{host}}
+	if !policy.Reaches(protoTCP, netip.MustParseAddr("2001:db8:1:1::50"), 631) {
+		t.Error("an allowance for a neighbour on the host's /64 was not honoured")
+	}
+	open := &Policy{Open: true, Host: host}
 	for _, address := range []string{"192.168.1.20", "100.100.100.100", "203.0.113.7", "169.254.169.254"} {
 		if !open.Reaches(protoTCP, netip.MustParseAddr(address), 22) {
 			t.Errorf("private-network allow did not reach %s", address)
@@ -143,7 +165,6 @@ func TestAllowancesAreReadAsTypedAndWrittenTheOneWay(t *testing.T) {
 		// NAT64 is the IPv4 address it stands for, as a packet's is.
 		{"64:ff9b::a00:5", "10.0.0.5"},
 		{"[64:ff9b::a00:5]:443", "10.0.0.5:443"},
-		{"64:ff9b:1::a00:0/120", "10.0.0.0/24"},
 		{"1.2.3.4:65535", "1.2.3.4:65535"},
 	} {
 		allowed, err := ParseAllowances(test.typed)
@@ -182,10 +203,50 @@ func TestAllowancesAreReadAsTypedAndWrittenTheOneWay(t *testing.T) {
 		// IPv4 written as IPv6 has 96 bits before the IPv4 part.
 		{"::ffff:10.0.0.0/8", "write it as IPv4"},
 		{"64:ff9b::/64", "write it as IPv4"},
+		// Which IPv4 address a network's own NAT64 address means is its
+		// network's business.
+		{"64:ff9b:1::a00:5", "write the IPv4 address"},
+		{"64:ff9b:1::a00:0/120", "write the IPv4 address"},
 	} {
 		_, err := ParseAllowances(bad.typed)
 		if err == nil || !strings.Contains(err.Error(), bad.says) {
 			t.Errorf("%q: got %v, want an error saying %q", bad.typed, err, bad.says)
+		}
+	}
+}
+
+func TestTheHostsNetworksAreItsNeighboursUnlessItHasNone(t *testing.T) {
+	up := net.FlagUp | net.FlagBroadcast | net.FlagMulticast
+	for _, test := range []struct {
+		name    string
+		flags   net.Flags
+		address string
+		bits    int
+		want    string
+	}{
+		{"a LAN", up, "192.168.1.5", 24, "192.168.1.5/24"},
+		{"a public IPv4 LAN", up, "198.51.100.5", 24, "198.51.100.5/24"},
+		{"a SLAAC address", up, "2001:db8:1:1::5", 64, "2001:db8:1:1::5/64"},
+		{"a DHCPv6 address, which says /128 and sits on a /64", up, "2001:db8:1:1::5", 128, "2001:db8:1:1::5/64"},
+		{"an IPv6 /56 on the link", up, "2001:db8:1:100::5", 56, "2001:db8:1:100::5/56"},
+		{"an IPv6 mask wider than any link's", up, "2001:db8:1:1::5", 32, "2001:db8:1:1::5/64"},
+		{"an IPv4 mask wider than any LAN's, which is a VPN's route", up, "203.0.113.7", 8, "203.0.113.7/32"},
+		{"a tunnel to one peer", net.FlagUp | net.FlagPointToPoint, "100.101.102.103", 10, "100.101.102.103/32"},
+		{"a loopback", net.FlagUp | net.FlagLoopback, "127.0.0.1", 8, "127.0.0.1/32"},
+		{"an interface that is down", net.FlagBroadcast, "198.51.100.5", 24, "198.51.100.5/32"},
+	} {
+		got := hostNetwork(test.flags, netip.MustParseAddr(test.address), test.bits)
+		if got.String() != test.want {
+			t.Errorf("%s: %s, want %s", test.name, got, test.want)
+		}
+	}
+	found, err := HostNetworks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, network := range found {
+		if !network.IsValid() {
+			t.Errorf("an invalid network: %v", network)
 		}
 	}
 }

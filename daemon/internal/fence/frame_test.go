@@ -320,13 +320,36 @@ func passtView(datagram []byte) (protocol uint8, upper []byte, ok bool) {
 	return next, data, true
 }
 
+// passt4View is the protocol, destination and upper-layer header passt
+// finds in an IPv4 packet, as tap4_handler in its tap.c reads them.
+func passt4View(datagram []byte) (protocol uint8, address netip.Addr, upper []byte, ok bool) {
+	if len(datagram) < 20 {
+		return 0, netip.Addr{}, nil, false
+	}
+	header, total := int(datagram[0]&0x0f)*4, int(binary.BigEndian.Uint16(datagram[2:4]))
+	if header < 20 || total > len(datagram) || header > len(datagram) || total < header {
+		return 0, netip.Addr{}, nil, false
+	}
+	// tap4_is_fragment: anything but "don't fragment" set.
+	if binary.BigEndian.Uint16(datagram[6:8])&^0x4000 != 0 {
+		return 0, netip.Addr{}, nil, false
+	}
+	return datagram[9], netip.AddrFrom4([4]byte(datagram[16:20])), datagram[header:total], true
+}
+
 // FuzzCheck sends the fence frames of every shape. It must not panic, and
-// whatever it lets through to somewhere private, passt must see the same
-// way: the same protocol, port and message type the policy judged.
+// whatever it lets through, passt must see the same way: read as passt
+// reads it, by the frame's type, the packet must be one the policy lets
+// through too. The policy has an allowance by port, resolvers, and the
+// host's own networks in both families.
 func FuzzCheck(f *testing.F) {
 	for _, seed := range [][]byte{
 		tcp4("140.82.112.3", 443), tcp4("192.168.1.20", 5432), tcp6("fd00::20", 5432),
+		tcp4("198.51.100.50", 445), tcp6("2001:db8:1:1::50", 445), tcp6("2001:db8:1:2::50", 443),
+		tcp6("64:ff9b:1:808:8:808:808:808", 443),
 		packet6(protoUDP, guestIPv6, netip.MustParseAddr("fd00::53"), segment(protoUDP, 53)),
+		packet4(protoUDP, guestIPv4, netip.MustParseAddr("192.168.1.1"), segment(protoUDP, 53)),
+		packet4(protoUDP, netip.MustParseAddr("0.0.0.0"), netip.MustParseAddr("255.255.255.255"), segment(protoUDP, 67)),
 		packet6(0, guestIPv6, netip.MustParseAddr("fd00::20"), append([]byte{protoTCP, 0, 0, 0, 0, 0, 0, 0}, segment(protoTCP, 5432)...)),
 		packet6Hops(protoICMPv6, 255, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("fe80::1"), segment(protoICMPv6, 135)),
 		packet6(protoUDP, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("ff02::1:2"), segment(protoUDP, 547)),
@@ -340,28 +363,38 @@ func FuzzCheck(f *testing.F) {
 			{Prefix: netip.MustParsePrefix("fd00::20/128"), Port: 5432},
 		},
 		Resolvers: []netip.Addr{netip.MustParseAddr("192.168.1.1"), netip.MustParseAddr("fd00::53")},
+		Host:      []netip.Prefix{netip.MustParsePrefix("198.51.100.5/24"), netip.MustParsePrefix("2001:db8:1:1::5/64")},
 	}
 	f.Fuzz(func(t *testing.T, frame []byte) {
 		pass, _ := policy.Check(frame)
-		if !pass || len(frame) < ethernetHeader || binary.BigEndian.Uint16(frame[12:14]) != etherIPv6 {
+		if !pass || len(frame) < ethernetHeader {
 			return
 		}
 		datagram := frame[ethernetHeader:]
-		if len(datagram) < 40 {
-			t.Fatalf("a frame too short for IPv6 passed: % x", frame)
-		}
-		address := netip.AddrFrom16([16]byte(datagram[24:40]))
-		if _, fenced := Fenced(address); !fenced {
+		var seen packet
+		var upper []byte
+		switch binary.BigEndian.Uint16(frame[12:14]) {
+		case etherIPv4:
+			protocol, address, data, ok := passt4View(datagram)
+			if !ok {
+				return // passt drops it
+			}
+			seen, upper = packet{protocol: protocol, address: address}, data
+		case etherIPv6:
+			if len(datagram) < 40 {
+				t.Fatalf("a frame too short for IPv6 passed: % x", frame)
+			}
+			protocol, data, ok := passtView(datagram[:min(len(datagram), 40+int(binary.BigEndian.Uint16(datagram[4:6])))])
+			if !ok {
+				return // passt drops it
+			}
+			seen, upper = packet{v6: true, protocol: protocol, address: netip.AddrFrom16([16]byte(datagram[24:40])), hops: datagram[7]}, data
+		default:
 			return
 		}
-		protocol, upper, ok := passtView(datagram[:min(len(datagram), 40+int(binary.BigEndian.Uint16(datagram[4:6])))])
-		if !ok {
-			return // passt drops it
-		}
-		seen := packet{v6: true, protocol: protocol, address: address, hops: datagram[7], icmp: -1}
-		seen.port, seen.icmp = upper4(protocol, upper)
+		seen.port, seen.icmp = upper4(seen.protocol, upper)
 		if !answeredLocally(seen) && !policy.Reaches(seen.protocol, seen.address, seen.port) {
-			t.Fatalf("passed to %s, which passt sees as protocol %d port %d type %d: % x", address, seen.protocol, seen.port, seen.icmp, frame)
+			t.Fatalf("passed to %s, which passt sees as protocol %d port %d type %d: % x", seen.address, seen.protocol, seen.port, seen.icmp, frame)
 		}
 	})
 }
@@ -372,7 +405,7 @@ func upper4(protocol uint8, data []byte) (port uint16, icmp int) {
 	if (protocol == protoTCP || protocol == protoUDP) && len(data) >= 4 {
 		port = uint16(data[2])<<8 | uint16(data[3])
 	}
-	if protocol == protoICMPv6 && len(data) >= 1 {
+	if (protocol == protoICMP || protocol == protoICMPv6) && len(data) >= 1 {
 		icmp = int(data[0])
 	}
 	return port, icmp

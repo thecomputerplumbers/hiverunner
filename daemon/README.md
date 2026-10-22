@@ -611,12 +611,17 @@ is 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16; 100.64.0.0/10, a tailnet's
 and a carrier's NAT's; 169.254.0.0/16, where a cloud keeps its metadata
 service, and Azure's 168.63.129.16; multicast and broadcast; fc00::/7,
 fe80::/10, fec0::/10 and IPv6 multicast; the loopback and unspecified
-addresses; and the machine's own addresses on any network, read again
-every few seconds while a job runs. The list is `fence.Private`. An IPv4
-address written as IPv6, or behind NAT64's 64:ff9b::/96 or 64:ff9b:1::/48,
-is taken as the IPv4 address in its last four bytes. The IPv4 addresses
-inside 6to4 and Teredo addresses are not read, which matters only on a
-machine with such a tunnel. The resolvers the guest was given are the
+addresses; and the machine's own addresses and the networks they are on,
+read again every few seconds while a job runs. That keeps a job off the
+machine's neighbours on a public network too, such as a printer with a
+global IPv6 address in the machine's /64, which the machine reaches past
+its router. A tunnel to one peer, and a mask wider than a /16, count as
+the address alone. The list is `fence.Private`. An IPv4 address written as
+IPv6, or behind NAT64's 64:ff9b::/96, is taken as that IPv4 address. One in
+a network's own NAT64 prefix, 64:ff9b:1::/48, is fenced if the IPv4 address
+at any place RFC 6052 allows is. The IPv4 addresses inside 6to4 and Teredo
+addresses are not read, nor those behind another network's own NAT64
+prefix, which matters only on a machine with such a tunnel or gateway. The resolvers the guest was given are the
 exception, on port 53 alone, so a router on the LAN still answers its names
 and nothing else. IPv4 fragments and IPv6 packets with extension headers go
 nowhere: passt reassembles neither, and finds the wrong port behind an

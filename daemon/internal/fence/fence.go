@@ -48,37 +48,62 @@ var Private = []Range{
 	{netip.MustParsePrefix("::/128"), "this host"},
 }
 
-// nat64 are the prefixes a NAT64 gateway reaches IPv4 through: the
-// well-known one, and the one set aside for a network's own gateway. An
-// address in either is taken as the IPv4 address in its last four bytes,
-// which is where a gateway translating a /96 puts it.
-var nat64 = []netip.Prefix{netip.MustParsePrefix("64:ff9b::/96"), netip.MustParsePrefix("64:ff9b:1::/48")}
+// The prefixes a NAT64 gateway reaches IPv4 through. The well-known one
+// is a /96, with the IPv4 address in its last four bytes. The one set
+// aside for a network's own gateway is a /48 that the network may carve a
+// longer prefix from, so where in it the IPv4 address sits depends on a
+// prefix length the guest's packet does not say.
+var (
+	nat64      = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local = netip.MustParsePrefix("64:ff9b:1::/48")
+)
 
 // translated is whether an IPv6 address stands for an IPv4 one.
 func translated(address netip.Addr) bool {
-	return address.Is4In6() || slices.ContainsFunc(nat64, func(p netip.Prefix) bool { return p.Contains(address) })
+	return address.Is4In6() || nat64.Contains(address) || nat64Local.Contains(address)
 }
 
 // Fenced is the range that keeps a guest from this address, if one does.
+// An address that may stand for several IPv4 addresses is fenced if any of
+// them is.
 func Fenced(address netip.Addr) (Range, bool) {
-	address = plain(address)
-	for _, r := range Private {
-		if r.Prefix.Contains(address) {
-			return r, true
+	for _, form := range standsFor(address) {
+		for _, r := range Private {
+			if r.Prefix.Contains(form) {
+				return r, true
+			}
 		}
 	}
 	return Range{}, false
 }
 
-// plain is the address a packet to this one actually reaches: an IPv4
-// address written as IPv6, either way, is that IPv4 address.
-func plain(address netip.Addr) netip.Addr {
+// standsFor is the addresses a packet to this one may actually reach. An
+// IPv4 address written as IPv6 is that IPv4 address. In a network's own
+// NAT64 prefix it is the IPv4 address at each place RFC 6052 puts one in a
+// prefix of /48, /56, /64 or /96, since which is meant cannot be told. Its
+// /32 and /40 places lie in the /48's own fixed bits, which no prefix
+// carved from it can use: read there, every address in it would be
+// 0.1.x.x, which is fenced, or 1.x.x.x.
+func standsFor(address netip.Addr) []netip.Addr {
 	address = address.WithZone("")
-	if translated(address) {
-		raw := address.As16()
-		return netip.AddrFrom4([4]byte(raw[12:]))
+	if !address.Is6() {
+		return []netip.Addr{address}
 	}
-	return address
+	raw := address.As16()
+	four := func(a, b, c, d byte) netip.Addr { return netip.AddrFrom4([4]byte{a, b, c, d}) }
+	switch {
+	case address.Is4In6(), nat64.Contains(address):
+		return []netip.Addr{four(raw[12], raw[13], raw[14], raw[15])}
+	case nat64Local.Contains(address):
+		// Bits 64 to 71 are always zero and never part of the address.
+		return []netip.Addr{
+			four(raw[6], raw[7], raw[9], raw[10]),   // /48
+			four(raw[7], raw[9], raw[10], raw[11]),  // /56
+			four(raw[9], raw[10], raw[11], raw[12]), // /64
+			four(raw[12], raw[13], raw[14], raw[15]),
+		}
+	}
+	return []netip.Addr{address}
 }
 
 // An Allowance is somewhere private the owner lets jobs reach: an address
@@ -150,10 +175,14 @@ func parseAllowance(entry string) (Allowance, error) {
 		// IPv4 written as IPv6 is the IPv4 it stands for, as a packet's
 		// address is: only then can the two match.
 		if translated(prefix.Addr()) {
+			forms := standsFor(prefix.Addr())
+			if len(forms) != 1 {
+				return Allowance{}, fmt.Errorf("%q: %w", entry, errNAT64Local)
+			}
 			if prefix.Bits() < 96 {
 				return Allowance{}, fmt.Errorf("%q: a range of IPv4 written as IPv6 must be /96 or narrower; write it as IPv4, like 10.0.0.0/8", entry)
 			}
-			prefix = netip.PrefixFrom(plain(prefix.Addr()), prefix.Bits()-96)
+			prefix = netip.PrefixFrom(forms[0], prefix.Bits()-96)
 		}
 		allowance.Prefix = prefix.Masked()
 	} else {
@@ -161,8 +190,11 @@ func parseAllowance(entry string) (Allowance, error) {
 		if err != nil || address.Zone() != "" {
 			return Allowance{}, fmt.Errorf("%q: %w", entry, errAllowance)
 		}
-		address = plain(address)
-		allowance.Prefix = netip.PrefixFrom(address, address.BitLen())
+		forms := standsFor(address)
+		if len(forms) != 1 {
+			return Allowance{}, fmt.Errorf("%q: %w", entry, errNAT64Local)
+		}
+		allowance.Prefix = netip.PrefixFrom(forms[0], forms[0].BitLen())
 	}
 	// A port left off after the colon is a mistake, not every port.
 	if hasPort {
@@ -174,6 +206,8 @@ func parseAllowance(entry string) (Allowance, error) {
 	}
 	return allowance, nil
 }
+
+var errNAT64Local = errors.New("which IPv4 address one in 64:ff9b:1::/48 stands for depends on its network's prefix; write the IPv4 address")
 
 // parsePort reads a port as it is written: digits alone, with no sign and
 // no leading zero.
@@ -212,9 +246,10 @@ type Policy struct {
 	// Resolvers are the name servers the guest was given. They are asked
 	// on port 53 wherever they are, a router on the LAN included.
 	Resolvers []netip.Addr
-	// Host is the machine's own addresses, kept from the guest whatever
-	// network they are on: what the machine serves is not the job's.
-	Host []netip.Addr
+	// Host is the machine's own addresses, each with the network it is on
+	// (see HostNetworks), kept from the guest whatever network that is:
+	// what the machine and its neighbours serve is not the job's.
+	Host []netip.Prefix
 }
 
 // Protocols a port is matched for.
@@ -233,36 +268,94 @@ func (p *Policy) Reaches(protocol uint8, address netip.Addr, port uint16) bool {
 	if p.Open {
 		return true
 	}
-	address = plain(address)
 	if protocol != protoTCP && protocol != protoUDP {
 		port = 0
 	}
+	// An address that may stand for several is reached only if each of
+	// them may be.
+	for _, form := range standsFor(address) {
+		if !p.reaches(form, port) {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *Policy) reaches(address netip.Addr, port uint16) bool {
 	if slices.ContainsFunc(p.Allow, func(a Allowance) bool { return a.covers(address, port) }) {
 		return true
 	}
-	if port == 53 && slices.ContainsFunc(p.Resolvers, func(r netip.Addr) bool { return plain(r) == address }) {
+	if port == 53 && slices.ContainsFunc(p.Resolvers, func(r netip.Addr) bool { return r.Unmap().WithZone("") == address }) {
 		return true
 	}
-	if slices.ContainsFunc(p.Host, func(h netip.Addr) bool { return plain(h) == address }) {
+	if slices.ContainsFunc(p.Host, func(h netip.Prefix) bool { return h.Contains(address) }) {
 		return false
 	}
 	_, fenced := Fenced(address)
 	return !fenced
 }
 
-// HostAddresses is every address this machine has, on any interface.
-func HostAddresses() []netip.Addr {
-	found, err := net.InterfaceAddrs()
+// HostNetworks is every address this machine has, each with the network
+// it is on. The machine reaches its neighbours on those networks directly,
+// past the router and whatever it keeps out, so a guest is kept from them
+// as from the machine itself: a printer with a global IPv6 address beside
+// the machine's is still on its LAN.
+//
+// Nothing the machine is on is left out. The guest's own network is a copy
+// of the machine's, made by passt, and fencing it off keeps the guest from
+// its neighbours and nothing else: its packets for the internet go to
+// addresses outside it. A bridge for other VMs on the machine is as much
+// the machine's as its LAN is.
+func HostNetworks() ([]netip.Prefix, error) {
+	interfaces, err := net.Interfaces()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	var addresses []netip.Addr
-	for _, each := range found {
-		if network, ok := each.(*net.IPNet); ok {
-			if address, ok := netip.AddrFromSlice(network.IP); ok {
-				addresses = append(addresses, address.Unmap())
+	var found []netip.Prefix
+	for _, each := range interfaces {
+		addresses, err := each.Addrs()
+		if err != nil {
+			return nil, err
+		}
+		for _, address := range addresses {
+			network, ok := address.(*net.IPNet)
+			if !ok {
+				continue
 			}
+			ip, ok := netip.AddrFromSlice(network.IP)
+			if !ok {
+				continue
+			}
+			ip = ip.Unmap()
+			bits, all := network.Mask.Size()
+			if ip.Is4() && all == 128 {
+				bits -= 96
+			}
+			found = append(found, hostNetwork(each.Flags, ip, bits))
 		}
 	}
-	return addresses
+	return found, nil
+}
+
+// hostNetwork is the network an interface's address is on, as far as the
+// fence goes. It is the address alone where the interface has no
+// neighbours (a loopback, a tunnel to a single peer, an interface that is
+// down) and where its mask is wider than a LAN's: a mask that wide is a
+// VPN's route, and would fence off the internet with it. An IPv6 address
+// is on a /64 whatever its mask says, as one from DHCPv6 is.
+func hostNetwork(flags net.Flags, address netip.Addr, bits int) netip.Prefix {
+	alone := netip.PrefixFrom(address, address.BitLen())
+	if flags&net.FlagUp == 0 || flags&(net.FlagLoopback|net.FlagPointToPoint) != 0 {
+		return alone
+	}
+	if address.Is4() {
+		if bits < 16 || bits > 32 {
+			return alone
+		}
+		return netip.PrefixFrom(address, bits)
+	}
+	if bits < 48 || bits > 64 {
+		bits = 64
+	}
+	return netip.PrefixFrom(address, bits)
 }
