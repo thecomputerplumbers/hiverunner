@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/connection"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/settings"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/ui"
 )
 
 func TestDoctorSaysWhatTheRunningDaemonCannotOpen(t *testing.T) {
@@ -37,5 +40,39 @@ func TestDoctorSaysWhatTheRunningDaemonCannotOpen(t *testing.T) {
 	}
 	if reason, _ := whyNoVMs(nil, connection.State{WrittenBy: os.Getpid()}); reason != "" {
 		t.Fatalf("a daemon that can run VMs was said not to: %q", reason)
+	}
+}
+
+func TestDoctorSaysHowExposedAMacIsWithoutFailing(t *testing.T) {
+	on := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", false)
+	if len(on) != 1 || on[0].OK || !on[0].Note || !strings.Contains(on[0].Found, "hiveworker") || !strings.Contains(on[0].Fix, "macos-jobs off") {
+		t.Fatalf("macOS jobs on said %+v", on)
+	}
+	if off := macOSJobs(settings.Settings{}, "darwin", false); len(off) != 1 || !off[0].OK {
+		t.Fatalf("macOS jobs off said %+v", off)
+	}
+	// A job in a throwaway VM of its own leaves nothing for the next.
+	if vm := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", true); len(vm) != 1 || !vm[0].OK || vm[0].Note || strings.Contains(vm[0].Found, "hiveworker") {
+		t.Fatalf("macOS jobs in VMs said %+v", vm)
+	}
+	if linux := macOSJobs(settings.Settings{MacOSJobs: true}, "linux", false); len(linux) != 0 {
+		t.Fatalf("a Linux machine was told about macOS jobs: %+v", linux)
+	}
+
+	// What is said and not counted shows its fix, and makes nothing exit 1.
+	// In the Security box it is drawn as the warning it is.
+	notes := append(on, host.Check{Name: "firewall", Found: "off", Note: true, Fix: "turn it on"}, host.Check{Name: "ssh", Found: "keys only", OK: true})
+	rows, problems := checkRows(ui.Screen{}, notes, false)
+	if problems != 0 || !strings.Contains(strings.Join(rows, "\n"), "turn it on") {
+		t.Fatalf("notes counted %d, drew %q", problems, rows)
+	}
+	if strings.Count(strings.Join(rows, "\n"), "○") != 2 || strings.Count(strings.Join(rows, "\n"), "●") != 1 {
+		t.Fatalf("warnings drawn as passes: %q", rows)
+	}
+	if rows, _ := checkRows(ui.Screen{}, notes, true); strings.Contains(strings.Join(rows, "\n"), "○") {
+		t.Fatalf("FileVault's kind of note drawn as a problem: %q", rows)
+	}
+	if _, problems := checkRows(ui.Screen{}, []host.Check{{Name: "sleep", Found: "on", Fix: "sudo pmset -a disablesleep 1"}}, true); problems != 1 {
+		t.Fatalf("a problem counted %d", problems)
 	}
 }

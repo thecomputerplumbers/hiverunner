@@ -159,6 +159,10 @@ func Unattended() []Check {
 	return checks
 }
 
+// Exposed looks at what this machine leaves open to the jobs it runs and to
+// its network.
+func Exposed(e Exposure) []Check { return local(e.Sudo).linux(e.Fence) }
+
 // onBattery is true when the machine has a battery and no mains supply
 // reports itself online.
 func onBattery(root string) bool {

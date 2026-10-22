@@ -319,6 +319,145 @@ stays awake without `SleepDisabled`, so there the warning says it is awake
 only while they are attached. The daemon repeats the sleep warning in its log
 when `lid` is turned on while it runs.
 
+## Securing a host
+
+`hived doctor` says, in a box of its own, how exposed the machine is to the
+jobs it runs and to its network. None of it makes it exit 1: each is the
+owner's call, as FileVault is. `hived doctor` never uses sudo unless asked,
+not even on credentials sudo has cached from a minute ago. `hived doctor
+--sudo` says it is about to, has sudo ask for a password if it would, and
+then reads what only root can with `sudo -n`. sshd's settings come from
+`sshd -G` where it needs no root (macOS, recent OpenSSH); unread, the `ssh`
+row says so. When Linux's firewall rules cannot be read, the `firewall` row
+says `could not read the rules (needs sudo)`. Every command is given five
+seconds.
+
+| Check        | Says so when                                                                                                                                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `firewall`   | macOS: the application firewall is off. Linux: nothing drops what it does not accept, for IPv4 and IPv6                                                                                                                 |
+| `ssh`        | sshd listens (on launchd's port on a Mac, its `Port` on Linux) and takes passwords, by asking or through PAM                                                                                                            |
+| `sharing`    | macOS: a Sharing service or AirPlay Receiver listens. Linux: Samba, VNC or RDP                                                                                                                                          |
+| `network`    | An interface has a private address, one in `100.64.0.0/10` (a tailnet's, or another CGNAT VPN's), or a public address on a subnet wider than a point-to-point link: an IPv4 subnet wider than /31, or a global IPv6 /64 |
+| `macos jobs` | `macos-jobs` is on, so macOS jobs share one home                                                                                                                                                                        |
+
+A router's firewall stands between the internet and a machine, not between
+the machine and the rest of its subnet, so a public subnet's other machines
+are as reachable to a job as a LAN's are. Where hived keeps a job's VM off
+the networks around the machine, the `network` row says so and is not a
+warning.
+
+On Linux the firewall is on when firewalld runs, when ufw is on and drops by
+default (for IPv6 too, unless `IPV6=no`), or when a chain on the input hook,
+in nftables or in a legacy iptables table already loaded, drops by its policy
+or by a last rule that drops everything, logged and counted or not. A chain
+that drops only some addresses or ports, as fail2ban's and CrowdSec's do, is
+not a firewall. IPv6 is judged only on a machine that has it.
+
+`hived doctor` reads sshd's configuration files, not the sshd that is
+running, so reload sshd after a change before believing it. A `Match` block
+can let passwords in for some users or addresses only: sshd is asked as a
+connection from each private range, a tailnet's and the internet, which takes
+root, and so `--sudo`, and where there is a block, or the files are root's to read as on
+Fedora, the `ssh` row says keys only outside its Match blocks. The files read
+are `sshd_config` and whatever its `Include` lines name.
+
+The `sharing` row goes by port: Screen Sharing 5900, Remote Management 3283,
+File Sharing 445, Printer Sharing 631, Remote Apple Events 3031, AirPlay
+Receiver 7000. The `network` row names each address and its interface. A
+Mac's own VMs, behind vmnet's `bridge100` and up, are left out; a Linux
+machine's container and VM bridges (`docker0`, `virbr0`, `cni0` and the like)
+are said as local bridges, whose containers a job can reach too.
+
+Turning FileVault off and auto-login on, so that a machine comes back by
+itself, costs two things. Whoever takes the machine can read its disk, and
+whoever sits at it after a restart is its user. Keep such a machine where it
+cannot walk off, and shut what reaches it over the network instead. hived
+needs nothing incoming: its tunnel is a connection it makes.
+
+- **The firewall on.** On a Mac, System Settings > Network > Firewall. It
+  stops software nobody allowed from taking connections, but by default it
+  allows signed software and whatever is on in Sharing, so it is no reason
+  to leave those on. It does nothing about what a macOS job reaches on the
+  Mac itself. On Linux, ufw or firewalld, or nftables rules of your own;
+  firewalld lets in what its zone allows, and Fedora Workstation's allows
+  ports 1025 to 65535.
+- **SSH by key only**, if it is on at all. Do it from a session you keep
+  open until a new one has logged in with a key:
+  1. From another machine, check that a key gets you in:
+     `ssh -o PreferredAuthentications=publickey you@this-machine`.
+  2. Turn passwords off. sshd keeps the first value it reads, and the
+     system's own files in `sshd_config.d` (`100-macos.conf`, Ubuntu's
+     `50-cloud-init.conf`) come after this one. If `sshd_config` has no
+     `Include /etc/ssh/sshd_config.d/*.conf` line (RHEL 8, Amazon Linux 2),
+     put the two lines at the top of `sshd_config` instead.
+
+     ```sh
+     printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\n' |
+       sudo tee /etc/ssh/sshd_config.d/00-keys-only.conf
+     sudo sshd -t   # says nothing when the configuration is good
+     ```
+
+  3. On Linux, reload it: `sudo systemctl reload ssh` on Debian and
+     Ubuntu, `sudo systemctl reload sshd` on Fedora, RHEL, Arch and SUSE.
+     A running sshd keeps what it read when it started, socket-activated as
+     on Ubuntu 24.04 or not; one not yet started may say there is nothing
+     to reload. A Mac starts sshd for each connection, so it reads the file
+     at the next SSH connection.
+  4. Open a new session with the key before you close the old one.
+
+- **Unused Sharing services off**, in System Settings > General > Sharing,
+  and AirPlay Receiver in General > AirDrop & Handoff. On a Mac nobody sits
+  at, keep Screen Sharing until a key login over SSH works.
+
+### On a tailnet
+
+A job reaches what the machine reaches (see "What the guest can reach"), and
+on a tailnet that is every peer the machine is granted. Until hived can keep
+jobs off them, tag the machine in the admin console (Machines, Edit ACL tags)
+and give the tag nothing to reach. A tagged machine is no longer its owner's,
+so `autogroup:self` stops covering it, and no grant here has `tag:hive` as its
+source:
+
+```json
+{
+  "tagOwners": { "tag:hive": ["autogroup:admin"] },
+  "grants": [
+    { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"] },
+    { "src": ["autogroup:member"], "dst": ["tag:hive"], "ip": ["tcp:22"] }
+  ]
+}
+```
+
+Members reach their own devices and can SSH to the hive's machines, and the
+machines, and their jobs, reach no one. A policy replaces the default that
+lets everything reach everything, so add what else the tailnet needs before
+saving it:
+
+- **Tailscale SSH.** A machine reached with `tailscale ssh` needs an `ssh`
+  rule as well, or the policy shuts its owner out:
+  `"ssh": [{ "action": "accept", "src": ["autogroup:admin"], "dst": ["tag:hive"], "users": ["autogroup:nonroot"] }]`.
+- **Exit nodes and subnet routers.** Members keep an exit node only with a
+  grant to `autogroup:internet`, and a subnet router's routes only with a
+  grant to their ranges. A hive machine that itself goes out through an exit
+  node needs `tag:hive` in the `autogroup:internet` grant, or it loses the
+  internet, and its tunnel with it.
+- **An existing policy.** Tagging keeps the machine in only while no rule's
+  `src` matches the tag. A grant or ACL from `"*"`, or from
+  `autogroup:tagged`, still lets it and its jobs reach everything that rule
+  names.
+
+On a LAN the same is a network of its own: a guest Wi-Fi or a VLAN with
+nothing else on it.
+
+### macOS jobs
+
+Every macOS job runs as the one `hiveworker` user, and what a job leaves in
+its home (a cache, a tool, a changed shell profile) the next job finds and
+may run, whichever hive sent it (see `docs/running-jobs.md`). Turn
+`macos-jobs` on only for a Mac whose hives may share that: one hive, or hives
+whose repositories you trust with each other's jobs. A pull request's test
+run should not share a Mac with a job that holds a signing certificate.
+
 ## Updating
 
 Once a day, at a random minute, the daemon reads `latest.json` from the
@@ -559,7 +698,7 @@ refuses, rather than sharing the machine with it.
 | `internal/api`      | Device sign-in and enrollment over HTTPS                     |
 | `internal/tunnel`   | The reconnecting WebSocket to the coordinator                |
 | `internal/protocol` | Tunnel messages, tested against `packages/protocol/fixtures` |
-| `internal/host`     | Hardware facts, power and lid state                          |
+| `internal/host`     | Hardware facts, power and lid state, and what it leaves open |
 | `internal/bench`    | The speed score benchmark                                    |
 | `internal/config`   | The machine file                                             |
 

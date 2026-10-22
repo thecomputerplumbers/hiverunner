@@ -47,7 +47,8 @@ const usage = `hived, the Hive Runner daemon
   hived status      Show what this machine lends, and whether it is lending;
                     --json for a script
   hived config      Show or change this machine's settings
-  hived doctor      Check this machine keeps taking jobs with nobody at it
+  hived doctor      Check this machine keeps taking jobs with nobody at it;
+                    --sudo to read the firewall and sshd as root too
   hived cache       Show or empty this machine's Actions cache
   hived macos       Set this Mac up for macOS jobs (Xcode, iOS builds)
   hived update      Update the daemon and guest image to the current
@@ -98,7 +99,7 @@ func main() {
 	case "config":
 		err = configure(os.Args[2:])
 	case "doctor":
-		err = doctor()
+		err = doctor(os.Args[2:])
 	case "cache":
 		err = cacheCommand(os.Args[2:])
 	case "macos":
