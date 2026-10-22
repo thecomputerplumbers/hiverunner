@@ -171,8 +171,49 @@ func (r *Runner) refence(vm *instance) {
 		policy = r.Network()
 	}
 	policy.Resolvers = vm.resolvers
-	policy.Host = fence.HostAddresses()
+	policy.Host = hostAddresses()
 	vm.network.Store(&policy)
+}
+
+// hostAddresses stands in for fence.HostAddresses in tests.
+var hostAddresses = fence.HostAddresses
+
+// hostEvery is how often a running VM's fence takes up the machine's own
+// addresses again. One the machine gains during a job, a new temporary
+// IPv6 address or a VPN's, is fenced off within it.
+const hostEvery = 10 * time.Second
+
+// rehost takes up the machine's addresses as they are now, and leaves the
+// rest of what the guest may reach as it is: the owner's word applies from
+// the next job, not halfway through this one.
+func (vm *instance) rehost() {
+	for {
+		was := vm.network.Load()
+		var next fence.Policy
+		if was != nil {
+			next = *was
+		}
+		next.Host = hostAddresses()
+		// A job handed over meanwhile set a whole new policy; this one
+		// is then taken up again from that.
+		if vm.network.CompareAndSwap(was, &next) {
+			return
+		}
+	}
+}
+
+// watchHost keeps taking up the machine's addresses until the VM ends.
+func (vm *instance) watchHost(every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-vm.ended:
+			return
+		case <-ticker.C:
+			vm.rehost()
+		}
+	}
 }
 
 // owner reports whose job the VM is running, for the guest service.

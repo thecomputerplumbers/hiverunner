@@ -609,11 +609,19 @@ further. It is answered, as a router would answer it, with "administratively
 prohibited", so the connection fails at once instead of timing out. Private
 is 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16; 100.64.0.0/10, a tailnet's
 and a carrier's NAT's; 169.254.0.0/16, where a cloud keeps its metadata
-service; multicast and broadcast; fc00::/7, fe80::/10 and IPv6 multicast;
-the loopback and unspecified addresses; and the machine's own addresses on
-any network. The list is `fence.Private`. The resolvers the guest was given
-are the exception, on port 53 alone, so a router on the LAN still answers
-its names and nothing else.
+service, and Azure's 168.63.129.16; multicast and broadcast; fc00::/7,
+fe80::/10, fec0::/10 and IPv6 multicast; the loopback and unspecified
+addresses; and the machine's own addresses on any network, read again
+every few seconds while a job runs. The list is `fence.Private`. An IPv4
+address written as IPv6, or behind NAT64's 64:ff9b::/96 or 64:ff9b:1::/48,
+is taken as the IPv4 address in its last four bytes. The IPv4 addresses
+inside 6to4 and Teredo addresses are not read, which matters only on a
+machine with such a tunnel. The resolvers the guest was given are the
+exception, on port 53 alone, so a router on the LAN still answers its names
+and nothing else. IPv4 fragments and IPv6 packets with extension headers go
+nowhere: passt reassembles neither, and finds the wrong port behind an
+extension header, so the fence could not judge them as passt would act on
+them.
 
 The owner can let jobs at something private on purpose, such as a database
 the machine serves them:

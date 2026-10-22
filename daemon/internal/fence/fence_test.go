@@ -2,6 +2,7 @@ package fence
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,10 @@ func TestTheGuestIsKeptOffWhatIsNotTheInternet(t *testing.T) {
 		{"::ffff:192.168.1.1", true},
 		{"64:ff9b::c0a8:0101", true},
 		{"64:ff9b::808:808", false},
+		// A network's own NAT64 prefix is read the same way.
+		{"64:ff9b:1::c0a8:101", true},
+		{"64:ff9b:1:abcd::808:808", false},
+		{"64:ff9b:2::c0a8:101", false},
 		{"::ffff:8.8.8.8", false},
 		// The internet, right up to each range's edges.
 		{"8.8.8.8", false},
@@ -54,7 +59,12 @@ func TestTheGuestIsKeptOffWhatIsNotTheInternet(t *testing.T) {
 		{"2606:4700:4700::1111", false},
 		{"2001:4860:4860::8888", false},
 		{"fbff:ffff::1", false},
-		{"fec0::1", false},
+		{"fec0::1", true},
+		{"feff:ffff::1", true},
+		// Azure's host service, in public-looking space, and its neighbours.
+		{"168.63.129.16", true},
+		{"168.63.129.15", false},
+		{"168.63.129.17", false},
 	} {
 		_, fenced := Fenced(netip.MustParseAddr(test.address))
 		if fenced != test.fenced {
@@ -130,6 +140,11 @@ func TestAllowancesAreReadAsTypedAndWrittenTheOneWay(t *testing.T) {
 		{"[fd00::/64]:443", "[fd00::/64]:443"},
 		{"::ffff:192.168.1.20", "192.168.1.20"},
 		{"::ffff:10.0.0.0/104", "10.0.0.0/8"},
+		// NAT64 is the IPv4 address it stands for, as a packet's is.
+		{"64:ff9b::a00:5", "10.0.0.5"},
+		{"[64:ff9b::a00:5]:443", "10.0.0.5:443"},
+		{"64:ff9b:1::a00:0/120", "10.0.0.0/24"},
+		{"1.2.3.4:65535", "1.2.3.4:65535"},
 	} {
 		allowed, err := ParseAllowances(test.typed)
 		if err != nil {
@@ -144,9 +159,33 @@ func TestAllowancesAreReadAsTypedAndWrittenTheOneWay(t *testing.T) {
 			t.Errorf("%q does not read back: %q %v", test.stored, FormatAllowances(again), err)
 		}
 	}
-	for _, bad := range []string{"lan", "192.168.1.300", "192.168.1.20:0", "192.168.1.20:65536", "192.168.1.20:http", "10.0.0.0/33", "fd00::5:80:", "[fd00::5]", "[fd00::5]80", "fe80::1%eth0", "printer.local"} {
-		if _, err := ParseAllowances(bad); err == nil {
-			t.Errorf("%q was accepted", bad)
+	for _, bad := range []struct{ typed, says string }{
+		{"lan", "allow-network takes"},
+		{"192.168.1.300", "allow-network takes"},
+		{"192.168.1.20:0", "from 1 to 65535"},
+		{"192.168.1.20:65536", "from 1 to 65535"},
+		{"192.168.1.20:http", "nothing before it"},
+		{"10.0.0.0/33", "allow-network takes"},
+		{"fd00::5:80:", "allow-network takes"},
+		{"[fd00::5]", "allow-network takes"},
+		{"[fd00::5]80", "allow-network takes"},
+		{"fe80::1%eth0", "allow-network takes"},
+		{"printer.local", "allow-network takes"},
+		// A port left off is not every port.
+		{"10.0.0.1:", "port after the colon is missing"},
+		{"[fd00::5]:", "port after the colon is missing"},
+		{"10.0.0.0/24:", "port after the colon is missing"},
+		{"10.0.0.1:+80", "nothing before it"},
+		{"10.0.0.1:-80", "nothing before it"},
+		{"10.0.0.1:053", "no leading zero"},
+		{"10.0.0.1: 80", "nothing before it"},
+		// IPv4 written as IPv6 has 96 bits before the IPv4 part.
+		{"::ffff:10.0.0.0/8", "write it as IPv4"},
+		{"64:ff9b::/64", "write it as IPv4"},
+	} {
+		_, err := ParseAllowances(bad.typed)
+		if err == nil || !strings.Contains(err.Error(), bad.says) {
+			t.Errorf("%q: got %v, want an error saying %q", bad.typed, err, bad.says)
 		}
 	}
 }

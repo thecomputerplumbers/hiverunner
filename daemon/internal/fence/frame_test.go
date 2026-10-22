@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"net"
 	"net/netip"
+	"slices"
 	"testing"
 	"time"
 )
@@ -56,10 +57,14 @@ func packet4(protocol uint8, source, address netip.Addr, payload []byte) []byte 
 }
 
 func packet6(next uint8, source, address netip.Addr, payload []byte) []byte {
+	return packet6Hops(next, 64, source, address, payload)
+}
+
+func packet6Hops(next, hops uint8, source, address netip.Addr, payload []byte) []byte {
 	header := make([]byte, 40)
 	header[0] = 6 << 4
 	binary.BigEndian.PutUint16(header[4:6], uint16(len(payload)))
-	header[6], header[7] = next, 64
+	header[6], header[7] = next, hops
 	from, to := source.As16(), address.As16()
 	copy(header[8:24], from[:])
 	copy(header[24:40], to[:])
@@ -79,9 +84,15 @@ func TestFramesFromTheGuestAreHeldToThePolicy(t *testing.T) {
 		Allow:     []Allowance{{Prefix: netip.MustParsePrefix("192.168.1.20/32"), Port: 5432}},
 		Resolvers: []netip.Addr{netip.MustParseAddr("192.168.1.1")},
 	}
-	// A fragment's header, then a TCP segment: hop-by-hop options go first.
+	// Hop-by-hop options, then a TCP segment; and a fragment's header.
 	options := append([]byte{protoTCP, 0, 0, 0, 0, 0, 0, 0}, segment(protoTCP, 22)...)
 	later := append([]byte{protoTCP, 0, 0, 8, 0, 0, 0, 1}, make([]byte, 16)...)
+	fragmented := packet4(protoTCP, guestIPv4, netip.MustParseAddr("140.82.112.3"), segment(protoTCP, 443))
+	fragmented[ethernetHeader+6] = 0x20 // more fragments
+	linkLocal, router := netip.MustParseAddr("fe80::5"), netip.MustParseAddr("fe80::1")
+	discovery := func(kind uint16, hops uint8, address string) []byte {
+		return packet6Hops(protoICMPv6, hops, linkLocal, netip.MustParseAddr(address), segment(protoICMPv6, kind))
+	}
 	for _, test := range []struct {
 		name    string
 		frame   []byte
@@ -107,13 +118,21 @@ func TestFramesFromTheGuestAreHeldToThePolicy(t *testing.T) {
 		{"IPv6 multicast too", packet6(protoUDP, guestIPv6, netip.MustParseAddr("ff02::fb"), segment(protoUDP, 5353)), false, false},
 		{"asking for an address", packet4(protoUDP, netip.MustParseAddr("0.0.0.0"), netip.MustParseAddr("255.255.255.255"), segment(protoUDP, 67)), true, false},
 		{"asking for an IPv6 address", packet6(protoUDP, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("ff02::1:2"), segment(protoUDP, 547)), true, false},
-		{"finding the router", packet6(protoICMPv6, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("ff02::2"), segment(protoICMPv6, 133)), true, false},
-		{"finding a neighbour", packet6(protoICMPv6, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("fe80::1"), segment(protoICMPv6, 135)), true, false},
-		{"a ping to the router's link-local address", packet6(protoICMPv6, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("fe80::1"), segment(protoICMPv6, 128)), false, true},
+		{"finding the router", discovery(133, 255, "ff02::2"), true, false},
+		{"finding a neighbour", discovery(135, 255, "fe80::1"), true, false},
+		{"finding a neighbour by its multicast address", discovery(135, 255, "ff02::1:ff00:1"), true, false},
+		{"answering a neighbour", discovery(136, 255, "fe80::1"), true, false},
+		{"discovery that has crossed a router", discovery(135, 64, "fe80::1"), false, true},
+		{"discovery sent off the link", discovery(135, 255, "fd00::5"), false, true},
+		{"discovery sent to the internet", discovery(135, 255, "2606:4700:4700::1111"), true, false},
+		{"a ping to the router's link-local address", packet6(protoICMPv6, linkLocal, router, segment(protoICMPv6, 128)), false, true},
 		{"UDP to port 67 on the LAN, which is not asking for an address", packet4(protoUDP, guestIPv4, netip.MustParseAddr("192.168.1.30"), segment(protoUDP, 67)), false, true},
-		{"a LAN connection behind an IPv6 extension header", packet6(hopByHop, guestIPv6, netip.MustParseAddr("fd00::9"), options), false, true},
-		{"a later IPv6 fragment to the LAN, which has no port to show", packet6(fragment, guestIPv6, netip.MustParseAddr("fd00::9"), later), false, true},
+		{"a LAN connection behind an IPv6 extension header", packet6(0, guestIPv6, netip.MustParseAddr("fd00::9"), options), false, false},
+		{"an IPv6 fragment, even to the internet", packet6(44, guestIPv6, netip.MustParseAddr("2606:4700:4700::1111"), later), false, false},
+		{"an IPv4 fragment, even to the internet", fragmented, false, false},
 		{"ARP, which the guest's network answers itself", frame(etherARP, make([]byte, 28)), true, false},
+		{"an IPv4 packet in a frame that says IPv6", frame(etherIPv6, tcp4("192.168.1.30", 22)[ethernetHeader:]), false, false},
+		{"an IPv6 packet in a frame that says IPv4", frame(etherIPv4, tcp6("2606:4700:4700::1111", 443)[ethernetHeader:]), false, false},
 		{"a VLAN-tagged frame", frame(0x8100, make([]byte, 46)), false, false},
 		{"a frame too short to be one", []byte{1, 2, 3}, false, false},
 		{"an IPv4 header that says it is longer than it is", frame(etherIPv4, []byte{0x4f, 0, 0, 20, 0, 0, 0, 0, 64, 6, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8}), false, false},
@@ -249,4 +268,112 @@ func readAll(conn net.Conn, into []byte) (int, error) {
 		}
 	}
 	return read, nil
+}
+
+// passtExtensionHeaders is IPV6_NH_OPT in passt's tap.c, copied by hand:
+// the next headers it walks past to find what a packet carries. If passt
+// changes it, so must this and passtSkips.
+var passtExtensionHeaders = []uint8{0, 43, 44, 50, 51, 60, 135, 139, 140, 253, 254}
+
+func TestTheFenceDropsWhatPasstWouldWalkPast(t *testing.T) {
+	internet := netip.MustParseAddr("2606:4700:4700::1111")
+	payload := append([]byte{protoTCP, 0, 0, 0, 0, 0, 0, 0}, segment(protoTCP, 443)...)
+	for _, next := range passtExtensionHeaders {
+		if pass, reply := (&Policy{}).Check(packet6(next, guestIPv6, internet, payload)); pass || reply != nil {
+			t.Errorf("next header %d: pass %v, answered %v; passt would walk past it, so it is dropped", next, pass, reply != nil)
+		}
+	}
+	for _, next := range []uint8{protoTCP, protoUDP, protoICMPv6, 132} {
+		if pass, _ := (&Policy{}).Check(packet6(next, guestIPv6, internet, segment(next, 443))); !pass {
+			t.Errorf("next header %d to the internet was dropped", next)
+		}
+	}
+}
+
+// passtView is the upper-layer protocol and header passt finds in an IPv6
+// packet, walked as ipv6_l4hdr in its tap.c walks it.
+func passtView(datagram []byte) (protocol uint8, upper []byte, ok bool) {
+	if len(datagram) < 40 {
+		return 0, nil, false
+	}
+	skips := func(next uint8) bool { return slices.Contains(passtExtensionHeaders, next) }
+	next, data := datagram[6], datagram[40:]
+	if skips(next) {
+		for {
+			if len(data) < 2 {
+				return 0, nil, false
+			}
+			next = data[0]
+			length := (int(data[1]) + 1) * 8
+			if !skips(next) {
+				break
+			}
+			if length > len(data) {
+				return 0, nil, false
+			}
+			data = data[length:]
+		}
+	}
+	if next == 59 {
+		return 0, nil, false
+	}
+	return next, data, true
+}
+
+// FuzzCheck sends the fence frames of every shape. It must not panic, and
+// whatever it lets through to somewhere private, passt must see the same
+// way: the same protocol, port and message type the policy judged.
+func FuzzCheck(f *testing.F) {
+	for _, seed := range [][]byte{
+		tcp4("140.82.112.3", 443), tcp4("192.168.1.20", 5432), tcp6("fd00::20", 5432),
+		packet6(protoUDP, guestIPv6, netip.MustParseAddr("fd00::53"), segment(protoUDP, 53)),
+		packet6(0, guestIPv6, netip.MustParseAddr("fd00::20"), append([]byte{protoTCP, 0, 0, 0, 0, 0, 0, 0}, segment(protoTCP, 5432)...)),
+		packet6Hops(protoICMPv6, 255, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("fe80::1"), segment(protoICMPv6, 135)),
+		packet6(protoUDP, netip.MustParseAddr("fe80::5"), netip.MustParseAddr("ff02::1:2"), segment(protoUDP, 547)),
+		frame(etherARP, make([]byte, 28)),
+	} {
+		f.Add(seed)
+	}
+	policy := &Policy{
+		Allow: []Allowance{
+			{Prefix: netip.MustParsePrefix("192.168.1.20/32"), Port: 5432},
+			{Prefix: netip.MustParsePrefix("fd00::20/128"), Port: 5432},
+		},
+		Resolvers: []netip.Addr{netip.MustParseAddr("192.168.1.1"), netip.MustParseAddr("fd00::53")},
+	}
+	f.Fuzz(func(t *testing.T, frame []byte) {
+		pass, _ := policy.Check(frame)
+		if !pass || len(frame) < ethernetHeader || binary.BigEndian.Uint16(frame[12:14]) != etherIPv6 {
+			return
+		}
+		datagram := frame[ethernetHeader:]
+		if len(datagram) < 40 {
+			t.Fatalf("a frame too short for IPv6 passed: % x", frame)
+		}
+		address := netip.AddrFrom16([16]byte(datagram[24:40]))
+		if _, fenced := Fenced(address); !fenced {
+			return
+		}
+		protocol, upper, ok := passtView(datagram[:min(len(datagram), 40+int(binary.BigEndian.Uint16(datagram[4:6])))])
+		if !ok {
+			return // passt drops it
+		}
+		seen := packet{v6: true, protocol: protocol, address: address, hops: datagram[7], icmp: -1}
+		seen.port, seen.icmp = upper4(protocol, upper)
+		if !answeredLocally(seen) && !policy.Reaches(seen.protocol, seen.address, seen.port) {
+			t.Fatalf("passed to %s, which passt sees as protocol %d port %d type %d: % x", address, seen.protocol, seen.port, seen.icmp, frame)
+		}
+	})
+}
+
+// upper4 is upper, written again for the fuzz test so the two are not one.
+func upper4(protocol uint8, data []byte) (port uint16, icmp int) {
+	icmp = -1
+	if (protocol == protoTCP || protocol == protoUDP) && len(data) >= 4 {
+		port = uint16(data[2])<<8 | uint16(data[3])
+	}
+	if protocol == protoICMPv6 && len(data) >= 1 {
+		icmp = int(data[0])
+	}
+	return port, icmp
 }

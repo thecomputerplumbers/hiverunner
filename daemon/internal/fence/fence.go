@@ -35,20 +35,29 @@ var Private = []Range{
 	{netip.MustParsePrefix("192.168.0.0/16"), "a private network"},
 	{netip.MustParsePrefix("100.64.0.0/10"), "a tailnet, or a carrier's NAT"},
 	{netip.MustParsePrefix("169.254.0.0/16"), "link-local, where a cloud keeps its metadata service"},
+	{netip.MustParsePrefix("168.63.129.16/32"), "Azure's host service: metadata, DNS and health probes"},
 	{netip.MustParsePrefix("224.0.0.0/4"), "multicast"},
 	{netip.MustParsePrefix("255.255.255.255/32"), "broadcast"},
 	{netip.MustParsePrefix("0.0.0.0/8"), "this host"},
 	{netip.MustParsePrefix("127.0.0.0/8"), "this host's loopback"},
 	{netip.MustParsePrefix("fc00::/7"), "a private IPv6 network, a tailnet's included"},
 	{netip.MustParsePrefix("fe80::/10"), "link-local IPv6"},
+	{netip.MustParsePrefix("fec0::/10"), "site-local IPv6, deprecated and still routed by some networks"},
 	{netip.MustParsePrefix("ff00::/8"), "IPv6 multicast"},
 	{netip.MustParsePrefix("::1/128"), "this host's loopback"},
 	{netip.MustParsePrefix("::/128"), "this host"},
 }
 
-// nat64 is the well-known prefix a NAT64 gateway reaches IPv4 through. An
-// address in it is the IPv4 address in its last four bytes.
-var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+// nat64 are the prefixes a NAT64 gateway reaches IPv4 through: the
+// well-known one, and the one set aside for a network's own gateway. An
+// address in either is taken as the IPv4 address in its last four bytes,
+// which is where a gateway translating a /96 puts it.
+var nat64 = []netip.Prefix{netip.MustParsePrefix("64:ff9b::/96"), netip.MustParsePrefix("64:ff9b:1::/48")}
+
+// translated is whether an IPv6 address stands for an IPv4 one.
+func translated(address netip.Addr) bool {
+	return address.Is4In6() || slices.ContainsFunc(nat64, func(p netip.Prefix) bool { return p.Contains(address) })
+}
 
 // Fenced is the range that keeps a guest from this address, if one does.
 func Fenced(address netip.Addr) (Range, bool) {
@@ -64,8 +73,8 @@ func Fenced(address netip.Addr) (Range, bool) {
 // plain is the address a packet to this one actually reaches: an IPv4
 // address written as IPv6, either way, is that IPv4 address.
 func plain(address netip.Addr) netip.Addr {
-	address = address.Unmap().WithZone("")
-	if address.Is6() && nat64.Contains(address) {
+	address = address.WithZone("")
+	if translated(address) {
 		raw := address.As16()
 		return netip.AddrFrom4([4]byte(raw[12:]))
 	}
@@ -120,7 +129,7 @@ func ParseAllowances(text string) ([]Allowance, error) {
 }
 
 func parseAllowance(entry string) (Allowance, error) {
-	place, port := entry, ""
+	place, port, hasPort := entry, "", false
 	switch {
 	case strings.HasPrefix(entry, "["):
 		// IPv6 with a port, which needs the brackets to be told apart.
@@ -128,9 +137,9 @@ func parseAllowance(entry string) (Allowance, error) {
 		if !ok || !strings.HasPrefix(rest, ":") {
 			return Allowance{}, fmt.Errorf("%q: %w", entry, errAllowance)
 		}
-		place, port = inside, rest[1:]
+		place, port, hasPort = inside, rest[1:], true
 	case strings.Count(entry, ":") == 1:
-		place, port, _ = strings.Cut(entry, ":")
+		place, port, hasPort = strings.Cut(entry, ":")
 	}
 	var allowance Allowance
 	if strings.Contains(place, "/") {
@@ -138,32 +147,50 @@ func parseAllowance(entry string) (Allowance, error) {
 		if err != nil {
 			return Allowance{}, fmt.Errorf("%q: %w", entry, errAllowance)
 		}
-		allowance.Prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-unmappedBits(prefix)).Masked()
+		// IPv4 written as IPv6 is the IPv4 it stands for, as a packet's
+		// address is: only then can the two match.
+		if translated(prefix.Addr()) {
+			if prefix.Bits() < 96 {
+				return Allowance{}, fmt.Errorf("%q: a range of IPv4 written as IPv6 must be /96 or narrower; write it as IPv4, like 10.0.0.0/8", entry)
+			}
+			prefix = netip.PrefixFrom(plain(prefix.Addr()), prefix.Bits()-96)
+		}
+		allowance.Prefix = prefix.Masked()
 	} else {
 		address, err := netip.ParseAddr(place)
 		if err != nil || address.Zone() != "" {
 			return Allowance{}, fmt.Errorf("%q: %w", entry, errAllowance)
 		}
-		address = address.Unmap()
+		address = plain(address)
 		allowance.Prefix = netip.PrefixFrom(address, address.BitLen())
 	}
-	if port != "" {
-		number, err := strconv.Atoi(port)
-		if err != nil || number < 1 || number > 65535 {
-			return Allowance{}, fmt.Errorf("%q: a port is from 1 to 65535", entry)
+	// A port left off after the colon is a mistake, not every port.
+	if hasPort {
+		number, err := parsePort(port)
+		if err != nil {
+			return Allowance{}, fmt.Errorf("%q: %w", entry, err)
 		}
-		allowance.Port = uint16(number)
+		allowance.Port = number
 	}
 	return allowance, nil
 }
 
-// unmappedBits is what a range written as IPv4-in-IPv6 loses when it is
-// written as the IPv4 range it is.
-func unmappedBits(prefix netip.Prefix) int {
-	if prefix.Addr().Is4In6() {
-		return 96
+// parsePort reads a port as it is written: digits alone, with no sign and
+// no leading zero.
+func parsePort(port string) (uint16, error) {
+	switch {
+	case port == "":
+		return 0, errors.New("the port after the colon is missing")
+	case strings.Trim(port, "0123456789") != "":
+		return 0, errors.New("a port is a number from 1 to 65535, with nothing before it")
+	case port[0] == '0':
+		return 0, errors.New("a port is a number from 1 to 65535, with no leading zero")
 	}
-	return 0
+	number, err := strconv.Atoi(port)
+	if err != nil || number > 65535 {
+		return 0, errors.New("a port is a number from 1 to 65535")
+	}
+	return uint16(number), nil
 }
 
 // FormatAllowances is the allowances as ParseAllowances reads them.

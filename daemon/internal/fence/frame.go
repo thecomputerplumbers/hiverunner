@@ -3,6 +3,7 @@ package fence
 import (
 	"encoding/binary"
 	"net/netip"
+	"slices"
 )
 
 // Ethernet frame types the guest's network passes on. Anything else, a VLAN
@@ -33,10 +34,12 @@ type packet struct {
 	source   netip.Addr
 	address  netip.Addr
 	// port is the destination port of a TCP or UDP packet, and zero for
-	// any other, or for a fragment after the first.
+	// any other.
 	port uint16
 	// icmp is the message type of an ICMP or ICMPv6 packet.
 	icmp int
+	// hops is an IPv6 packet's hop limit.
+	hops uint8
 	// datagram is the IP packet itself, header and all.
 	datagram []byte
 }
@@ -50,7 +53,8 @@ func (p *Policy) Check(frame []byte) (pass bool, reply []byte) {
 	if len(frame) < ethernetHeader {
 		return false, nil
 	}
-	switch binary.BigEndian.Uint16(frame[12:14]) {
+	kind := binary.BigEndian.Uint16(frame[12:14])
+	switch kind {
 	case etherARP:
 		// Asked of the guest's network, and answered by it, for every
 		// address: no ARP goes past it.
@@ -59,7 +63,7 @@ func (p *Policy) Check(frame []byte) (pass bool, reply []byte) {
 	default:
 		return false, nil
 	}
-	parsed, ok := parse(frame[ethernetHeader:])
+	parsed, ok := parse(kind, frame[ethernetHeader:])
 	if !ok {
 		return false, nil
 	}
@@ -81,10 +85,22 @@ func answeredLocally(parsed packet) bool {
 		return true // DHCP
 	case parsed.v6 && parsed.protocol == protoUDP && parsed.port == 547 && parsed.address == dhcpServers:
 		return true // DHCPv6
-	case parsed.v6 && parsed.protocol == protoICMPv6 && parsed.icmp >= 133 && parsed.icmp <= 136:
-		return true // router and neighbour discovery
+	case parsed.v6 && parsed.protocol == protoICMPv6 && parsed.icmp >= 133 && parsed.icmp <= 136 && parsed.hops == 255 && onLink(parsed.address):
+		// Router and neighbour discovery, which never leaves the link:
+		// a hop limit of 255 is how a receiver knows (RFC 4861).
+		return true
 	}
 	return false
+}
+
+// linkLocal and linkMulticast are the destinations discovery is sent to.
+var (
+	linkLocal     = netip.MustParsePrefix("fe80::/10")
+	linkMulticast = netip.MustParsePrefix("ff02::/16")
+)
+
+func onLink(address netip.Addr) bool {
+	return linkLocal.Contains(address) || linkMulticast.Contains(address)
 }
 
 // answerable is whether a router would say why it dropped this packet. It
@@ -104,14 +120,16 @@ func answerable(parsed packet) bool {
 }
 
 // parse reads an IP packet's header, and the start of what it carries.
-func parse(datagram []byte) (packet, bool) {
+// passt goes by the frame's type and the fence by the packet's version, so
+// a packet whose two disagree is dropped.
+func parse(kind uint16, datagram []byte) (packet, bool) {
 	if len(datagram) < 1 {
 		return packet{}, false
 	}
-	switch datagram[0] >> 4 {
-	case 4:
+	switch {
+	case kind == etherIPv4 && datagram[0]>>4 == 4:
 		return parse4(datagram)
-	case 6:
+	case kind == etherIPv6 && datagram[0]>>4 == 6:
 		return parse6(datagram)
 	}
 	return packet{}, false
@@ -126,6 +144,11 @@ func parse4(datagram []byte) (packet, bool) {
 	if header < 20 || total < header || len(datagram) < header {
 		return packet{}, false
 	}
+	// A fragment is dropped, as passt drops it: the port the policy looks
+	// at is in the first one only, and passt reassembles none.
+	if flags := binary.BigEndian.Uint16(datagram[6:8]); flags&0x2000 != 0 || flags&0x1fff != 0 {
+		return packet{}, false
+	}
 	datagram = datagram[:min(total, len(datagram))]
 	parsed := packet{
 		protocol: datagram[9],
@@ -134,18 +157,17 @@ func parse4(datagram []byte) (packet, bool) {
 		icmp:     -1,
 		datagram: datagram,
 	}
-	first := binary.BigEndian.Uint16(datagram[6:8])&0x1fff == 0
-	parsed.port, parsed.icmp = upper(parsed.protocol, datagram[header:], first)
+	parsed.port, parsed.icmp = upper(parsed.protocol, datagram[header:])
 	return parsed, true
 }
 
-// IPv6 extension headers that come before what the packet carries.
-const (
-	hopByHop     = 0
-	routing      = 43
-	fragment     = 44
-	destinations = 60
-)
+// passtSkips is every IPv6 next header passt takes for an extension header
+// and walks past to find what the packet carries: IPV6_NH_OPT in its
+// tap.c. A guest's packet with any of them is dropped. Its walk stops one
+// header short of the upper-layer one, so what passt would take for the
+// port is not the port, and the policy cannot judge such a packet by the
+// one passt acts on. Nothing a job needs to send has them.
+var passtSkips = []uint8{0, 43, 44, 50, 51, 60, 135, 139, 140, 253, 254}
 
 func parse6(datagram []byte) (packet, bool) {
 	if len(datagram) < 40 {
@@ -156,42 +178,21 @@ func parse6(datagram []byte) (packet, bool) {
 		v6:       true,
 		source:   netip.AddrFrom16([16]byte(datagram[8:24])),
 		address:  netip.AddrFrom16([16]byte(datagram[24:40])),
+		protocol: datagram[6],
+		hops:     datagram[7],
 		datagram: datagram,
 	}
-	next, rest, first := datagram[6], datagram[40:], true
-	// A handful of extension headers at most; a packet with more is not
-	// one any network takes.
-	for range 8 {
-		switch next {
-		case hopByHop, routing, destinations:
-			if len(rest) < 2 || len(rest) < (int(rest[1])+1)*8 {
-				return packet{}, false
-			}
-			next, rest = rest[0], rest[(int(rest[1])+1)*8:]
-			continue
-		case fragment:
-			if len(rest) < 8 {
-				return packet{}, false
-			}
-			first = first && binary.BigEndian.Uint16(rest[2:4])>>3 == 0
-			next, rest = rest[0], rest[8:]
-			continue
-		}
-		parsed.protocol = next
-		parsed.port, parsed.icmp = upper(next, rest, first)
-		return parsed, true
+	if slices.Contains(passtSkips, parsed.protocol) {
+		return packet{}, false
 	}
-	return packet{}, false
+	parsed.port, parsed.icmp = upper(parsed.protocol, datagram[40:])
+	return parsed, true
 }
 
 // upper is the destination port of a TCP or UDP segment, and the type of
-// an ICMP message, from the start of what a packet carries. A fragment
-// after the first carries neither.
-func upper(protocol uint8, payload []byte, first bool) (port uint16, icmp int) {
+// an ICMP message, from the start of what a packet carries.
+func upper(protocol uint8, payload []byte) (port uint16, icmp int) {
 	icmp = -1
-	if !first {
-		return 0, icmp
-	}
 	switch protocol {
 	case protoTCP, protoUDP:
 		if len(payload) >= 4 {

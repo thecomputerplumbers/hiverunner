@@ -446,6 +446,8 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 	vm.stop = func() { stopping.Do(func() { _ = machine.Process.Kill() }) }
 	vm.served = address != 0
 	vm.unserve = forget
+	// The machine's own addresses can change while the VM runs.
+	go vm.watchHost(hostEvery)
 	go func() {
 		waitErr := <-exited
 		// Powered off by the guest, or killed by us (which has no exit
