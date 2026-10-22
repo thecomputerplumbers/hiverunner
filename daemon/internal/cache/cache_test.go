@@ -736,3 +736,230 @@ func TestProtobufCallsAreAnsweredInProtobuf(t *testing.T) {
 		t.Fatalf("a miss answered %v", miss)
 	}
 }
+
+// chunked is a body whose length is not known until it ends, as a request
+// sent with chunked transfer encoding has.
+func chunked(content string) io.Reader { return io.MultiReader(strings.NewReader(content)) }
+
+// leftovers lists the files under the uploads that are not an upload's own
+// record: the bytes a save has left on the disk.
+func leftovers(t *testing.T, store *Store) (files []string, bytes int64) {
+	t.Helper()
+	_ = filepath.WalkDir(filepath.Join(store.root, "uploads"), func(path string, item os.DirEntry, err error) error {
+		if err != nil || item.IsDir() || item.Name() == "upload.json" {
+			return nil
+		}
+		if info, err := item.Info(); err == nil {
+			files = append(files, strings.TrimPrefix(path, store.root))
+			bytes += info.Size()
+		}
+		return nil
+	})
+	return files, bytes
+}
+
+func TestAChunkedUploadCannotPassTheLimit(t *testing.T) {
+	store := newStore(t, 1000)
+	id, err := store.Begin(Entry{Pool: "acme", Repo: "1", Scope: "s", Key: "k", Version: "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutBlock("acme", id, "YTo=", chunked(strings.Repeat("a", 600)), -1); err != nil {
+		t.Fatalf("a block within the limit: %v", err)
+	}
+	// Each block is under the limit, but the upload no longer would be.
+	if err := store.PutBlock("acme", id, "Yjo=", chunked(strings.Repeat("b", 600)), -1); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("a block that takes the upload past the limit: %v", err)
+	}
+	if err := store.PutWhole("acme", id, chunked(strings.Repeat("c", 600)), -1); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("a whole archive that takes the upload past the limit: %v", err)
+	}
+	if files, bytes := leftovers(t, store); bytes != 600 || len(files) != 1 {
+		t.Fatalf("after refusing the rest, the upload holds %d bytes in %v", bytes, files)
+	}
+	// What was kept is still a cache.
+	if err := store.Commit("acme", id, []string{"YTo="}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Finalize("acme", "1", "s", "k", "v", 600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The disk is checked as the bytes arrive, not only when their length
+	// was declared.
+	store.free = func(string) (int64, error) { return minFree + 100, nil }
+	id, _ = store.Begin(Entry{Pool: "acme", Repo: "1", Scope: "s", Key: "full", Version: "v"})
+	if err := store.PutBlock("acme", id, "YTo=", chunked(strings.Repeat("x", 500)), -1); !errors.Is(err, ErrNoRoom) {
+		t.Fatalf("a chunked block onto a nearly full disk: %v", err)
+	}
+	if files, _ := leftovers(t, store); len(files) != 0 {
+		t.Fatalf("a refused block left %v", files)
+	}
+
+	// And over HTTP, where a chunked body has no Content-Length.
+	h := newHarness(t, "")
+	h.store.Limit = func() int64 { return 1000 }
+	token := h.issuer.token(t, "42", nil)
+	var created answer
+	h.call(token, "CreateCacheEntry", map[string]any{"key": "k", "version": "v"}, &created)
+	send := func(block, content string) int {
+		request, _ := http.NewRequest("PUT", created.UploadURL+"?comp=block&blockid="+block, chunked(content))
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	if status := send("YTo=", strings.Repeat("a", 600)); status != 201 {
+		t.Fatalf("a chunked block within the limit: %d", status)
+	}
+	if status := send("Yjo=", strings.Repeat("b", 600)); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a chunked block past the limit: %d", status)
+	}
+	if _, bytes := leftovers(t, h.store); bytes != 600 {
+		t.Fatalf("the refused block left the upload holding %d bytes", bytes)
+	}
+}
+
+func TestUnfinishedUploadsShareTheLimit(t *testing.T) {
+	store := newStore(t, 1000)
+	var ids []string
+	for i := range 20 {
+		id, err := store.Begin(Entry{Pool: "acme", Repo: "1", Scope: "s", Key: fmt.Sprint("k", i), Version: "v"})
+		if err != nil {
+			t.Fatalf("begin %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	// Every upload at once, each well within the limit on its own.
+	var wait sync.WaitGroup
+	var mu sync.Mutex
+	var kept []string
+	for _, id := range ids {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			if store.PutBlock("acme", id, "YTo=", chunked(strings.Repeat("x", 250)), -1) == nil {
+				mu.Lock()
+				kept = append(kept, id)
+				mu.Unlock()
+			}
+		}()
+	}
+	wait.Wait()
+	if _, bytes := leftovers(t, store); bytes > 1000 {
+		t.Fatalf("%d unfinished uploads hold %d bytes, over the limit of 1000", len(kept), bytes)
+	}
+	if len(kept) != 4 {
+		t.Fatalf("%d of the uploads were kept, want the 4 that fit", len(kept))
+	}
+	var waiting string
+	for _, id := range ids {
+		if !contains(kept, id) {
+			waiting = id
+			break
+		}
+	}
+	// A declared length is held to the same account.
+	if err := store.PutBlock("acme", waiting, "YTo=", strings.NewReader(strings.Repeat("y", 250)), 250); err == nil {
+		t.Fatal("a declared block past the limit was kept")
+	}
+	// While the uploads already fill it, a new save is not begun.
+	if _, err := store.Begin(Entry{Pool: "acme", Repo: "1", Scope: "s", Key: "later", Version: "v"}); err == nil {
+		t.Fatal("a save was begun while unfinished uploads fill the limit")
+	}
+
+	// Finishing one gives its room back.
+	done := kept[0]
+	if err := store.Commit("acme", done, []string{"YTo="}); err != nil {
+		t.Fatal(err)
+	}
+	var key string
+	for i, id := range ids {
+		if id == done {
+			key = fmt.Sprint("k", i)
+		}
+	}
+	if _, err := store.Finalize("acme", "1", "s", key, "v", 250); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutBlock("acme", waiting, "YTo=", chunked(strings.Repeat("z", 250)), -1); err != nil {
+		t.Fatalf("an upload after another finished: %v", err)
+	}
+
+	// However small, uploads cannot be begun without end.
+	small := newStore(t, 1000)
+	begun := 0
+	for i := range 1000 {
+		if _, err := small.Begin(Entry{Pool: "acme", Repo: "1", Scope: "s", Key: fmt.Sprint("k", i), Version: "v"}); err != nil {
+			break
+		}
+		begun++
+	}
+	if begun == 1000 {
+		t.Fatal("a thousand saves were begun and left unfinished")
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAbandonedUploadsAreSweptSoon(t *testing.T) {
+	store := newStore(t, 0)
+	begin := func(key string) string {
+		id, err := store.Begin(Entry{Pool: "acme", Repo: "1", Scope: "s", Key: key, Version: "v"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.PutBlock("acme", id, "YTo=", strings.NewReader("bytes"), 5); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// age makes an upload look as if it began, and last heard from its
+	// job, some time ago.
+	age := func(id string, started, heard time.Duration) {
+		dir := filepath.Join(store.root, "uploads", id)
+		pending, _ := readUpload(dir)
+		pending.Started = time.Now().Add(-started)
+		if err := writeJSON(filepath.Join(dir, "upload.json"), pending); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-heard)
+		_ = filepath.WalkDir(dir, func(path string, _ os.DirEntry, _ error) error {
+			return os.Chtimes(path, when, when)
+		})
+	}
+	idle, slow, busy := begin("idle"), begin("slow"), begin("busy")
+	age(idle, 30*time.Minute, 30*time.Minute)
+	age(slow, 3*time.Hour, time.Minute)
+	age(busy, time.Minute, time.Minute)
+
+	// As the daemon finds them when it starts again.
+	reopened, err := Open(store.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened.Limit, reopened.free = store.Limit, store.free
+	reopened.Trim()
+	exists := func(id string) bool {
+		_, err := os.Stat(filepath.Join(store.root, "uploads", id))
+		return err == nil
+	}
+	if exists(idle) {
+		t.Error("an upload not heard from in half an hour was kept")
+	}
+	if exists(slow) {
+		t.Error("an upload begun three hours ago was kept")
+	}
+	if !exists(busy) {
+		t.Error("an upload in progress was swept")
+	}
+}

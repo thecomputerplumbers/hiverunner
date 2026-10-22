@@ -52,7 +52,8 @@ type Entry struct {
 var (
 	ErrExists   = errors.New("a cache with this key already exists")
 	ErrNoRoom   = errors.New("this machine's disk is too full to save a cache")
-	ErrTooLarge = errors.New("this cache is larger than the machine's whole cache")
+	ErrTooLarge = errors.New("this cache is larger than this machine will keep")
+	ErrBusy     = errors.New("too many caches are being saved on this machine at once")
 	ErrNotFound = errors.New("no such cache")
 	ErrSize     = errors.New("the uploaded cache is not the size the job reported")
 )
@@ -60,8 +61,19 @@ var (
 const (
 	// minFree is the disk space a save must leave on the machine.
 	minFree = 5 << 30
-	// staleUpload is how long an unfinished upload is kept.
-	staleUpload = 24 * time.Hour
+	// checkEvery is how many bytes a write takes between looks at the disk.
+	checkEvery = 64 << 20
+	// maxEntry is the largest one cache may be, as on GitHub.
+	maxEntry = 10 << 30
+	// maxUploads is how many saves may be unfinished at once, and maxBlocks
+	// how many blocks they may hold between them: as many as one blob may
+	// have in blob storage.
+	maxUploads = 64
+	maxBlocks  = 50_000
+	// An unfinished upload is abandoned once its job has sent it nothing for
+	// idleUpload, or it began more than oldUpload ago.
+	idleUpload = 10 * time.Minute
+	oldUpload  = 2 * time.Hour
 )
 
 var (
@@ -71,8 +83,10 @@ var (
 )
 
 // Store keeps entries as files under one directory. What is on disk is the
-// whole truth: nothing is remembered between calls, so `hived cache clear`
-// and a running daemon cannot disagree.
+// whole truth about entries: nothing is remembered between calls, so `hived
+// cache clear` and a running daemon cannot disagree. Only what unfinished
+// uploads hold is counted in memory, since bytes still arriving are on no
+// disk yet.
 type Store struct {
 	root string
 	// Limit is the most the entries may occupy, in bytes. It is asked on
@@ -84,6 +98,10 @@ type Store struct {
 	// mu orders saves, evictions and clears. Uploading bytes and
 	// downloading do not hold it.
 	mu sync.Mutex
+	// quota guards held. It may be taken while holding mu, never the
+	// other way around.
+	quota sync.Mutex
+	held  *held
 }
 
 // Open returns the store rooted at dir, creating it.
@@ -137,6 +155,14 @@ func (s *Store) limit() int64 {
 		return 0
 	}
 	return s.Limit()
+}
+
+// most is the largest one cache may be.
+func (s *Store) most() int64 {
+	if limit := s.limit(); limit > 0 {
+		return min(limit, maxEntry)
+	}
+	return maxEntry
 }
 
 func (s *Store) repoDir(pool, repo string) (string, error) {
@@ -325,33 +351,60 @@ func (s *Store) Begin(entry Entry) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := s.admit(id); err != nil {
+		return "", err
+	}
 	dir := filepath.Join(s.root, "uploads", id)
 	if err := os.MkdirAll(filepath.Join(dir, "blocks"), 0o700); err != nil {
+		s.forget(id)
 		return "", err
 	}
 	entry.ID, entry.Secret, entry.Size = "", "", 0
 	if err := writeJSON(filepath.Join(dir, "upload.json"), upload{Entry: entry, Started: time.Now()}); err != nil {
+		s.forget(id)
 		os.RemoveAll(dir)
 		return "", err
 	}
 	return id, nil
 }
 
-// sweepUploads removes saves that were started and abandoned.
+// sweepUploads removes saves that were started and abandoned. The caller
+// holds mu, so no upload is being begun or finalized meanwhile.
 func (s *Store) sweepUploads() {
 	listed, _ := os.ReadDir(filepath.Join(s.root, "uploads"))
+	started := map[string]time.Time{}
 	for _, item := range listed {
-		dir := filepath.Join(s.root, "uploads", item.Name())
-		pending, ok := readUpload(dir)
-		if !ok || time.Since(pending.Started) > staleUpload {
-			os.RemoveAll(dir)
+		if pending, ok := readUpload(filepath.Join(s.root, "uploads", item.Name())); ok {
+			started[item.Name()] = pending.Started
 		}
+	}
+	var doomed []string
+	s.quota.Lock()
+	account := s.account()
+	for _, item := range listed {
+		began, ok := started[item.Name()]
+		upload := account.uploads[item.Name()]
+		if ok && upload != nil && time.Since(upload.heard) < idleUpload && time.Since(began) < oldUpload {
+			continue
+		}
+		account.forget(item.Name())
+		doomed = append(doomed, filepath.Join(s.root, "uploads", item.Name()))
+	}
+	// An upload whose directory is gone holds nothing.
+	for id := range account.uploads {
+		if _, ok := started[id]; !ok {
+			account.forget(id)
+		}
+	}
+	s.quota.Unlock()
+	for _, dir := range doomed {
+		os.RemoveAll(dir)
 	}
 }
 
 // room refuses bytes that could never be kept, before they are written.
 func (s *Store) room(dir string, more int64) error {
-	if limit := s.limit(); limit > 0 && more > limit {
+	if more > s.most() {
 		return ErrTooLarge
 	}
 	if free, err := s.free(dir); err == nil && free-more < minFree {
@@ -360,34 +413,252 @@ func (s *Store) room(dir string, more int64) error {
 	return nil
 }
 
-// write copies a request body to a file that only appears once it is whole.
-func (s *Store) write(path string, body io.Reader, expected int64) error {
+// held is what the unfinished uploads hold between them, on the disk and
+// still arriving, so that together they stay within the limit however
+// their bytes are sent.
+type held struct {
+	uploads map[string]*heldUpload
+	bytes   int64
+	blocks  int
+}
+
+// heldUpload is one unfinished upload's share.
+type heldUpload struct {
+	bytes  int64
+	blocks int
+	// heard is when its job last sent it anything.
+	heard time.Time
+	// gone is set once it is finalized or swept, so a write still arriving
+	// for it stops and does not give back what is no longer counted.
+	gone bool
+}
+
+// account returns what the uploads hold, reading it from the disk the
+// first time: the uploads a daemon left behind still take up room. The
+// caller holds quota.
+func (s *Store) account() *held {
+	if s.held != nil {
+		return s.held
+	}
+	s.held = &held{uploads: map[string]*heldUpload{}}
+	listed, _ := os.ReadDir(filepath.Join(s.root, "uploads"))
+	for _, item := range listed {
+		dir := filepath.Join(s.root, "uploads", item.Name())
+		pending, ok := readUpload(dir)
+		if !ok {
+			continue
+		}
+		upload := &heldUpload{heard: pending.Started}
+		_ = filepath.WalkDir(dir, func(path string, file os.DirEntry, err error) error {
+			if err != nil || file.IsDir() || path == filepath.Join(dir, "upload.json") {
+				return nil
+			}
+			info, err := file.Info()
+			if err != nil {
+				return nil
+			}
+			upload.bytes += info.Size()
+			if filepath.Dir(path) == filepath.Join(dir, "blocks") {
+				upload.blocks++
+			}
+			if info.ModTime().After(upload.heard) {
+				upload.heard = info.ModTime()
+			}
+			return nil
+		})
+		s.held.uploads[item.Name()] = upload
+		s.held.bytes += upload.bytes
+		s.held.blocks += upload.blocks
+	}
+	return s.held
+}
+
+// forget stops counting an upload. The caller holds quota.
+func (h *held) forget(id string) {
+	upload := h.uploads[id]
+	if upload == nil {
+		return
+	}
+	upload.gone = true
+	h.bytes -= upload.bytes
+	h.blocks -= upload.blocks
+	delete(h.uploads, id)
+}
+
+func (s *Store) forget(id string) {
+	s.quota.Lock()
+	defer s.quota.Unlock()
+	s.account().forget(id)
+}
+
+// admit starts counting a new upload, if there is room for one.
+func (s *Store) admit(id string) error {
+	limit := s.limit()
+	s.quota.Lock()
+	defer s.quota.Unlock()
+	account := s.account()
+	if len(account.uploads) >= maxUploads {
+		return ErrBusy
+	}
+	if limit > 0 && account.bytes >= limit {
+		return ErrBusy
+	}
+	account.uploads[id] = &heldUpload{heard: time.Now()}
+	return nil
+}
+
+// lease is one write's claim on room for its upload.
+type lease struct {
+	store  *Store
+	upload *heldUpload
+	dir    string
+	// limit is the most all uploads may hold, and most what this one may.
+	limit, most int64
+	// claimed is what this write has taken from the account and not yet
+	// settled, and arrived how many bytes of its body have been read.
+	claimed, arrived int64
+	// The disk is looked at again once arrived reaches check.
+	check int64
+}
+
+// lease begins a write to an upload. A block is refused once the uploads
+// hold as many as they may.
+func (s *Store) lease(id, dir string, block bool) (*lease, error) {
+	limit, most := s.limit(), s.most()
+	s.quota.Lock()
+	defer s.quota.Unlock()
+	account := s.account()
+	upload := account.uploads[id]
+	if upload == nil {
+		return nil, ErrNotFound
+	}
+	if block && account.blocks >= maxBlocks {
+		return nil, ErrBusy
+	}
+	upload.heard = time.Now()
+	return &lease{store: s, upload: upload, dir: dir, limit: limit, most: most}, nil
+}
+
+// claim takes room for n more bytes, if the upload and all the uploads
+// together stay within their limits.
+func (l *lease) claim(n int64) error {
+	s := l.store
+	s.quota.Lock()
+	defer s.quota.Unlock()
+	if l.upload.gone {
+		return ErrNotFound
+	}
+	l.upload.heard = time.Now()
+	if l.upload.bytes+n > l.most {
+		return ErrTooLarge
+	}
+	if l.limit > 0 && s.held.bytes+n > l.limit {
+		return ErrBusy
+	}
+	l.upload.bytes += n
+	s.held.bytes += n
+	l.claimed += n
+	return nil
+}
+
+// arrive counts n bytes of the body as read, before they are written.
+func (l *lease) arrive(n int64) error {
+	l.arrived += n
+	if l.arrived >= l.check {
+		if free, err := l.store.free(l.dir); err == nil && free-checkEvery < minFree {
+			return ErrNoRoom
+		}
+		l.check = l.arrived + checkEvery
+	}
+	if more := l.arrived - l.claimed; more > 0 {
+		return l.claim(more)
+	}
+	return nil
+}
+
+// settle ends the write. Of what it claimed, kept bytes stay on the disk
+// and the rest is given back, with the freed bytes it replaced or removed.
+// blocks is how many blocks it added, or removed if negative. Settling
+// again gives back nothing more.
+func (l *lease) settle(kept, freed int64, blocks int) {
+	s := l.store
+	s.quota.Lock()
+	defer s.quota.Unlock()
+	change := kept - l.claimed - freed
+	l.claimed = 0
+	if l.upload.gone {
+		return
+	}
+	// Writes racing on one block can make the disk hold less than was
+	// counted, never more; the account only errs on the side of full.
+	change = max(change, -l.upload.bytes)
+	blocks = max(blocks, -l.upload.blocks)
+	l.upload.bytes += change
+	s.held.bytes += change
+	l.upload.blocks += blocks
+	s.held.blocks += blocks
+}
+
+// metered claims room for a body's bytes as they arrive, and stops it once
+// its upload would be too large or the disk too full.
+type metered struct {
+	body  io.Reader
+	lease *lease
+}
+
+func (m *metered) Read(p []byte) (int, error) {
+	n, err := m.body.Read(p)
+	if n > 0 {
+		if refused := m.lease.arrive(int64(n)); refused != nil {
+			return 0, refused
+		}
+	}
+	return n, err
+}
+
+// write copies a request body to a file that only appears once it is
+// whole. Its bytes count against the limits as they arrive, so a body
+// whose length was never declared is held to them too.
+func (s *Store) write(id, path string, body io.Reader, expected int64, block bool) error {
+	dir := filepath.Dir(path)
+	lease, err := s.lease(id, dir, block)
+	if err != nil {
+		return err
+	}
+	// Whatever was claimed and not kept is given back.
+	defer lease.settle(0, 0, 0)
 	if expected > 0 {
-		if err := s.room(filepath.Dir(path), expected); err != nil {
+		if err := s.room(dir, expected); err != nil {
+			return err
+		}
+		if err := lease.claim(expected); err != nil {
 			return err
 		}
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".part-")
+	temporary, err := os.CreateTemp(dir, ".part-")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(temporary.Name())
-	limit := s.limit()
-	if limit <= 0 {
-		limit = 1 << 62
-	}
-	// One byte past the limit is enough to know it was exceeded.
-	written, err := io.Copy(temporary, io.LimitReader(body, limit+1))
+	written, err := io.Copy(temporary, &metered{body: body, lease: lease})
 	if closeErr := temporary.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
 		return err
 	}
-	if written > limit {
-		return ErrTooLarge
+	var replaced int64
+	added := 0
+	if info, err := os.Stat(path); err == nil {
+		replaced = info.Size()
+	} else if block {
+		added = 1
 	}
-	return os.Rename(temporary.Name(), path)
+	if err := os.Rename(temporary.Name(), path); err != nil {
+		return err
+	}
+	lease.settle(written, replaced, added)
+	return nil
 }
 
 // PutBlock stores one block of an upload. Blocks may arrive in any order and
@@ -401,7 +672,7 @@ func (s *Store) PutBlock(pool, id, blockID string, body io.Reader, expected int6
 		return fmt.Errorf("unusable block id")
 	}
 	// Block ids are the client's; their hex is a safe file name.
-	return s.write(filepath.Join(dir, "blocks", hex.EncodeToString([]byte(blockID))), body, expected)
+	return s.write(id, filepath.Join(dir, "blocks", hex.EncodeToString([]byte(blockID))), body, expected, true)
 }
 
 // Commit assembles an upload from its blocks, in the order given.
@@ -413,6 +684,11 @@ func (s *Store) Commit(pool, id string, blockIDs []string) error {
 	if len(blockIDs) == 0 {
 		return fmt.Errorf("an upload needs at least one block")
 	}
+	lease, err := s.lease(id, dir, false)
+	if err != nil {
+		return err
+	}
+	defer lease.settle(0, 0, 0)
 	var total int64
 	for _, blockID := range blockIDs {
 		info, err := os.Stat(filepath.Join(dir, "blocks", hex.EncodeToString([]byte(blockID))))
@@ -423,6 +699,14 @@ func (s *Store) Commit(pool, id string, blockIDs []string) error {
 	}
 	if err := s.room(dir, total); err != nil {
 		return err
+	}
+	// The archive replaces every block. A block listed twice makes it
+	// larger than what arrived, and the difference needs room of its own.
+	blocks, count := stored(dir)
+	if total > blocks {
+		if err := lease.claim(total - blocks); err != nil {
+			return err
+		}
 	}
 	temporary, err := os.CreateTemp(dir, ".blob-")
 	if err != nil {
@@ -445,11 +729,33 @@ func (s *Store) Commit(pool, id string, blockIDs []string) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
+	var replaced int64
+	if info, err := os.Stat(filepath.Join(dir, "blob")); err == nil {
+		replaced = info.Size()
+	}
 	if err := os.Rename(temporary.Name(), filepath.Join(dir, "blob")); err != nil {
 		return err
 	}
 	// The blocks have been copied; do not keep the archive twice.
-	return os.RemoveAll(filepath.Join(dir, "blocks"))
+	err = os.RemoveAll(filepath.Join(dir, "blocks"))
+	lease.settle(total, blocks+replaced, -count)
+	return err
+}
+
+// stored is what an upload's finished blocks hold. A block still arriving
+// is left out: its own write counts it.
+func stored(dir string) (bytes int64, count int) {
+	listed, _ := os.ReadDir(filepath.Join(dir, "blocks"))
+	for _, item := range listed {
+		if strings.HasPrefix(item.Name(), ".part-") {
+			continue
+		}
+		if info, err := item.Info(); err == nil {
+			bytes += info.Size()
+			count++
+		}
+	}
+	return bytes, count
 }
 
 // PutWhole stores an upload sent as a single request.
@@ -458,7 +764,7 @@ func (s *Store) PutWhole(pool, id string, body io.Reader, expected int64) error 
 	if err != nil {
 		return err
 	}
-	return s.write(filepath.Join(dir, "blob"), body, expected)
+	return s.write(id, filepath.Join(dir, "blob"), body, expected, false)
 }
 
 // Finalize turns the upload for a key into an entry restores can find, then
@@ -492,7 +798,10 @@ func (s *Store) Finalize(pool, repo, scope, key, version string, size int64) (En
 		return Entry{}, ErrNotFound
 	}
 	// Whatever happens next, this upload is finished with.
-	defer os.RemoveAll(dir)
+	defer func() {
+		s.forget(filepath.Base(dir))
+		os.RemoveAll(dir)
+	}()
 
 	blob, err := os.Stat(filepath.Join(dir, "blob"))
 	if err != nil {
@@ -501,7 +810,7 @@ func (s *Store) Finalize(pool, repo, scope, key, version string, size int64) (En
 	if size >= 0 && blob.Size() != size {
 		return Entry{}, ErrSize
 	}
-	if limit := s.limit(); limit > 0 && blob.Size() > limit {
+	if blob.Size() > s.most() {
 		return Entry{}, ErrTooLarge
 	}
 	// Two jobs may save the same key at once. The first to finish is the
