@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -62,5 +63,36 @@ func TestAGuestIsNotGivenAResolverOnlyTheHostCanUse(t *testing.T) {
 				t.Errorf("got %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestAGuestMayAskTheResolversItWasGiven(t *testing.T) {
+	resolv := filepath.Join(t.TempDir(), "resolv.conf")
+	if err := os.WriteFile(resolv, []byte("nameserver 127.0.0.53\nnameserver 192.168.0.1\nnameserver fe80::1%eth0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := []netip.Addr{netip.MustParseAddr("192.168.0.1"), netip.MustParseAddr("fe80::1")}
+	if got := guestResolvers(nil, resolv); !slices.Equal(got, want) {
+		t.Errorf("from resolv.conf: got %v, want %v", got, want)
+	}
+	want = []netip.Addr{netip.MustParseAddr("1.1.1.1")}
+	if got := guestResolvers([]string{"1.1.1.1"}, resolv); !slices.Equal(got, want) {
+		t.Errorf("chosen: got %v, want %v", got, want)
+	}
+}
+
+func TestPublicDNSLeavesTheHostsResolversOut(t *testing.T) {
+	resolv := filepath.Join(t.TempDir(), "resolv.conf")
+	if err := os.WriteFile(resolv, []byte("nameserver 192.168.0.1\nnameserver fd00::1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := guestResolvers(publicResolvers(), resolv)
+	if len(got) != 4 || !slices.ContainsFunc(got, netip.Addr.Is4) || !slices.ContainsFunc(got, netip.Addr.Is6) {
+		t.Fatalf("public resolvers: %v", got)
+	}
+	for _, resolver := range got {
+		if resolver.IsPrivate() {
+			t.Errorf("a LAN resolver was given: %v", resolver)
+		}
 	}
 }

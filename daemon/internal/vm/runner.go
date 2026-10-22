@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
 )
 
@@ -52,6 +54,14 @@ type Runner struct {
 	// changes, with "" once it can again: hived doctor reads it from there,
 	// since what the service may open is not what the owner's shell may.
 	OnUnusable func(reason string)
+	// Network is what the owner lets a job reach beyond the internet,
+	// asked when a VM boots and again when it is given a job. Unset, it is
+	// the internet alone. Where FencesNetwork is false nothing holds a
+	// guest to it.
+	Network func() fence.Policy
+	// PublicDNS is whether a guest is given public resolvers rather than
+	// the machine's own, asked when a VM boots: the owner's dns public.
+	PublicDNS func() bool
 
 	mu      sync.Mutex
 	warm    *instance
@@ -149,6 +159,93 @@ type instance struct {
 	unserve func()
 	// release returns the VM's network identity for the next one to use.
 	release func()
+	// resolvers are the name servers the guest was given when it booted.
+	resolvers []netip.Addr
+	// network is what the guest may reach: see fence.
+	network atomic.Pointer[fence.Policy]
+}
+
+// refence holds the VM's guest to what the owner allows now, the
+// resolvers it was given, and the machine's own addresses as they are now:
+// a warm VM may have been booted on another network. What could not be
+// read is as it was last read. A VM whose machine's addresses have never
+// been read is not started, where its guest is held to the fence: it would
+// reach the machine's public addresses and their neighbours.
+func (r *Runner) refence(vm *instance) error {
+	var policy fence.Policy
+	if r.Network != nil {
+		policy = r.Network()
+	}
+	policy.Resolvers = vm.resolvers
+	was := vm.network.Load()
+	found, err := hostNetworks()
+	for try := 1; err != nil && was == nil && try < hostTries; try++ {
+		time.Sleep(hostRetry)
+		found, err = hostNetworks()
+	}
+	switch {
+	case err == nil:
+		policy.Host = found
+	case was != nil:
+		policy.Host = was.Host
+	case FencesNetwork && !policy.Open:
+		return fmt.Errorf("read this machine's own addresses, to keep the job off them: %w", err)
+	}
+	vm.network.Store(&policy)
+	return nil
+}
+
+// How often, and how far apart, a VM's first read of the machine's own
+// addresses is tried.
+var (
+	hostTries = 3
+	hostRetry = 200 * time.Millisecond
+)
+
+// hostNetworks stands in for fence.HostNetworks in tests.
+var hostNetworks = fence.HostNetworks
+
+// hostEvery is how often a running VM's fence takes up the machine's own
+// addresses again. One the machine gains during a job, a new temporary
+// IPv6 address or a VPN's, is fenced off within it.
+const hostEvery = 10 * time.Second
+
+// rehost takes up the machine's addresses as they are now, and leaves the
+// rest of what the guest may reach as it is: the owner's word applies from
+// the next job, not halfway through this one.
+// The machine's networks that cannot be read now are those last read.
+func (vm *instance) rehost() {
+	found, err := hostNetworks()
+	if err != nil {
+		return
+	}
+	for {
+		was := vm.network.Load()
+		var next fence.Policy
+		if was != nil {
+			next = *was
+		}
+		next.Host = found
+		// A job handed over meanwhile set a whole new policy; this one
+		// is then taken up again from that.
+		if vm.network.CompareAndSwap(was, &next) {
+			return
+		}
+	}
+}
+
+// watchHost keeps taking up the machine's addresses until the VM ends.
+func (vm *instance) watchHost(every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-vm.ended:
+			return
+		case <-ticker.C:
+			vm.rehost()
+		}
+	}
 }
 
 // owner reports whose job the VM is running, for the guest service.
@@ -208,6 +305,11 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 	}
 	// Whatever happens: the disk, the share and the credential go.
 	defer vm.destroy()
+	// What the guest may reach is what the owner allows now, not when a
+	// warm VM booted. It is set before the job is.
+	if err := r.refence(vm); err != nil {
+		return jobs.Result{ExitCode: -1}, err
+	}
 
 	// The VM now works for this pool, and is told where the host's service
 	// is before it is told about the job.

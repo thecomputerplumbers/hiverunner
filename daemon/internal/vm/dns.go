@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"net"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
@@ -87,6 +88,30 @@ func guestUsable(servers []string) []string {
 	}
 	return usable
 }
+
+// guestResolvers is the resolvers a guest is given: those guestDNS chose,
+// or, where it chose none, the usable ones in the host's resolv.conf, which
+// is what passt then hands the guest. A guest may ask these on port 53
+// wherever they are, and no others, which is what keeps names resolving
+// for a guest kept off the LAN its router is on. That includes a resolver
+// on the LAN, which knows the LAN's names: dns public gives the guest
+// publicResolvers instead.
+func guestResolvers(chosen []string, resolvConf string) []netip.Addr {
+	if chosen == nil {
+		chosen = guestUsable(nameservers(resolvConf))
+	}
+	var resolvers []netip.Addr
+	for _, server := range chosen {
+		if address, err := netip.ParseAddr(server); err == nil {
+			resolvers = append(resolvers, address.WithZone(""))
+		}
+	}
+	return resolvers
+}
+
+// publicResolvers is what a guest is given for dns public: Cloudflare's and
+// Google's in both families, so that passt reads nothing from resolv.conf.
+func publicResolvers() []string { return slices.Concat(publicDNS4, publicDNS6) }
 
 func nameservers(file string) []string {
 	handle, err := os.Open(file)

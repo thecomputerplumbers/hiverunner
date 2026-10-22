@@ -23,7 +23,13 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 )
+
+// FencesNetwork is whether a guest here is held to its fence.Policy. It
+// is on Linux: every frame between QEMU and passt goes through hived.
+const FencesNetwork = true
 
 // What a Linux host keeps between VMs: the one socket every guest dials, and
 // which VM each caller is.
@@ -262,9 +268,10 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 	if err != nil {
 		return "", err
 	}
-	forget := func() {}
+	forget, unfence := func() {}, func() {}
 	defer func() {
 		if err != nil {
+			unfence()
 			forget()
 			stopHelpers()
 			os.RemoveAll(sockets)
@@ -308,22 +315,47 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 	// to a file instead is refused by the confinement distributions ship it
 	// with, which lets it create a log file but not open one.)
 	//
-	// The two are joined by a socket made here, one end each, and not by one
-	// passt listens on: the confinement Proxmox VE 9 runs passt under lets it
+	// Each is handed one end of a socket made here, and not one passt
+	// listens on: the confinement Proxmox VE 9 runs passt under lets it
 	// listen and then refuses the accept, and passt says nothing of it, so
 	// the guest boots with a network card that reaches nowhere.
-	relayEnd, machineEnd, err := socketPair()
+	//
+	// hived keeps the other two ends, and stands between them: a frame the
+	// guest sends reaches passt only if the guest may reach where it is
+	// going. See package fence.
+	relayEnd, fenceNetwork, err := socketPair()
 	if err != nil {
 		return "", err
 	}
 	defer relayEnd.Close()
+	fenceGuest, machineEnd, err := socketPair()
+	if err != nil {
+		fenceNetwork.Close()
+		return "", err
+	}
 	defer machineEnd.Close()
+	toNetwork, toGuest, err := conns(fenceNetwork, fenceGuest)
+	if err != nil {
+		return "", err
+	}
+	unfence = func() {
+		toNetwork.Close()
+		toGuest.Close()
+	}
 	// The host's search domains stay with the host. A job resolves the
 	// names it wrote, not those names inside the owner's tailnet or LAN,
 	// and does not ask a public resolver about either.
 	network := []string{"--foreground", "--quiet", "--one-off", "--no-map-gw", "--no-dhcp-search", "--fd", inheritedFD}
-	for _, server := range upstreamDNS() {
+	chosen := upstreamDNS()
+	if r.PublicDNS != nil && r.PublicDNS() {
+		chosen = publicResolvers()
+	}
+	for _, server := range chosen {
 		network = append(network, "--dns", server)
+	}
+	vm.resolvers = guestResolvers(chosen, "/etc/resolv.conf")
+	if err = r.refence(vm); err != nil {
+		return "", err
 	}
 	relay, err := run("passt.log", found.passt, relayEnd, network...)
 	if err != nil {
@@ -391,6 +423,14 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 		}
 	}
 
+	// The fence runs for as long as the VM does: the VM going hangs up on
+	// it, and it hangs up on passt.
+	go func() {
+		if err := fence.Relay(toGuest, toNetwork, vm.network.Load); err != nil && vm.alive() {
+			r.Log.Warn("the VM's network stopped", "error", err)
+		}
+	}()
+
 	// The VM is in a scope of its own, so the kernel killing it for memory
 	// ends the scope and not the daemon's service with it.
 	qemu, qemuArgs := inOwnScope(scopesAvailable(), filepath.Base(vm.dir), found.qemu, args)
@@ -411,6 +451,8 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 	vm.stop = func() { stopping.Do(func() { _ = machine.Process.Kill() }) }
 	vm.served = address != 0
 	vm.unserve = forget
+	// The machine's own addresses can change while the VM runs.
+	go vm.watchHost(hostEvery)
 	go func() {
 		waitErr := <-exited
 		// Powered off by the guest, or killed by us (which has no exit
@@ -541,6 +583,24 @@ func socketPair() (*os.File, *os.File, error) {
 		return nil, nil, fmt.Errorf("make the guest's network socket: %w", err)
 	}
 	return os.NewFile(uintptr(ends[0]), "network"), os.NewFile(uintptr(ends[1]), "network"), nil
+}
+
+// conns are hived's two ends of the guest's network as connections, which
+// the runtime's poller waits on. The files themselves are closed.
+func conns(one, other *os.File) (net.Conn, net.Conn, error) {
+	first, err := net.FileConn(one)
+	one.Close()
+	second, otherErr := net.FileConn(other)
+	other.Close()
+	if err == nil && otherErr == nil {
+		return first, second, nil
+	}
+	for _, made := range []net.Conn{first, second} {
+		if made != nil {
+			made.Close()
+		}
+	}
+	return nil, nil, fmt.Errorf("make the guest's network socket: %w", errors.Join(err, otherErr))
 }
 
 // upstreamDNS is what the guest should be told to resolve names with, or

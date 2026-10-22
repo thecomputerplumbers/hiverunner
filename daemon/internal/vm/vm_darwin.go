@@ -16,6 +16,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// FencesNetwork is whether a guest here is held to its fence.Policy. Not
+// on a Mac: the guest is behind the system's NAT, which gives hived no say
+// in where its packets go, and pf, which would, needs root.
+const FencesNetwork = false
+
 // Apple's Virtualization.framework keeps nothing between VMs.
 type platformState struct{}
 
