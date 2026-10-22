@@ -13,9 +13,10 @@ import (
 // great deal: a checkout, node_modules, Pods, DerivedData, Gradle's outputs.
 // Indexing it fights the compiler for the whole job, for files deleted when
 // the job ends. Spotlight skips any folder whose name ends in .noindex, so
-// with the spotlight-exclude setting on, as it is by default, the runner and
-// the jobs live in one, and so do the caches a job keeps for the next. That
-// needs no root and no system setting.
+// with the spotlight-exclude setting on, as it is by default, the jobs live
+// in one, and so do the caches a job keeps for the next. That needs no root
+// and no system setting. GitHub's runner is root's, outside Home: see
+// Runners.
 
 // NoIndexDir is the folder in Home that Spotlight skips.
 const NoIndexDir = "hive.noindex"
@@ -52,8 +53,8 @@ func spotlightExcluded() bool {
 	return current.SpotlightExclude
 }
 
-// layout is where the child keeps GitHub's runner, its jobs and their
-// caches: in Home, or in Home's hive.noindex.
+// layout is where the child keeps its jobs and their caches: in Home, or in
+// Home's hive.noindex.
 type layout struct {
 	home    string
 	noIndex bool
@@ -66,21 +67,14 @@ func (l layout) base() string {
 	return l.home
 }
 
-func (l layout) runner() string { return filepath.Join(l.base(), "runner") }
-func (l layout) jobs() string   { return filepath.Join(l.base(), "jobs") }
-func (l layout) cache() string  { return filepath.Join(l.home, NoIndexDir, "cache") }
-func (l layout) other() layout  { return layout{home: l.home, noIndex: !l.noIndex} }
+func (l layout) jobs() string  { return filepath.Join(l.base(), "jobs") }
+func (l layout) cache() string { return filepath.Join(l.home, NoIndexDir, "cache") }
+func (l layout) other() layout { return layout{home: l.home, noIndex: !l.noIndex} }
 
-// installed is the runner directory that holds this version: this layout's,
-// or the other's while moving it waits for no job to be running.
-func (l layout) installed(version string) string {
-	for _, base := range []string{l.runner(), l.other().runner()} {
-		if _, err := os.Stat(filepath.Join(base, version, "run.sh")); err == nil {
-			return base
-		}
-	}
-	return l.runner()
-}
+// legacyRunner is where hiveworker unpacked GitHub's runner for itself,
+// before it was root's in Runners. Nothing runs it; arrange and a clean
+// remove it.
+func (l layout) legacyRunner() string { return filepath.Join(l.base(), "runner") }
 
 // env is what a job is given to keep the caches a variable moves out of
 // the index. A job's own env: wins over it, as over anything the runner
@@ -96,11 +90,11 @@ func (l layout) env() []string {
 	return env
 }
 
-// arrange moves everything into this layout from the other: the runner,
-// whole by a rename, and the linked caches; the caches a variable moves
-// start empty. Job directories left behind are
-// removed. It must run only while no job does, and is safe to repeat. What
-// it cannot do it says, and the rest is done anyway.
+// arrange moves everything into this layout from the other: the linked
+// caches; the caches a variable moves start empty. Job directories left
+// behind are removed, and so is a runner hiveworker once unpacked for
+// itself, in either. It must run only while no job does, and is safe to
+// repeat. What it cannot do it says, and the rest is done anyway.
 func (l layout) arrange() error {
 	var problems []error
 	if l.noIndex {
@@ -108,7 +102,7 @@ func (l layout) arrange() error {
 			return err
 		}
 	}
-	problems = append(problems, move(l.other().runner(), l.runner()))
+	problems = append(problems, os.RemoveAll(l.legacyRunner()), os.RemoveAll(l.other().legacyRunner()))
 	// No job is running, so whatever is in either is left from one that
 	// did not finish.
 	problems = append(problems, os.RemoveAll(l.other().jobs()), os.RemoveAll(l.jobs()))

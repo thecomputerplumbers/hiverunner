@@ -281,11 +281,14 @@ job (#110). Spotlight skips any folder whose name ends in `.noindex`, so with
 `spotlight-exclude on`, the default, a job run as `hiveworker` keeps
 everything in one:
 
-| Where                             | What                                                         |
-| --------------------------------- | ------------------------------------------------------------ |
-| `~hiveworker/hive.noindex/runner` | GitHub's runner, as `hived macos setup` installs it          |
-| `~hiveworker/hive.noindex/jobs`   | Each job's clone of the runner, and its `TMPDIR`; gone after |
-| `~hiveworker/hive.noindex/cache`  | Caches kept for the next job                                 |
+| Where                            | What                                                         |
+| -------------------------------- | ------------------------------------------------------------ |
+| `~hiveworker/hive.noindex/jobs`  | Each job's clone of the runner, and its `TMPDIR`; gone after |
+| `~hiveworker/hive.noindex/cache` | Caches kept for the next job                                 |
+
+GitHub's runner itself is root's, in
+`/Library/Application Support/Hive Runner/runner`, outside `/Users`, where
+`hived macos setup` installs it and no job can change it.
 
 The caches a job keeps get there two ways. `CP_HOME_DIR` (CocoaPods) and
 `npm_config_cache` are set for the runner, so a job's own `env:` still wins.
@@ -299,10 +302,11 @@ already there is left alone.
 
 The move happens in `hived macos-job`, as `hiveworker`, and only while no job
 is running: every job holds `~hiveworker/.hived-jobs.lock` shared and the move
-takes it exclusively, or waits for the next request. The runner moves whole by
-one rename, a stale copy left behind is removed, and doing it again changes
-nothing. `~hiveworker/jobs`, left by an older hived, is removed then too.
-Turning the setting off moves the runner and the linked caches back.
+takes it exclusively, or waits for the next request. Doing it again changes
+nothing. Job directories left in either place, and a runner an older hived
+unpacked in `~hiveworker/runner` or `~hiveworker/hive.noindex/runner`, are
+removed then too, and by the clean around every job. Turning the setting off
+moves the linked caches back.
 
 `hiveworker`'s home also gets a `.metadata_never_index`, which asks Spotlight
 to leave the rest of it alone; macOS honours that less reliably than a
@@ -533,7 +537,8 @@ nothing else on it.
 
 ### macOS jobs
 
-Every macOS job runs as the one `hiveworker` user, and what a job leaves in
+Every macOS job runs as the one `hiveworker` user, one at a time, and the
+processes it leaves running are stopped before the next. What a job leaves in
 its home (a cache, a tool, a changed shell profile) the next job finds and
 may run, whichever hive sent it (see `docs/running-jobs.md`). Turn
 `macos-jobs` on only for a Mac whose hives may share that: one hive, or hives
