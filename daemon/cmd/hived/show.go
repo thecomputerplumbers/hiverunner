@@ -579,6 +579,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("ipv6-site", "/"+strconv.Itoa(cmp.Or(current.IPv6Site, fence.DefaultSite)), "the IPv6 site jobs are kept off"),
 		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs"),
 		row("macos-isolation", cmp.Or(current.MacOSIsolation, settings.IsolationUser), "the "+native.User+" user, or a VM per job"),
+		row("max-macos-vms", strconv.Itoa(current.MacOSVMs()), "how many macOS VMs run at once"),
 		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
 		place("data-dir", current.DataDir, "where the image and job disks are kept"),
 		place("cache-dir", current.CacheDir, "where the Actions cache is kept"),
@@ -681,7 +682,11 @@ hived config set <name> <value>  Change one
                                  or a macOS image for macos-isolation vm
   macos-isolation user or vm     run each as a separate user on this Mac (user),
                                  or in a throwaway macOS VM cloned from the image
-                                 hived macos image makes (vm)
+                                 hived macos image makes (vm); experimental, and
+                                 untested on real hardware so far
+  max-macos-vms 1 or 2           how many macOS VMs run at once; two share one
+                                 network, on which one job can come between the
+                                 other and its gateway
   auto-update on or off          update to new releases when no job is running;
                                  off, hived status and a notification say so
   data-dir   a path or default   where the Linux image and each job's disk are

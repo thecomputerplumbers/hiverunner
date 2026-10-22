@@ -318,8 +318,18 @@ func TestTheOwnerSaysHowBigTheIPv6SiteIs(t *testing.T) {
 // for a VM, and a file that says anything else is refused.
 func TestMacOSIsolation(t *testing.T) {
 	current := Default()
-	if current.MacOSInVM() {
-		t.Fatal("a Mac whose owner has decided nothing runs macOS jobs in a VM")
+	if current.MacOSInVM() || current.MacOSVMs() != 1 {
+		t.Fatal("a Mac whose owner has decided nothing runs macOS jobs in a VM, or more than one")
+	}
+	for value, want := range map[string]int{"2": 2, "1": 1} {
+		if err := current.Set("max-macos-vms", value); err != nil || current.MacOSVMs() != want {
+			t.Errorf("max-macos-vms %s: %d %v", value, current.MacOSVMs(), err)
+		}
+	}
+	for _, bad := range []string{"0", "3", "two"} {
+		if err := current.Set("max-macos-vms", bad); err == nil {
+			t.Errorf("max-macos-vms %s was accepted", bad)
+		}
 	}
 	if err := current.Set("macos-isolation", " VM "); err != nil || !current.MacOSInVM() || current.MacOSIsolation != IsolationVM {
 		t.Fatalf("set macos-isolation vm: %+v %v", current, err)

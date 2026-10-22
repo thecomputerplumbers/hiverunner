@@ -714,3 +714,49 @@ func TestTheLimitsAreThoseOfTheWayChosen(t *testing.T) {
 		t.Fatalf("second, by a way with no limit of its own: %q", reason)
 	}
 }
+
+// A job holds the memory it was accepted with, so a Linux offer counts a
+// macOS VM accepted before it whatever the limits say of macOS now.
+func TestALinuxOfferCountsTheMacOSVMsAccepted(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Native(newFake())
+	m.Limit(limited(Limits{MaxJobs: 2, MacOS: true, Available: 12*gib + MemoryMargin - 1, GuestMemory: fourGiB, MacOSMemory: 8 * gib}))
+	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
+		t.Fatalf("a macOS VM with room: %q", reason)
+	}
+	m.Limit(limited(Limits{MaxJobs: 2, MacOS: true, Available: 12*gib + MemoryMargin - 1, GuestMemory: fourGiB}))
+	if reason := m.Offer("acme", sized("l-1", 2)); reason != ReasonLowMemory {
+		t.Fatalf("a Linux job past an accepted macOS VM, with no macOS memory in its limits: %q, want low memory", reason)
+	}
+}
+
+// Where what is free cannot be read, as on a Mac, a planned budget holds
+// every job held, running or not, and the owner's reserve.
+func TestAMacPlansItsMemory(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Native(newFake())
+	sixteen := Limits{MaxJobs: 4, MacOS: true, Planned: 16 * gib, GuestMemory: fourGiB, MacOSMemory: 8 * gib}
+	m.Limit(limited(sixteen))
+	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
+		t.Fatalf("one 8 GiB macOS VM on a 16 GiB Mac: %q", reason)
+	}
+	if reason := m.Offer("acme", macOSOffer("m-2")); reason != ReasonLowMemory {
+		t.Fatalf("a second 8 GiB macOS VM on a 16 GiB Mac: %q, want low memory", reason)
+	}
+	if err := m.Start(context.Background(), "acme", start("m-1")); err != nil {
+		t.Fatal(err)
+	}
+	if reason := m.Offer("acme", sized("l-1", 2)); reason != "" {
+		t.Fatalf("a 4 GiB Linux job beside a running macOS VM: %q", reason)
+	}
+	if reason := m.Offer("acme", sized("l-2", 2)); reason != ReasonLowMemory {
+		t.Fatalf("another 4 GiB Linux job, past the plan: %q, want low memory", reason)
+	}
+	m.Release("acme", "l-1")
+	reserved := sixteen
+	reserved.Reserve = 4 * gib
+	m.Limit(limited(reserved))
+	if reason := m.Offer("acme", sized("l-1", 2)); reason != ReasonLowMemory {
+		t.Fatalf("a Linux job into the owner's reserve: %q, want low memory", reason)
+	}
+}

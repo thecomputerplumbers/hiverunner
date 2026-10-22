@@ -242,6 +242,7 @@ and `hived config set <name> <value>` changes one:
 | `ipv6-site`         | `48`, `56`, `64`            | The IPv6 site around this machine jobs are kept off                |
 | `macos-jobs`        | `on`, `off`                 | Take `hive-macos` jobs; see "macOS jobs" below                     |
 | `macos-isolation`   | `user`, `vm`                | Run each as the `hiveworker` user, or in a macOS VM (experimental) |
+| `max-macos-vms`     | `1`, `2`                    | How many macOS VMs run at once                                     |
 | `data-dir`          | a path, `default`           | Where the image and each job's disk are kept                       |
 | `cache-dir`         | a path, `default`           | Where the Actions cache is kept                                    |
 
@@ -260,9 +261,14 @@ signing. By default each runs on the Mac itself as a separate user,
 macOS VM: an APFS clone of an image its owner made once with
 `hived macos image create`, `open` and `seal`, with a machine identifier of
 its own, deleted when the job ends. The job reads the image's digest as
-`HIVE_IMAGE_DIGEST`. Two such VMs run at once at most, as Apple's licence
-allows. `docs/running-jobs.md` has both ways in full; the VM way has not yet
-run on real hardware.
+`HIVE_IMAGE_DIGEST`. One runs at a time unless the owner sets
+`max-macos-vms 2`, the most Apple's licence allows. `docs/running-jobs.md`
+has both ways in full.
+
+**The VM way is experimental**: it is off unless the owner turns it on, and
+has not yet run on real hardware. Every job is root in a clone of the image,
+so never sign in to an Apple Account or iCloud in it, give `runner` a random
+password, and get Xcode through `--share`.
 
 ## On another disk
 

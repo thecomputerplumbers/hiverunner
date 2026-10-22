@@ -32,7 +32,17 @@ With hived config set macos-isolation vm, each job runs in a throwaway macOS
 VM instead, cloned from an image you make once and deleted after the job.
 `
 
-const macosImageUsage = `hived macos image                          Say what the image is, and whether jobs can use it
+// imageSecrets is said wherever the owner sets the image up: whatever is
+// left in it, every job has, as root in its clone.
+const imageSecrets = `Every job is root in a clone of this image, so anything left in it is every
+job's to read. Never sign in to an Apple Account or iCloud in it; get Xcode
+through --share, not the App Store. Give the runner user a random password
+you use nowhere else. Leave no keys, tokens or keychain items in it.
+`
+
+const macosImageUsage = `Experimental: a VM per job has not yet run on real hardware.
+
+hived macos image                          Say what the image is, and whether jobs can use it
 hived macos image create --ipsw <file>     Install macOS from a restore image on this Mac
                          [--disk-gb 150]   into a new image; nothing is downloaded
 hived macos image open [--share <folder>]  Start the image in a window, to set it up by hand
@@ -45,8 +55,9 @@ Making one, once:
   1. hived macos image create --ipsw ~/Downloads/UniversalMac_26.0_Restore.ipsw
   2. hived macos image open --share ~/Downloads
      In the window:
-     - Go through Setup Assistant. Make an admin user named runner. Skip the
-       Apple Account, and leave FileVault off: automatic login needs it off.
+     - Go through Setup Assistant. Make an admin user named runner, with a
+       random password you use nowhere else. Skip the Apple Account, and
+       leave FileVault off: automatic login needs it off.
        Turn on no sharing service: two jobs' VMs share one network.
      - System Settings > Users & Groups: log in automatically as runner.
      - Xcode: expand the .xip from /Volumes/My Shared Files/files into
@@ -65,11 +76,12 @@ Making one, once:
      hived config set macos-jobs on
 
 Each job gets a clone of the image with a machine identifier of its own, and
-reads the image's digest as HIVE_IMAGE_DIGEST. Two run at once at most, as
-Apple's licence allows. Opening the image again changes it; seal it after,
+reads the image's digest as HIVE_IMAGE_DIGEST. One runs at a time unless
+max-macos-vms is 2, the most Apple's licence allows. Opening the image again changes it; seal it after,
 and after moving data-dir to another disk. The digest says which image a job
 ran on; this Mac computes it, so it vouches for nothing beyond that.
-`
+
+` + imageSecrets
 
 // macos is `hived macos ...`: setting a Mac up for jobs that need macOS.
 func macos(ctx context.Context, args []string) error {
@@ -208,6 +220,7 @@ func macosImage(ctx context.Context, args []string) error {
 				return fmt.Errorf("%s is not a folder", *share)
 			}
 		}
+		fmt.Print(imageSecrets + "\n")
 		return macvm.Open(ctx, macvm.OpenOptions{Dir: dir, Share: *share, Say: os.Stdout})
 	case "seal":
 		image, err := macvm.Seal(dir, func(into string) (string, error) { return native.DownloadRunner(ctx, into) }, os.Stdout)
@@ -215,6 +228,7 @@ func macosImage(ctx context.Context, args []string) error {
 			return err
 		}
 		fmt.Println("Sealed: " + image.Digest)
+		fmt.Print("\n" + imageSecrets)
 		if !current.MacOSInVM() {
 			fmt.Println("Run each macOS job in a clone of it with: hived config set macos-isolation vm")
 		}

@@ -226,7 +226,21 @@ jobs:
 Android EAS builds need no Mac: they run on the Linux labels with
 `setup-java` and `android-actions/setup-android`.
 
-#### A macOS VM per job (not yet run on real hardware)
+#### A macOS VM per job (experimental: not yet run on real hardware)
+
+> **Experimental.** None of this has yet booted on a real Mac, and it is off
+> unless the owner turns it on: `macos-isolation` is `user` by default. Two
+> known gaps remain before it is more than that: the VMs share one vmnet
+> network (so one runs at a time unless the owner sets `max-macos-vms 2`),
+> and results come back through a writable shared folder rather than a
+> virtio-vsock socket.
+
+> **Secrets in the image.** Every job is root in a clone of the image, so
+> anything left in it is every job's to read. Never sign in to an Apple
+> Account or iCloud in the image; get Xcode through `--share` from a `.xip`,
+> not the App Store. Give `runner` a random password you use nowhere else,
+> since its hash is in every clone. Leave no keys, tokens or keychain items
+> in it. `hived macos image open` and `seal` say this too.
 
 A Mac's owner can have each `hive-macos` job run in a throwaway macOS VM
 instead, so nothing one job leaves behind, a process still running or a
@@ -249,7 +263,8 @@ runner:
    image in `data-dir`.
 2. `hived macos image open --share <folder>` starts the image itself in a
    window. In it the owner goes through Setup Assistant with an admin user
-   named `runner` and FileVault off, has `runner` log in automatically,
+   named `runner`, with a random password, no Apple Account, and FileVault
+   off, has `runner` log in automatically,
    installs Xcode (from a `.xip` in the shared folder, or copied from the
    Mac's own `/Applications`), accepts its licence and finishes its first
    launch, downloads the iOS platform, installs what every job needs
@@ -300,9 +315,15 @@ with the Mac, and every clone has the same `runner` user and password. So
 the image keeps nothing listening, as its installer leaves it: no sharing
 services, and a firewall that blocks every incoming connection. Nothing on
 the host keeps the VMs apart on the network yet.
-Apple's macOS licence allows two macOS VMs on a Mac besides its own macOS,
-so a Mac takes two such jobs at once at most, whatever `max-jobs` says, and
-declines a third with that reason. Whether a job runs in a VM is decided when
+Apple's macOS licence allows two macOS VMs on a Mac besides its own macOS.
+A Mac runs one at a time unless its owner says
+`hived config set max-macos-vms 2`, because the two would share the
+network above, on which one job, root in its VM, can put itself between the
+other and its gateway. It declines one past that with that reason, whatever
+`max-jobs` says. A Mac cannot say how much memory is free, so where it runs
+macOS VMs, or its owner keeps a `reserve-memory`, jobs are admitted against
+a plan instead: the Mac's memory, less the reserve and the margin, must hold
+every job's guest, running or accepted. Whether a job runs in a VM is decided when
 it is offered: changing `macos-isolation` changes the jobs offered after,
 not one already accepted. A job can report any exit code, so one saying
 GitHub refused its runner as too old (exit 7) is believed only when

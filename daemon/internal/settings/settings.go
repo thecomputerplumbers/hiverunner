@@ -57,6 +57,11 @@ type Settings struct {
 	// itself, or IsolationVM, in a throwaway macOS VM cloned from an image
 	// the owner made. Empty is IsolationUser.
 	MacOSIsolation string `json:"macosIsolation,omitempty"`
+	// MaxMacOSVMs is how many macOS VMs run at once under IsolationVM, up
+	// to MostMacOSVMs. Zero is one: two VMs share one vmnet network, on
+	// which a job, root in its own, can come between the other and its
+	// gateway, so a second is the owner's choice to make.
+	MaxMacOSVMs int `json:"maxMacOSVMs,omitempty"`
 	// AutoUpdate lets the daemon update itself when a release is out and
 	// it has no job, by running the installer. Off, it only says so.
 	AutoUpdate bool `json:"autoUpdate"`
@@ -121,6 +126,13 @@ const (
 	IsolationUser = "user"
 	IsolationVM   = "vm"
 )
+
+// MostMacOSVMs is how many macOS VMs Apple's licence lets a Mac run at
+// once, and so the most max-macos-vms takes.
+const MostMacOSVMs = 2
+
+// MacOSVMs is MaxMacOSVMs, one if the owner has not said.
+func (s Settings) MacOSVMs() int { return max(s.MaxMacOSVMs, 1) }
 
 // MacOSInVM reports whether hive-macos jobs run in a throwaway macOS VM.
 func (s Settings) MacOSInVM() bool { return s.MacOSIsolation == IsolationVM }
@@ -248,6 +260,9 @@ func (s Settings) validate() error {
 	if s.MacOSIsolation != "" && s.MacOSIsolation != IsolationUser && s.MacOSIsolation != IsolationVM {
 		return errMacOSIsolation
 	}
+	if s.MaxMacOSVMs < 0 || s.MaxMacOSVMs > MostMacOSVMs {
+		return errMaxMacOSVMs
+	}
 	_, _, err := parseHours(s.Hours)
 	return err
 }
@@ -262,7 +277,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "macos-isolation", "auto-update", "data-dir", "cache-dir"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "macos-isolation", "max-macos-vms", "auto-update", "data-dir", "cache-dir"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -287,6 +302,12 @@ func (s *Settings) Set(key, value string) error {
 			return fmt.Errorf("max-jobs takes a number from 1 to %d", MostJobs)
 		}
 		s.MaxJobs = jobs
+	case "max-macos-vms":
+		vms, err := strconv.Atoi(value)
+		if err != nil || vms < 1 || vms > MostMacOSVMs {
+			return errMaxMacOSVMs
+		}
+		s.MaxMacOSVMs = vms
 	case "max-vcpus":
 		if value == "auto" {
 			s.MaxVCPUs = 0
@@ -385,7 +406,10 @@ func (s *Settings) Set(key, value string) error {
 	return nil
 }
 
-var errMacOSIsolation = errors.New("macos-isolation takes user or vm")
+var (
+	errMacOSIsolation = errors.New("macos-isolation takes user or vm")
+	errMaxMacOSVMs    = fmt.Errorf("max-macos-vms takes 1 or %d: Apple's licence lets a Mac run %d macOS VMs at once", MostMacOSVMs, MostMacOSVMs)
+)
 
 // reserve is a parsed reserve-memory: gigabytes, or a percent of the host's
 // memory. The zero value holds nothing back.

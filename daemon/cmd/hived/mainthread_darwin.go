@@ -1,8 +1,16 @@
 package main
 
-import "runtime"
+import (
+	"os"
+	"runtime"
+)
 
-// main runs on the process's main thread, which is the only one macOS draws
-// windows on: hived macos image open shows the image's VM in one. Nothing
-// else hived does minds where its main goroutine runs.
-func init() { runtime.LockOSThread() }
+// hived macos image open shows the image's VM in a window, and macOS draws
+// windows on the process's main thread only. main starts there if init
+// locks it, so it is locked for that command and no other: the daemon and
+// every other command run as they would anywhere.
+func init() {
+	if opensWindow(os.Args) {
+		runtime.LockOSThread()
+	}
+}

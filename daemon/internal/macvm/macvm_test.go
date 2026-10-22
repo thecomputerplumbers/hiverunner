@@ -758,9 +758,15 @@ func TestVMsThatWillNotStopAreCountedForOffers(t *testing.T) {
 		}
 	}
 	var limits jobs.Limits
+	// One at a time unless the owner says two: max-macos-vms.
 	r.Limit(&limits)
-	if limits.MostMacOS != MostVMs || limits.MacOSMemory != Memory(64<<30) {
-		t.Fatalf("limits with nothing running: %+v", limits)
+	if limits.MostMacOS != 1 || limits.MacOSMemory != Memory(64<<30) {
+		t.Fatalf("limits with nothing running, as the owner left it: %+v", limits)
+	}
+	r.Most = func() int { return 5 }
+	r.Limit(&limits)
+	if limits.MostMacOS != MostVMs {
+		t.Fatalf("limits with nothing running, the owner asking for more than Apple allows: %+v", limits)
 	}
 	runStuck()
 	r.Limit(&limits)

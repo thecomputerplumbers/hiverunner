@@ -26,6 +26,7 @@ import (
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/macvm"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/pools"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/settings"
@@ -466,9 +467,15 @@ func run(ctx context.Context) error {
 			maxJobs = min(maxJobs, memoryPlan(facts, current).Jobs)
 		}
 		// A macOS VM's own limits are set by its runner, once it is the
-		// one chosen for an offer: see jobs.Limiter.
-		return jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS(), Hold: hold,
+		// one chosen for an offer: see jobs.Limiter. Its memory is set here
+		// too, so that a Linux offer counts the macOS VMs accepted.
+		limits := jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS(), Hold: hold,
 			Available: host.AvailableMemory(), Reserve: current.ReserveBytes(hostMemory()), GuestMemory: guestMemory}
+		if current.MacOSInVM() {
+			limits.MacOSMemory = macvm.Memory(hostMemory())
+		}
+		limits.Planned = plannedMemory(current, limits.Available, hostMemory())
+		return limits
 	}
 	slot := jobs.New(runner, log)
 	// Every job that stops with the host's kill reports it, and a restarted
@@ -866,4 +873,17 @@ func benchmark(args []string) error {
 	}
 	fmt.Printf("%.2f units/s on one core: speed score %.2f\n", unitsPerSecond, bench.Score(unitsPerSecond))
 	return nil
+}
+
+// plannedMemory is the memory budget jobs are admitted against where what
+// is free cannot be read: on a Mac, which reclaims its caches as it is
+// asked. Every job held counts against it, as if its guest had touched all
+// of its memory. It is the host's memory where the owner runs macOS VMs or
+// keeps a reserve, and nothing otherwise, so a Mac lending Linux jobs alone
+// takes as many as it always did.
+func plannedMemory(current settings.Settings, available, hostBytes uint64) uint64 {
+	if available > 0 || !current.MacOSInVM() && current.ReserveMemory == "" {
+		return 0
+	}
+	return hostBytes
 }

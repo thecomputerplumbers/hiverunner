@@ -91,7 +91,8 @@ func newMacOSRunner(log *slog.Logger, live func() settings.Settings) *macosRunne
 	if dir, err := macosImageDir(live()); err != nil {
 		runner.vmMissing = "the macOS image is not available: " + err.Error()
 	} else {
-		runner.machines = &macvm.Runner{Dir: dir, WorkDir: workDir(dir), Log: log, HostMemory: hostMemory()}
+		runner.machines = &macvm.Runner{Dir: dir, WorkDir: workDir(dir), Log: log, HostMemory: hostMemory(),
+			Most: func() int { return live().MacOSVMs() }}
 		runner.vm = runner.machines
 	}
 	return runner

@@ -89,6 +89,9 @@ type Runner struct {
 	Log     *slog.Logger
 	// HostMemory is the Mac's memory, for what each VM is given.
 	HostMemory uint64
+	// Most is how many VMs the owner lets run at once, up to MostVMs:
+	// max-macos-vms. Nil is one.
+	Most func() int
 
 	mu sync.Mutex
 	// slots are the VMs running, by network identity. stuck counts those
@@ -142,12 +145,17 @@ func (r *Runner) Unusable() string {
 	return r.problem
 }
 
-// Limit implements jobs.Limiter: two VMs at most, fewer while one that
-// would not stop holds a place, and each one's memory free on the host.
+// Limit implements jobs.Limiter: as many VMs as the owner allows, two at
+// most, fewer while one that would not stop holds a place, and each one's
+// memory free on the host.
 func (r *Runner) Limit(limits *jobs.Limits) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	limits.MostMacOS = max(MostVMs-r.stuck, 1)
+	most := 1
+	if r.Most != nil {
+		most = min(max(r.Most(), 1), MostVMs)
+	}
+	limits.MostMacOS = max(min(most, MostVMs-r.stuck), 1)
 	limits.MacOSMemory = Memory(r.HostMemory)
 }
 

@@ -120,8 +120,14 @@ type Limits struct {
 	// VM's, or zero for one run on the Mac itself, which is not checked.
 	MacOSMemory uint64
 	// Available is the memory the host can give a new VM right now, in
-	// bytes. Zero means unknown, and no job is declined for want of memory.
+	// bytes. Zero means unknown: then Planned is the budget, if there is one.
 	Available uint64
+	// Planned is the memory the host's jobs may plan on, in bytes, where
+	// what is free cannot be read, as on a Mac, which reclaims what it
+	// caches as it is asked: a job is declined if it, every job held, the
+	// margin and Reserve would not fit in it. Zero means no budget, and no
+	// job is declined for want of memory.
+	Planned uint64
 	// Reserve is memory the owner keeps for everything else on the host: a
 	// job is declined if accepting it would leave Available below it.
 	Reserve uint64
@@ -161,6 +167,9 @@ type slot struct {
 	label        string
 	// runner is what runs it, chosen when it was offered.
 	runner Runner
+	// memory is what its guest takes from the host, as the limits had it
+	// when it was offered: a macOS VM's too, whatever the next offer is.
+	memory uint64
 	phase  phase
 	// cancel stops the start timer (accepted) or the runner (running).
 	cancel func()
@@ -336,18 +345,26 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	if limits.Cores > 0 && used > 0 && used+offer.VCPUs+OwnerCores > limits.Cores {
 		return ReasonNoCores
 	}
-	// A guest's memory is taken as it touches it, so what the host reports
-	// free does not yet count jobs accepted but not started.
-	if limits.Available > 0 && limits.GuestMemory != nil && limits.memory(kind, offer.VCPUs) > 0 {
-		pending := uint64(0)
+	memory := uint64(0)
+	if limits.GuestMemory != nil {
+		memory = limits.memory(kind, offer.VCPUs)
+	}
+	if memory > 0 {
+		// A guest's memory is taken as it touches it, so what the host
+		// reports free does not yet count jobs accepted but not started.
+		// A budget counts every job held.
+		budget, held := limits.Available, uint64(0)
+		if budget == 0 {
+			budget = limits.Planned
+		}
 		for _, other := range m.held {
-			if other.phase == accepted {
-				pending += limits.memory(other.kind, other.vcpus)
+			if other.phase == accepted || limits.Available == 0 {
+				held += other.memory
 			}
 		}
-		need := limits.memory(kind, offer.VCPUs) + pending + MemoryMargin + limits.Reserve
-		if limits.Available < need {
-			m.log.Warn("declining a job: not enough free memory", "assignment", offer.AssignmentID, "available_mb", limits.Available>>20, "needed_mb", need>>20)
+		need := memory + held + MemoryMargin + limits.Reserve
+		if budget > 0 && budget < need {
+			m.log.Warn("declining a job: not enough free memory", "assignment", offer.AssignmentID, "available_mb", budget>>20, "needed_mb", need>>20, "planned", limits.Available == 0)
 			return ReasonLowMemory
 		}
 	}
@@ -359,6 +376,7 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 		timeout:      time.Duration(offer.TimeoutMinutes) * time.Minute,
 		label:        offer.Label,
 		runner:       runner,
+		memory:       memory,
 		phase:        accepted,
 	}
 	// If the coordinator never follows up, the machine must not stay
