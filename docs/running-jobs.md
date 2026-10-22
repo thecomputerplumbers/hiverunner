@@ -194,6 +194,11 @@ agree before one runs:
   capacity for the label, creates no scale set for it, and answers capacity
   probes for it with no.
 
+`hiveworker` is in the `staff` group, as every user on a Mac is, so the
+owner's files are out of its reach only while the owner's home folder is
+closed to `staff` and to everyone. `hived macos setup`, `hived macos status`
+and `hived doctor` say when it is not; `chmod 700 ~` closes it.
+
 The label's kind is `macos` in `@workspace/pricing`, beside the two
 architectures, and `machineServes` there is the one place that decides which
 machine is which kind; the coordinator's `serves()` calls it. A job is billed as 4 vCPUs, the size

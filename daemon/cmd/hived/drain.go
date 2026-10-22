@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/macvm"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/settings"
 )
 
@@ -63,7 +65,7 @@ func drainCommand(ctx context.Context, args []string) error {
 	}
 	return drain(ctx, drainOptions{
 		Limit: *limit, Settle: drainSettle, Every: 2 * time.Second,
-		Jobs: func() int { return jobsInHand(workDir(dir)) },
+		Jobs: func() int { return jobsInHand(workDir(dir), macosWorkDir(current)) },
 		Say:  func(text string) { fmt.Println(text) },
 	})
 }
@@ -169,19 +171,70 @@ func endDrain() error {
 	return os.Remove(mark)
 }
 
-// jobsInHand is how many jobs the daemon holding this work directory is
-// running, from what they leave where anyone can see.
-func jobsInHand(work string) int {
+// jobsInHand is how many jobs the daemon holding these work directories is
+// running, from what they leave where anyone can see: Linux VMs in work,
+// macOS VMs in macOS ("" for none), and on a Mac the jobs run as
+// native.User.
+func jobsInHand(work, macOS string) int {
 	count := vmJobs(work)
+	if macOS != "" {
+		count += macvm.JobsInHand(macOS)
+	}
 	if runtime.GOOS == "darwin" {
-		// A macOS job is a process, started through sudo.
-		if out, err := exec.Command("/bin/ps", "-axo", "command=").Output(); err == nil {
-			for _, line := range strings.Split(string(out), "\n") {
-				// The job itself, not the sudo that started it.
-				if strings.HasSuffix(line, "hived macos-job") && !strings.Contains(line, "sudo") {
-					count++
-				}
-			}
+		if out, err := exec.Command("/bin/ps", "-axo", "pid=,ppid=,uid=,command=").Output(); err == nil {
+			count += userJobs(string(out), os.Getuid())
+		}
+	}
+	return count
+}
+
+// userJobs is how many macOS jobs running as native.User a table of
+// processes shows, as `ps -axo pid=,ppid=,uid=,command=` prints it, for the
+// owner with this uid. A job is hived macos-job started through sudo by one
+// of the owner's processes, or by one with no sudo left between. That user
+// can give a process any name, and one a job leaves running is launchd's
+// child once the job ends: a name alone would keep an update waiting.
+func userJobs(table string, owner int) int {
+	type process struct {
+		parent, uid int
+		command     string
+	}
+	processes := map[int]process{}
+	for _, line := range strings.Split(table, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		parent, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+		uid, err := strconv.Atoi(fields[2])
+		if err != nil {
+			continue
+		}
+		processes[pid] = process{parent: parent, uid: uid, command: strings.Join(fields[3:], " ")}
+	}
+	sudo := func(p process) bool {
+		name, _, _ := strings.Cut(p.command, " ")
+		return filepath.Base(name) == "sudo"
+	}
+	count := 0
+	for _, job := range processes {
+		// The job itself, not the sudo that started it.
+		if !strings.HasSuffix(job.command, "hived macos-job") || sudo(job) {
+			continue
+		}
+		by, ok := processes[job.parent]
+		if ok && by.uid == 0 && sudo(by) {
+			by, ok = processes[by.parent]
+		}
+		if ok && by.uid == owner {
+			count++
 		}
 	}
 	return count

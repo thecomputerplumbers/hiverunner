@@ -18,7 +18,7 @@ func TestASelfTestDoesNotNeedTheDaemonStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if err := refuseSelftestWhileBusy(workDir(image)); err != nil {
+	if err := refuseSelftestWhileBusy(workDir(image), ""); err != nil {
 		t.Fatalf("an idle daemon blocked a self-test: %v", err)
 	}
 	got, err := vm.LockWorkDir(selftestDir(image))
@@ -37,7 +37,7 @@ func TestASelfTestRefusesWhileAJobRuns(t *testing.T) {
 	if err := os.WriteFile(clock, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := refuseSelftestWhileBusy(work)
+	err := refuseSelftestWhileBusy(work, "")
 	if err == nil || !strings.Contains(err.Error(), "a job is running") {
 		t.Fatalf("got %v", err)
 	}

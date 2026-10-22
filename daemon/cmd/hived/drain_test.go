@@ -162,3 +162,63 @@ func TestAJobInHandIsAVMThatWasHandedOne(t *testing.T) {
 		t.Errorf("counted %d jobs where two VMs have one", got)
 	}
 }
+
+func TestAMacOSVMWithAJobIsAJobInHand(t *testing.T) {
+	work, macOS := t.TempDir(), t.TempDir()
+	for _, file := range []string{
+		// One VM with its job, one whose job is over though it has yet to
+		// stop, and a guest's own file of that name where it writes.
+		"job-1/handed", "job-1/out/ready",
+		"job-2/out/ready",
+		"job-3/out/handed",
+	} {
+		full := filepath.Join(macOS, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := jobsInHand(work, macOS); got != 1 {
+		t.Errorf("counted %d jobs where one macOS VM has one", got)
+	}
+	if got := jobsInHand(work, ""); got != 0 {
+		t.Errorf("counted %d jobs with no macOS VMs", got)
+	}
+}
+
+// A macOS job run as native.User is hived macos-job started through sudo by
+// the owner's own daemon. The user can name a process anything, and a job
+// can leave one running, so the name alone is not a job.
+func TestAMacOSJobIsOneTheOwnersDaemonStarted(t *testing.T) {
+	const owner = 501
+	table := strings.Join([]string{
+		"    1     0     0 /sbin/launchd",
+		"  700     1   501 /Users/ada/.local/bin/hived run",
+		// A job: its sudo, and hived macos-job under it.
+		"  710   700     0 /usr/bin/sudo -n -u hiveworker /Users/ada/.local/bin/hived macos-job",
+		"  711   710   502 /Users/ada/.local/bin/hived macos-job",
+		// Started by the daemon with no sudo between, as a sudo that
+		// runs its command in its own place would leave it.
+		"  801   700   502 /Users/ada/.local/bin/hived macos-job",
+		// Left behind by a job when it ended: launchd's now.
+		"  720     1   502 /Users/hiveworker/jobs/x/hived macos-job",
+		// Named so by a job that is running, under the real one.
+		"  730   711   502 /tmp/hived macos-job",
+		// Through a sudo the user started itself.
+		"  735     1   502 /bin/zsh",
+		"  740   735     0 /usr/bin/sudo -n -u hiveworker /tmp/hived macos-job",
+		"  741   740   502 /tmp/hived macos-job",
+		// Whose parent is gone, and a line ps did not finish.
+		"  750   999   502 /tmp/hived macos-job",
+		"  760",
+		"",
+	}, "\n")
+	if got := userJobs(table, owner); got != 2 {
+		t.Errorf("counted %d macOS jobs where the daemon started 2", got)
+	}
+	if got := userJobs(table, 503); got != 0 {
+		t.Errorf("counted %d of another owner's macOS jobs", got)
+	}
+}

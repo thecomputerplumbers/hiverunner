@@ -52,6 +52,12 @@ func fakeChild() int {
 		n, _ := strconv.Atoi(os.Getenv(name))
 		return n
 	}
+	if spotlight := os.Getenv("NATIVE_TEST_SPOTLIGHT"); spotlight != "" {
+		if file, err := os.OpenFile(spotlight, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			file.WriteString(strconv.FormatBool(ask.NoIndex) + "\n")
+			file.Close()
+		}
+	}
 	switch {
 	case ask.Clean:
 		note("clean")
@@ -109,6 +115,33 @@ func TestRunCleansBeforeAndAfterTheJob(t *testing.T) {
 	want := "clean | job a1 true | clean"
 	if got := strings.Join(noted(t, log), " "); got != want {
 		t.Fatalf("the child was asked: %s; want %s", got, want)
+	}
+}
+
+// Every request arranges the child's layout for the spotlight-exclude it
+// carries, so a clean that left it out would move the caches out of
+// hive.noindex before each job and back for it.
+func TestEveryRequestCarriesSpotlightExclude(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		dir := t.TempDir()
+		t.Setenv("HIVE_CONFIG", filepath.Join(dir, "machine.json"))
+		if !on {
+			if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"spotlightExclude":false}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if spotlightExcluded() != on {
+			t.Fatalf("spotlight-exclude reads as %v, want %v", !on, on)
+		}
+		spotlight := filepath.Join(dir, "spotlight")
+		runner, _ := fakeRunner(t, "NATIVE_TEST_SPOTLIGHT="+spotlight)
+		if _, err := runner.Run(context.Background(), jobs.Job{AssignmentID: "a1", JITConfig: jitConfig}); err != nil {
+			t.Fatal(err)
+		}
+		want := strings.Repeat(strconv.FormatBool(on)+" ", 3)
+		if got := strings.Join(strings.Fields(read(t, spotlight)), " ") + " "; got != want {
+			t.Fatalf("spotlight-exclude %v: the clean, job and clean carried %s", on, got)
+		}
 	}
 }
 

@@ -25,6 +25,21 @@ Also:
 - The runner reads its JIT config from its environment rather than its
   command line.
 - `hived macos remove` also removes the runner.
+- `hived macos setup` writes its sudo rule, checks it and puts it in place
+  all inside `/etc/sudoers.d`.
+- `hived macos setup`, `hived macos status` and `hived doctor` say when the
+  owner's home folder can be read or opened by `hiveworker`, and how to close
+  it: `chmod 700 ~`.
+- `hived drain`, which the updater waits on, counts a macOS job only when the
+  daemon started it, and counts jobs in macOS VMs too.
+
+### Actions cache: saves are held to the cache's size as they arrive
+
+Every save in progress counts toward the cache's size, whether or not it said
+its length up front, and one cache is at most 10 GB, as on GitHub. A machine
+takes at most 64 saves at once, and drops one that has sent nothing for ten
+minutes or is two hours old. A save past what the machine will keep fails as
+an ordinary cache-save failure; the job goes on.
 
 ### Spotlight is kept out of macOS jobs
 

@@ -806,3 +806,44 @@ func TestAGuestThatFillsItsResultsIsStopped(t *testing.T) {
 		})
 	}
 }
+
+// hived drain, another process, sees a job in hand for as long as the job
+// lasts, and not for a VM that would not stop after it.
+func TestAJobInHandIsSeenFromOutsideUntilItEnds(t *testing.T) {
+	launched := make(chan *instance, 1)
+	r := newRunner(t, sealedImage(t), func(vm *instance) error {
+		_ = os.WriteFile(filepath.Join(vm.out, "ready"), nil, 0o600)
+		launched <- vm
+		return nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Run(ctx, job("a-1"))
+		done <- err
+	}()
+	stuck := <-launched
+	// Beside it, a directory that is not a job's, with a file of the
+	// same name where a guest writes.
+	if err := os.MkdirAll(filepath.Join(r.WorkDir, "job-left", "out"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.WorkDir, "job-left", "out", handedFile), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := JobsInHand(r.WorkDir); got != 1 {
+		t.Fatalf("counted %d jobs with one running", got)
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() = %v", err)
+	}
+	// Its clone is kept while it runs on, but its job is over.
+	if left := jobDirs(t, r); len(left) != 2 {
+		t.Fatalf("job directories: %v", left)
+	}
+	if got := JobsInHand(r.WorkDir); got != 0 {
+		t.Fatalf("counted %d jobs once the job was over", got)
+	}
+	stuck.end()
+}

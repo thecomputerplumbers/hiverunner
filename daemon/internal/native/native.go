@@ -1,9 +1,10 @@
 // Package native runs hive-macos jobs on this Mac itself, for the things
 // only macOS can do: building for iOS, signing with Xcode. There is no VM.
 // Instead the job runs as a separate local user, hiveworker, that owns
-// nothing of the Mac's owner's. That keeps the owner's files and keychain
-// out of reach, and nothing more: the job sees this Mac's installed
-// software and its network, like any self-hosted macOS runner.
+// nothing of the Mac's owner's. That keeps the owner's files (while their
+// home folder is closed to others: see HomeOpen) and keychain out of reach,
+// and nothing more: the job sees this Mac's installed software and its
+// network, like any self-hosted macOS runner.
 //
 // The daemon runs as the owner. It reaches the hiveworker user through one
 // sudo rule, written by `hived macos setup`, that lets the owner run exactly
@@ -16,6 +17,7 @@
 package native
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,11 +25,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,6 +71,75 @@ const (
 
 // RunnerDir is the runner every job clones.
 func RunnerDir() string { return filepath.Join(Runners, RunnerVersion) }
+
+// CloseHome is how the owner closes their home folder to User, who, like
+// every user on a Mac, is in the staff group.
+const CloseHome = "chmod 700 ~"
+
+// HomeOpen is the owner's home folder and how User can see into it, or ""
+// for how when it cannot, or there is no User yet to ask about. A job can
+// read whatever in the folder is not closed to it in turn.
+func HomeOpen() (home, how string) {
+	owner, err := user.Current()
+	if err != nil {
+		return "", ""
+	}
+	worker, err := user.Lookup(User)
+	if err != nil {
+		return owner.HomeDir, ""
+	}
+	return owner.HomeDir, homeOpen(owner.HomeDir, worker)
+}
+
+func homeOpen(home string, worker *user.User) string {
+	info, err := os.Stat(home)
+	if err != nil {
+		return ""
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	groups, _ := worker.GroupIds()
+	return opening(info.Mode(), strconv.FormatUint(uint64(stat.Gid), 10), append(groups, worker.Gid))
+}
+
+// opening is how a user in these groups, by id, and not the directory's
+// owner, can see into a directory with this mode and group, or "" if it
+// cannot. Its group's bits are the ones that apply to a member, whatever
+// everyone's say.
+func opening(mode fs.FileMode, group string, groups []string) string {
+	bits, who := mode.Perm()&0o7, "everyone"
+	if slices.Contains(groups, group) {
+		bits, who = mode.Perm()>>3&0o7, "its group, which "+User+" is in"
+	}
+	switch {
+	case bits&0o4 != 0:
+		return "readable by " + who
+	case bits&0o1 != 0:
+		return "open to " + who + " for a file whose name is known"
+	}
+	return ""
+}
+
+// installSudoers is how setup writes the sudo rule: as root, with the rule
+// on stdin, visudo as $1 and the rule's path as $2. The rule is written,
+// checked and moved into place inside the rule's own directory, which only
+// root can write, so what visudo checked is what sudo reads: there is no
+// moment when it sits in a directory of the owner's, where anything running
+// as them could change it. sudo skips a name with a dot in it, and the move
+// is a rename, so it never reads half a rule.
+const installSudoers = `set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+umask 077
+rule=$(mktemp "$(dirname "$2")/.hiveworker.XXXXXX")
+trap 'rm -f "$rule"' EXIT
+cat >"$rule"
+"$1" -cf "$rule" >/dev/null
+chmod 0440 "$rule"
+mv -f "$rule" "$2"
+trap - EXIT
+`
 
 // ReasonStaleRunner is why a Mac declines macOS jobs once GitHub has refused
 // its runner as too old.
@@ -279,11 +354,17 @@ func (r *Runner) run(ctx context.Context, job jobs.Job) (jobs.Result, error) {
 func (r *Runner) clean(when string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	// The child arranges its layout for every request, so a clean carries
+	// spotlight-exclude as a job does.
+	ask, err := json.Marshal(request{Clean: true, NoIndex: spotlightExcluded()})
+	if err != nil {
+		return err
+	}
 	cmd := r.child(ctx)
-	cmd.Stdin = strings.NewReader(`{"clean":true}`)
+	cmd.Stdin = bytes.NewReader(ask)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if err == nil {
 		return nil
 	}

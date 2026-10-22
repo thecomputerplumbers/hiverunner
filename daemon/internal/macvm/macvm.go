@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -350,6 +351,10 @@ func (r *Runner) prepare(job jobs.Job, slot int) (*instance, Image, error) {
 	if err != nil {
 		return nil, Image{}, err
 	}
+	if err := os.WriteFile(filepath.Join(dir, handedFile), nil, 0o600); err != nil {
+		os.RemoveAll(dir)
+		return nil, Image{}, err
+	}
 	vcpus := job.VCPUs
 	if vcpus < 1 {
 		vcpus = VCPUs
@@ -498,6 +503,8 @@ func stopReason(ctx context.Context) string {
 // it past Apple's licence, would be worse than waiting. They go when it
 // does stop.
 func (r *Runner) release(guest *instance, slot int, id, digest string) {
+	// The job is over, whether or not its VM stops.
+	_ = os.Remove(filepath.Join(guest.dir, handedFile))
 	if guest.alive() {
 		guest.stop()
 		select {
@@ -529,6 +536,27 @@ func (r *Runner) release(guest *instance, slot int, id, digest string) {
 		return
 	}
 	gone()
+}
+
+// handedFile is in a job's directory, beside what the guest is given and
+// not in it, from the moment the directory is made until the job is over.
+// hived drain, another process, counts the jobs in hand by it.
+const handedFile = "handed"
+
+// JobsInHand is how many VMs in a work directory have a job. One that
+// would not stop once its job was over has none.
+func JobsInHand(work string) int {
+	count := 0
+	entries, _ := os.ReadDir(work)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "job-") {
+			continue
+		}
+		if info, err := os.Lstat(filepath.Join(work, entry.Name(), handedFile)); err == nil && info.Mode().IsRegular() {
+			count++
+		}
+	}
+	return count
 }
 
 // mac is a VM's network identity. The host's network remembers each card it

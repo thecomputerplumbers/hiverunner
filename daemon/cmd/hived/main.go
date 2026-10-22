@@ -726,7 +726,7 @@ func selftest(ctx context.Context) error {
 	// Beside the daemon's work directory, so the daemon can stay running.
 	// A job in hand would share the machine with the test VM.
 	runner.WorkDir = selftestDir(runner.Image.Dir)
-	if err := refuseSelftestWhileBusy(jobsWork); err != nil {
+	if err := refuseSelftestWhileBusy(jobsWork, macosWorkDir(current)); err != nil {
 		return err
 	}
 	release, err := vm.LockWorkDir(runner.WorkDir)
@@ -764,8 +764,8 @@ func selftest(ctx context.Context) error {
 // image, like a job, but not the directory the daemon holds.
 func selftestDir(image string) string { return image + "-selftest" }
 
-func refuseSelftestWhileBusy(work string) error {
-	n := jobsInHand(work)
+func refuseSelftestWhileBusy(work, macOS string) error {
+	n := jobsInHand(work, macOS)
 	switch n {
 	case 0:
 		return nil

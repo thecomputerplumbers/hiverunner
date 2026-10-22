@@ -142,7 +142,8 @@ func doctor(args []string) error {
 		exposure.Sudo = authorise()
 	}
 	// Every warning here is a note, so a note is drawn as what it is.
-	if exposed, _ := checkRows(screen, append(host.Exposed(exposure), macOSJobs(current, runtime.GOOS, macOSInVM(current))...), false); len(exposed) > 0 {
+	home, open := homeOpen(current)
+	if exposed, _ := checkRows(screen, append(host.Exposed(exposure), macOSJobs(current, runtime.GOOS, macOSInVM(current), home, open)...), false); len(exposed) > 0 {
 		fmt.Print(indent(screen.Box("Security", exposed...)))
 	}
 	switch problems {
@@ -206,18 +207,33 @@ func macOSInVM(current settings.Settings) bool { return current.MacOSInVM() }
 // macOSJobs is the macos jobs check. A macOS job runs as the one native.User
 // with the one home, so what a job leaves there, such as a package it
 // installed, is still there for the next job, whichever hive sends it. In a
-// VM of its own, it leaves nothing for the next.
-func macOSJobs(current settings.Settings, system string, inVM bool) []host.Check {
+// VM of its own, it leaves nothing for the next. home is the owner's home
+// folder, and open how native.User can see into it, as native.HomeOpen says.
+func macOSJobs(current settings.Settings, system string, inVM bool, home, open string) []host.Check {
 	switch {
 	case system != "darwin":
 		return nil
 	case current.MacOSJobs && inVM:
 		return []host.Check{{Name: "macos jobs", Found: "on: each macOS job runs in a throwaway VM cloned from the image, and leaves nothing for the next", OK: true}}
 	case current.MacOSJobs:
-		return []host.Check{{Name: "macos jobs", Found: "on: every macOS job runs as " + native.User + ", and finds what the jobs before it left in its home",
+		checks := []host.Check{{Name: "macos jobs", Found: "on: every macOS job runs as " + native.User + ", and finds what the jobs before it left in its home",
 			Note: true, Fix: "serve only hives whose macOS jobs may share a home, or hived config set macos-jobs off"}}
+		if open != "" {
+			checks = append(checks, host.Check{Name: "home folder", Found: home + " is " + open + ", so macOS jobs can read what in it is not closed to them",
+				Note: true, Fix: native.CloseHome})
+		}
+		return checks
 	}
 	return []host.Check{{Name: "macos jobs", Found: "off", OK: true}}
+}
+
+// homeOpen is native.HomeOpen, asked only of a Mac whose macOS jobs run as
+// native.User.
+func homeOpen(current settings.Settings) (home, open string) {
+	if runtime.GOOS != "darwin" || !current.MacOSJobs || macOSInVM(current) {
+		return "", ""
+	}
+	return native.HomeOpen()
 }
 
 // reach is whether this machine can find and talk to the server and the

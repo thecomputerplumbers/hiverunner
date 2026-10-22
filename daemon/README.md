@@ -545,6 +545,11 @@ may run, whichever hive sent it (see `docs/running-jobs.md`). Turn
 whose repositories you trust with each other's jobs. A pull request's test
 run should not share a Mac with a job that holds a signing certificate.
 
+`hiveworker`, like every user on a Mac, is in the `staff` group. A home
+folder `staff` or everyone can read or enter is open to every macOS job, for
+whatever in it is not closed in turn; `hived doctor` says so. Close it with
+`chmod 700 ~`.
+
 ## Updating
 
 Once a day, at a random minute, the daemon reads `latest.json` from the

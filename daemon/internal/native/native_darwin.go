@@ -98,6 +98,7 @@ func Setup(ctx context.Context, options SetupOptions) error {
 	before := inspect(exe)
 	if before.Problem == "" {
 		say("This Mac is already set up for macOS jobs, with %s and runner %s.", before.Xcode, before.Runner)
+		warnHomeOpen(say)
 		return nil
 	}
 
@@ -108,9 +109,9 @@ func Setup(ctx context.Context, options SetupOptions) error {
 	say("")
 	say("A hive-macos job runs on this Mac itself, not in a VM, as a separate user")
 	say("named %s. It can use %s and whatever else is installed here, and the", User, xcode)
-	say("network. It cannot read your home folder or your keychain. Only hives whose")
-	say("owners allow macOS jobs will send any, and you can turn this off at any")
-	say("time with: hived config set macos-jobs off")
+	say("network. It cannot read your keychain, or your home folder while that is")
+	say("closed to other users. Only hives whose owners allow macOS jobs will send")
+	say("any, and you can turn this off at any time with: hived config set macos-jobs off")
 	say("")
 	say("Setting up will, with your password for sudo:")
 	step := 1
@@ -138,9 +139,11 @@ func Setup(ctx context.Context, options SetupOptions) error {
 		}
 	}
 
-	sudo := func(args ...string) error {
+	// sudo asks for a password on the terminal, not stdin, so stdin can
+	// carry what a command reads.
+	sudoWith := func(stdin io.Reader, args ...string) error {
 		cmd := exec.CommandContext(ctx, "/usr/bin/sudo", args...)
-		cmd.Stdin = os.Stdin
+		cmd.Stdin = stdin
 		cmd.Stdout = io.Discard
 		var stderr strings.Builder
 		cmd.Stderr = io.MultiWriter(&stderr, os.Stderr)
@@ -149,6 +152,7 @@ func Setup(ctx context.Context, options SetupOptions) error {
 		}
 		return nil
 	}
+	sudo := func(args ...string) error { return sudoWith(os.Stdin, args...) }
 
 	if !before.UserExists {
 		say("Creating the %s user...", User)
@@ -181,22 +185,7 @@ func Setup(ctx context.Context, options SetupOptions) error {
 	if !before.Sudo {
 		say("Writing %s...", SudoersPath)
 		rule := fmt.Sprintf("# Written by hived macos setup. Lets %s run GitHub's runner as %s.\n%s ALL=(%s) NOPASSWD: %s macos-job\n", owner.Username, User, owner.Username, User, exe)
-		temporary, err := os.CreateTemp("", "hiveworker-sudoers-")
-		if err != nil {
-			return err
-		}
-		defer os.Remove(temporary.Name())
-		if _, err := temporary.WriteString(rule); err != nil {
-			return err
-		}
-		if err := temporary.Chmod(0o644); err != nil {
-			return err
-		}
-		temporary.Close()
-		if err := sudo("/usr/sbin/visudo", "-cf", temporary.Name()); err != nil {
-			return err
-		}
-		if err := sudo("/usr/bin/install", "-o", "root", "-g", "wheel", "-m", "0440", temporary.Name(), SudoersPath); err != nil {
+		if err := sudoWith(strings.NewReader(rule), "/bin/sh", "-c", installSudoers, "hived", "/usr/sbin/visudo", SudoersPath); err != nil {
 			return err
 		}
 	}
@@ -230,6 +219,7 @@ func Setup(ctx context.Context, options SetupOptions) error {
 	}
 	say("")
 	say("This Mac takes macOS jobs: runs-on: hive-macos, with %s and runner %s.", after.Xcode, after.Runner)
+	warnHomeOpen(say)
 	return nil
 }
 
@@ -258,6 +248,19 @@ func installRunner(sudo func(...string) error, tarball string) error {
 		}
 	}
 	return checkRunner("/", final, 0)
+}
+
+// warnHomeOpen says so if the owner's home folder is open to User, and how
+// to close it. It is the owner's to close: setup changes nothing of theirs.
+func warnHomeOpen(say func(string, ...any)) {
+	home, how := HomeOpen()
+	if how == "" {
+		return
+	}
+	say("")
+	say("Your home folder, %s, is %s,", home, how)
+	say("so a macOS job can read whatever in it is not closed to it in turn. To close it:")
+	say("  %s", CloseHome)
 }
 
 // Remove undoes Setup: the sudo rule, the runner and the user go, with
