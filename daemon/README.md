@@ -323,21 +323,28 @@ when `lid` is turned on while it runs.
 
 `hived doctor` says, in a box of its own, how exposed the machine is to the
 jobs it runs and to its network. None of it makes it exit 1: each is the
-owner's call, as FileVault is. What only root can read is read with
-`sudo -n`, which never asks for a password. A user in the `admin`, `sudo` or
-`wheel` group is tried once, with `sudo -n true`, and nothing else is tried
-with sudo if that is refused. sshd's settings come from `sshd -G` where it
-needs no root (macOS, recent OpenSSH); unread, the `ssh` row says so. When
-Linux's firewall rules cannot be read, there is no `firewall` row. Every
-command is given five seconds.
+owner's call, as FileVault is. `hived doctor` never uses sudo unless asked,
+not even on credentials sudo has cached from a minute ago. `hived doctor
+--sudo` says it is about to, has sudo ask for a password if it would, and
+then reads what only root can with `sudo -n`. sshd's settings come from
+`sshd -G` where it needs no root (macOS, recent OpenSSH); unread, the `ssh`
+row says so. When Linux's firewall rules cannot be read, the `firewall` row
+says `could not read the rules (needs sudo)`. Every command is given five
+seconds.
 
-| Check        | Says so when                                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------------ |
-| `firewall`   | macOS: the application firewall is off. Linux: nothing drops what it does not accept, for IPv4 and IPv6      |
-| `ssh`        | sshd listens (on launchd's port on a Mac, its `Port` on Linux) and takes passwords, by asking or through PAM |
-| `sharing`    | macOS: a Sharing service or AirPlay Receiver listens. Linux: Samba, VNC or RDP                               |
-| `network`    | An interface has a private address, or one in `100.64.0.0/10` (a tailnet's, or another CGNAT VPN's)          |
-| `macos jobs` | `macos-jobs` is on, so macOS jobs share one home                                                             |
+| Check        | Says so when                                                                                                                                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `firewall`   | macOS: the application firewall is off. Linux: nothing drops what it does not accept, for IPv4 and IPv6                                                                                                                 |
+| `ssh`        | sshd listens (on launchd's port on a Mac, its `Port` on Linux) and takes passwords, by asking or through PAM                                                                                                            |
+| `sharing`    | macOS: a Sharing service or AirPlay Receiver listens. Linux: Samba, VNC or RDP                                                                                                                                          |
+| `network`    | An interface has a private address, one in `100.64.0.0/10` (a tailnet's, or another CGNAT VPN's), or a public address on a subnet wider than a point-to-point link: an IPv4 subnet wider than /31, or a global IPv6 /64 |
+| `macos jobs` | `macos-jobs` is on, so macOS jobs share one home                                                                                                                                                                        |
+
+A router's firewall stands between the internet and a machine, not between
+the machine and the rest of its subnet, so a public subnet's other machines
+are as reachable to a job as a LAN's are. Where hived keeps a job's VM off
+the networks around the machine, the `network` row says so and is not a
+warning.
 
 On Linux the firewall is on when firewalld runs, when ufw is on and drops by
 default (for IPv6 too, unless `IPV6=no`), or when a chain on the input hook,
@@ -350,7 +357,7 @@ not a firewall. IPv6 is judged only on a machine that has it.
 running, so reload sshd after a change before believing it. A `Match` block
 can let passwords in for some users or addresses only: sshd is asked as a
 connection from each private range, a tailnet's and the internet, which takes
-root, and where there is a block, or the files are root's to read as on
+root, and so `--sudo`, and where there is a block, or the files are root's to read as on
 Fedora, the `ssh` row says keys only outside its Match blocks. The files read
 are `sshd_config` and whatever its `Include` lines name.
 

@@ -44,14 +44,18 @@ func TestDoctorSaysWhatTheRunningDaemonCannotOpen(t *testing.T) {
 }
 
 func TestDoctorSaysHowExposedAMacIsWithoutFailing(t *testing.T) {
-	on := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin")
+	on := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", false)
 	if len(on) != 1 || on[0].OK || !on[0].Note || !strings.Contains(on[0].Found, "hiveworker") || !strings.Contains(on[0].Fix, "macos-jobs off") {
 		t.Fatalf("macOS jobs on said %+v", on)
 	}
-	if off := macOSJobs(settings.Settings{}, "darwin"); len(off) != 1 || !off[0].OK {
+	if off := macOSJobs(settings.Settings{}, "darwin", false); len(off) != 1 || !off[0].OK {
 		t.Fatalf("macOS jobs off said %+v", off)
 	}
-	if linux := macOSJobs(settings.Settings{MacOSJobs: true}, "linux"); len(linux) != 0 {
+	// A job in a throwaway VM of its own leaves nothing for the next.
+	if vm := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", true); len(vm) != 1 || !vm[0].OK || vm[0].Note || strings.Contains(vm[0].Found, "hiveworker") {
+		t.Fatalf("macOS jobs in VMs said %+v", vm)
+	}
+	if linux := macOSJobs(settings.Settings{MacOSJobs: true}, "linux", false); len(linux) != 0 {
 		t.Fatalf("a Linux machine was told about macOS jobs: %+v", linux)
 	}
 

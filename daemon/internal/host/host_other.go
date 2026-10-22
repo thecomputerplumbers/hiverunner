@@ -22,7 +22,7 @@ func StaysAwake() (awake, known bool) { return false, false }
 
 func Unattended() []Check { return nil }
 
-func Exposed() []Check { return nil }
+func Exposed(Exposure) []Check { return nil }
 
 // AvailableMemory is unknown here: zero, so nothing is declined for it.
 func AvailableMemory() uint64 { return 0 }

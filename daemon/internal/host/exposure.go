@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/hex"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,10 +18,33 @@ import (
 
 // What follows reads how exposed a machine is to the jobs it runs and to its
 // network. That is the owner's call as much as FileVault is, so every check
-// is a Note. sudo is only ever run with -n, which never asks for a password,
-// and what it would take a password to read is said to be unread, or not
-// said. Everything is read through a system, so that tests can stand in for
-// the machine, and the readers are tested on any system.
+// is a Note. sudo is run only when the owner asks, with hived doctor --sudo,
+// and then only with -n, after hived has said it will; what it would take
+// root to read is otherwise said to be unread. Everything is read through a
+// system, so that tests can stand in for the machine, and the readers are
+// tested on any system.
+
+// Exposure is what the checks are told rather than read.
+type Exposure struct {
+	// Sudo is whether the owner asked for root's files and rules to be read
+	// with sudo, and sudo has been authorised.
+	Sudo bool
+	// Fence is what keeps a job's VM off the networks around this machine.
+	Fence Fence
+}
+
+// Fence is what keeps a job's VM off the networks around this machine. The
+// zero value keeps it off nothing, which is how a job's VM has always been.
+type Fence struct {
+	// On is whether jobs are kept off this machine's private networks, its
+	// tailnet, its own addresses and its subnets.
+	On bool
+	// Allow is what jobs may reach there all the same.
+	Allow []string
+	// Why is why jobs are not kept off, where hived could keep them off,
+	// and Fix how to; "" where it cannot.
+	Why, Fix string
+}
 
 // system is how the checks reach a machine: the commands they run, the
 // files they read and what they know of it.
@@ -27,39 +53,36 @@ type system struct {
 	// read is every file a pattern matches, one after another, or "".
 	read      func(pattern string) string
 	addresses []address
-	user      string
-	// sudoer is whether sudo -n works here. It is asked once, and every
-	// other sudo is left untried if not, so that the auth log gets one
-	// refusal at most.
+	// user is who runs hived, as the system has it, not as $USER says.
+	user string
+	// sudoer is whether the owner asked for sudo, and it was authorised.
+	// Nothing is run with sudo otherwise.
 	sudoer bool
 	// ipv6 is whether the machine has IPv6 to filter.
 	ipv6 bool
 }
 
-// address is one of the machine's addresses, and the interface it is on.
+// address is one of the machine's addresses, the interface it is on, and
+// the length of its subnet's prefix: zero where that is unknown.
 type address struct {
 	iface string
 	ip    net.IP
+	bits  int
 }
 
 // local is this machine.
-func local() system {
-	s := system{run: command, read: readAll, user: os.Getenv("USER")}
-	// Nobody outside these groups is made to try at all.
-	groups, _ := command("id", "-Gn")
-	for _, group := range strings.Fields(groups) {
-		if group == "admin" || group == "sudo" || group == "wheel" || group == "root" {
-			_, err := command("sudo", "-n", "true")
-			s.sudoer = err == nil
-			break
-		}
+func local(sudo bool) system {
+	s := system{run: command, read: readAll, sudoer: sudo}
+	if me, err := user.Current(); err == nil {
+		s.user = me.Username
 	}
 	interfaces, _ := net.Interfaces()
 	for _, iface := range interfaces {
 		addresses, _ := iface.Addrs()
 		for _, a := range addresses {
 			if ip, ok := a.(*net.IPNet); ok {
-				s.addresses = append(s.addresses, address{iface.Name, ip.IP})
+				bits, _ := ip.Mask.Size()
+				s.addresses = append(s.addresses, address{iface.Name, ip.IP, bits})
 			}
 		}
 	}
@@ -109,7 +132,7 @@ func readAll(pattern string) string {
 }
 
 // mac is what a Mac leaves open.
-func (s system) mac() []Check {
+func (s system) mac(fence Fence) []Check {
 	var checks []Check
 	said, _ := s.run("/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate")
 	switch on, known := firewallState(said); {
@@ -142,11 +165,11 @@ func (s system) mac() []Check {
 			addresses = append(addresses, a)
 		}
 	}
-	return append(checks, network(addresses)...)
+	return append(checks, network(addresses, fence)...)
 }
 
 // linux is what a Linux machine leaves open.
-func (s system) linux() []Check {
+func (s system) linux(fence Fence) []Check {
 	checks := s.linuxFirewall()
 	listening := procListening(s.read("/proc/net/tcp") + s.read("/proc/net/tcp6"))
 	checks = append(checks, s.ssh("sshd", "sshd is not listening", nil, listening, ", then reload sshd: hived reads its files, not the sshd running")...)
@@ -155,7 +178,7 @@ func (s system) linux() []Check {
 		{"VNC", 5900},
 		{"RDP", 3389},
 	}, "stop the ones you do not use")...)
-	return append(checks, network(s.addresses)...)
+	return append(checks, network(s.addresses, fence)...)
 }
 
 // linuxFirewall is the firewall check on Linux. ufw says to anyone whether
@@ -199,8 +222,11 @@ func (s system) linuxFirewall() []Check {
 	}
 	const fix = "turn one on, such as with sudo ufw allow ssh && sudo ufw enable"
 	switch {
+	case !read && !s.sudoer:
+		// Unsaid, it would read as nothing to worry about.
+		return []Check{{Name: "firewall", Found: "could not read the rules (needs sudo)", Note: true, Fix: "hived doctor --sudo, or sudo nft list ruleset"}}
 	case !read:
-		return nil
+		return []Check{{Name: "firewall", Found: "could not read the rules, even with sudo", Note: true, Fix: "sudo nft list ruleset"}}
 	case v4 && v6:
 		return on
 	case v4:
@@ -244,7 +270,11 @@ func (s system) ssh(name, off string, ports []int, listening map[int]bool, fix s
 		return []Check{{Name: "ssh", Found: off, OK: true}}
 	}
 	if settings == "" {
-		return []Check{{Name: "ssh", Found: name + " is on, and hived could not read whether it takes passwords", Note: true, Fix: sshKeysOnly + fix}}
+		check := Check{Name: "ssh", Found: name + " is on, and hived could not read whether it takes passwords", Note: true, Fix: sshKeysOnly + fix}
+		if !s.sudoer {
+			check.Fix = "read it with hived doctor --sudo, or " + check.Fix
+		}
+		return []Check{check}
 	}
 	passwords, from := sshPasswords(settings), ""
 	// What sshd prints is for no connection in particular, so a Match block
@@ -255,7 +285,8 @@ func (s system) ssh(name, off string, ports []int, listening map[int]bool, fix s
 	config := sshConfig(s.read)
 	outside := !passwords && (config == "" || sshMatches(config))
 	for _, probe := range sshProbes {
-		if !outside || !s.sudoer {
+		// A user name with a comma in would be more keys to -C.
+		if !outside || !s.sudoer || s.user == "" || strings.ContainsAny(s.user, ", ") {
 			break
 		}
 		matched, err := s.run("sudo", "-n", sshd, "-T", "-C", "user="+s.user+",host=probe,addr="+probe)
@@ -285,10 +316,10 @@ var (
 )
 
 // network is the network check: whether this machine has an address on a
-// tailnet or a private network, whose other machines a job can reach as it
-// can.
-func network(addresses []address) []Check {
-	var tailnets, private, bridges []string
+// tailnet, a private network or a public subnet, whose other machines a job
+// can reach as it can, unless the fence keeps it off them.
+func network(addresses []address, fence Fence) []Check {
+	var tailnets, private, public, bridges []string
 	seen := false
 	for _, a := range addresses {
 		switch {
@@ -300,6 +331,14 @@ func network(addresses []address) []Check {
 			bridges = append(bridges, a.ip.String()+" on "+a.iface)
 		case a.ip.IsPrivate():
 			private = append(private, a.ip.String()+" on "+a.iface)
+		case neighboured(a):
+			// The router's firewall is between the internet and this
+			// machine, not between it and the rest of its subnet.
+			ip, _ := netip.AddrFromSlice(a.ip)
+			subnet := netip.PrefixFrom(ip.Unmap(), a.bits).Masked().String() + " on " + a.iface
+			if !slices.Contains(public, subnet) {
+				public = append(public, subnet)
+			}
 		}
 		seen = true
 	}
@@ -312,18 +351,44 @@ func network(addresses []address) []Check {
 		on = append(on, "a private network ("+strings.Join(private, ", ")+")")
 		fixes = append(fixes, "lend it from a network of its own, such as a guest Wi-Fi or VLAN")
 	}
+	if len(public) > 0 {
+		on = append(on, "a public subnet shared with other machines ("+strings.Join(public, ", ")+")")
+		fixes = append(fixes, "give it a subnet of its own, or firewall it from its neighbours")
+	}
 	if len(bridges) > 0 {
 		on = append(on, "local bridges ("+strings.Join(bridges, ", ")+")")
 		fixes = append(fixes, "keep on its bridges only the containers and VMs a job may reach")
 	}
+	where := "on " + strings.Join(on, " and ")
 	switch {
+	case len(on) > 0 && fence.On && len(fence.Allow) > 0:
+		return []Check{{Name: "network", Found: where + ", and jobs are kept off them but for " + strings.Join(fence.Allow, ", "), OK: true}}
+	case len(on) > 0 && fence.On:
+		return []Check{{Name: "network", Found: where + ", and jobs are kept off them", OK: true}}
+	case len(on) > 0 && fence.Why != "":
+		return []Check{{Name: "network", Found: where + ", and a job can reach whatever this machine can there, as " + fence.Why,
+			Note: true, Fix: fence.Fix}}
 	case len(on) > 0:
-		return []Check{{Name: "network", Found: "on " + strings.Join(on, " and ") + ", and a job can reach whatever this machine can there",
+		return []Check{{Name: "network", Found: where + ", and a job can reach whatever this machine can there",
 			Note: true, Fix: strings.Join(fixes, "; ")}}
 	case seen:
-		return []Check{{Name: "network", Found: "on no tailnet or private network", OK: true}}
+		// Nothing around it to keep jobs off; that is not to say what is
+		// on the internet cannot be reached.
+		return []Check{{Name: "network", Found: "on no tailnet, private network or shared public subnet", OK: true}}
 	}
 	return nil
+}
+
+// neighboured is whether a public address is on a subnet other machines
+// can be on too: wider than a point-to-point link, or a known prefix.
+func neighboured(a address) bool {
+	if !a.ip.IsGlobalUnicast() || a.bits == 0 {
+		return false
+	}
+	if a.ip.To4() != nil {
+		return a.bits < 31
+	}
+	return a.bits < 127
 }
 
 // localBridge is whether an interface is one that containers or VMs on this

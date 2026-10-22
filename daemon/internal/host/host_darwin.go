@@ -134,7 +134,7 @@ func Unattended() []Check {
 
 // Exposed looks at what this Mac leaves open to the jobs it runs and to its
 // network.
-func Exposed() []Check { return local().mac() }
+func Exposed(e Exposure) []Check { return local(e.Sudo).mac(e.Fence) }
 
 // AvailableMemory is not read on a Mac, where the system reclaims cached
 // memory on demand and no figure says what a new VM can have. Zero means

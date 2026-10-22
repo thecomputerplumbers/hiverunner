@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -44,8 +45,19 @@ func asleep(current settings.Settings, power host.Power) (problem, fix string) {
 // nobody at it, through a closed lid and a restart. It fails if not, so a
 // script setting a machine up can ask. What the owner may have chosen, such
 // as FileVault, is said and does not fail it, and nor does anything it says
-// about how exposed the machine is to its jobs and its network.
-func doctor() error {
+// about how exposed the machine is to its jobs and its network. With --sudo
+// it reads what only root can, saying so first; it never uses sudo
+// otherwise, not even on credentials sudo has cached.
+func doctor(args []string) error {
+	withSudo := false
+	for _, arg := range args {
+		switch arg {
+		case "--sudo":
+			withSudo = true
+		default:
+			return errors.New("usage: hived doctor [--sudo]")
+		}
+	}
 	current, err := settings.Load()
 	if err != nil {
 		return err
@@ -124,8 +136,12 @@ func doctor() error {
 	if problems == 0 {
 		fmt.Println(indent(screen.Dim(thisMachine + " keeps taking jobs with nobody at it.")))
 	}
+	exposure := host.Exposure{Fence: jobsFence(current)}
+	if withSudo && runtime.GOOS != "windows" {
+		exposure.Sudo = authorise()
+	}
 	// Every warning here is a note, so a note is drawn as what it is.
-	if exposed, _ := checkRows(screen, append(host.Exposed(), macOSJobs(current, runtime.GOOS)...), false); len(exposed) > 0 {
+	if exposed, _ := checkRows(screen, append(host.Exposed(exposure), macOSJobs(current, runtime.GOOS, macOSInVM(current))...), false); len(exposed) > 0 {
 		fmt.Print(indent(screen.Box("Security", exposed...)))
 	}
 	switch problems {
@@ -162,13 +178,39 @@ func checkRows(screen ui.Screen, checks []host.Check, notesPass bool) (rows []st
 	return rows, problems
 }
 
+// authorise is --sudo: it says that sudo is about to be used and what for,
+// and has sudo ask for a password if it would. Whether sudo may be used.
+func authorise() bool {
+	fmt.Println()
+	fmt.Println("Reading the firewall rules and sshd's settings with sudo, as --sudo asks.")
+	validate := exec.Command("sudo", "-v")
+	validate.Stdin, validate.Stdout, validate.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := validate.Run(); err != nil {
+		fmt.Println("sudo refused, so they are read as this user can.")
+		return false
+	}
+	return true
+}
+
+// jobsFence is what keeps a job's VM off the networks around this machine,
+// for the network check. Nothing does yet: a job's VM reaches whatever this
+// machine can. Fencing the private networks fills this in.
+func jobsFence(settings.Settings) host.Fence { return host.Fence{} }
+
+// macOSInVM is whether a hive-macos job runs in a throwaway VM of its own
+// rather than as native.User on the Mac. It cannot yet.
+func macOSInVM(settings.Settings) bool { return false }
+
 // macOSJobs is the macos jobs check. A macOS job runs as the one native.User
 // with the one home, so what a job leaves there, such as a package it
-// installed, is still there for the next job, whichever hive sends it.
-func macOSJobs(current settings.Settings, system string) []host.Check {
+// installed, is still there for the next job, whichever hive sends it. In a
+// VM of its own, it leaves nothing for the next.
+func macOSJobs(current settings.Settings, system string, inVM bool) []host.Check {
 	switch {
 	case system != "darwin":
 		return nil
+	case current.MacOSJobs && inVM:
+		return []host.Check{{Name: "macos jobs", Found: "on: each macOS job runs in a throwaway VM cloned from the image, and leaves nothing for the next", OK: true}}
 	case current.MacOSJobs:
 		return []host.Check{{Name: "macos jobs", Found: "on: every macOS job runs as " + native.User + ", and finds what the jobs before it left in its home",
 			Note: true, Fix: "serve only hives whose macOS jobs may share a home, or hived config set macos-jobs off"}}
