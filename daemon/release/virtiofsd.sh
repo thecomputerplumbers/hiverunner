@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds virtiofsd, the program that serves a job's one directory to its VM,
+# Builds virtiofsd, the program that serves a job's directories to its VM,
 # as a single static binary for Linux.
 #
 #   ./release/virtiofsd.sh arm64|amd64 OUTPUT-FILE

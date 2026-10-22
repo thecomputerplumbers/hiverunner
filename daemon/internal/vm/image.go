@@ -2,9 +2,10 @@
 //
 // The machine is a Linux guest under Apple's Virtualization.framework: its
 // own kernel, its own memory, its own disk. The disk is a copy-on-write clone
-// of the guest image, made for the job and deleted after it. The only thing
-// the host shares with the guest is one directory created for that job,
-// holding the job's one-time runner configuration.
+// of the guest image, made for the job and deleted after it. The only things
+// the host shares with the guest are two directories created for that job:
+// one it can only read, holding the job's one-time runner configuration,
+// and one it writes its results to.
 package vm
 
 import (
@@ -15,6 +16,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/sharefile"
 )
 
 // Image is a built guest image: see daemon/image/build.sh.
@@ -101,7 +104,7 @@ func (i Image) path(name string) string { return filepath.Join(i.Dir, name) }
 const ExitRunnerDeprecated = 7
 
 // ReasonStaleImage is why a machine with an outdated guest declines jobs.
-const ReasonStaleImage = "this machine's guest image has a runner GitHub no longer accepts; rebuild the image"
+const ReasonStaleImage = "this machine's guest image has a runner GitHub no longer accepts, so jobs are declined for an hour; run hived update"
 
 // SweepWorkDir removes what a previous daemon left behind in its work
 // directory and reports how many job directories it found.
@@ -122,15 +125,18 @@ func SweepWorkDir(dir string) (int, error) {
 		return 0, err
 	}
 	removed := 0
+	var failed []error
 	for _, entry := range entries {
 		// Only what this package creates. Anything else is not ours to delete.
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "job-") {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
-			return removed, err
+		// One that cannot be removed does not keep the rest.
+		if err := sharefile.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			failed = append(failed, err)
+			continue
 		}
 		removed++
 	}
-	return removed, nil
+	return removed, errors.Join(failed...)
 }

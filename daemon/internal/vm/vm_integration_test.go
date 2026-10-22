@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,7 +92,7 @@ func TestAVMBootsReportsAndLeavesNothingBehind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("self-test: %v\n%s", err, report)
 	}
-	for _, want := range []string{"CPUS=2", "USER=runner", "NETWORK=ok", "DOCKER=ok", "ZRAM=ok", "SWAP=ok", "RUNNER=" + r.Image.RunnerVersion} {
+	for _, want := range []string{"CPUS=2", "USER=runner", "NETWORK=ok", "DOCKER=ok", "ZRAM=ok", "SWAP=ok", "HANDED=read-only", "RUNNER=" + r.Image.RunnerVersion} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report lacks %q:\n%s", want, report)
 		}
@@ -123,29 +125,37 @@ func TestCancellationDestroysTheVM(t *testing.T) {
 	}
 }
 
-// The guest sees one directory. What the host put there is all there is.
-func TestTheShareHoldsOnlyTheJob(t *testing.T) {
+// The guest sees two directories: what it was handed, which is all the
+// host put there and which it cannot change, and where it wrote back.
+func TestTheSharesHoldOnlyTheJob(t *testing.T) {
 	r := realRunner(t)
 	ctx, cancel := context.WithTimeout(context.Background(), patient(2*time.Minute))
 	defer cancel()
-	var names []string
-	_, err := r.run(ctx, jobs.Job{AssignmentID: "share", Pool: "test", VCPUs: 1}, "selftest", "1", func(share string) {
-		entries, _ := os.ReadDir(share)
-		for _, entry := range entries {
-			names = append(names, entry.Name())
+	names := map[string][]string{}
+	_, err := r.run(ctx, jobs.Job{AssignmentID: "share", Pool: "test", VCPUs: 1}, "selftest", "1", func(out string) {
+		for _, shared := range []string{"in", "out"} {
+			entries, _ := os.ReadDir(filepath.Join(filepath.Dir(out), shared))
+			for _, entry := range entries {
+				names[shared] = append(names[shared], entry.Name())
+			}
 		}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{
-		"clock": true, "ready": true, "selftest": true, "selftest.out": true, "exit": true,
-		"host": true, "label": true, "diag": true, "notices": true, "stop-reason": true,
+	allowed := map[string]map[string]bool{
+		"in":  {"clock": true, "selftest": true, "host": true, "label": true, "stop-reason": true},
+		"out": {"ready": true, "selftest.out": true, "exit": true, "diag": true, "notices": true},
 	}
-	for _, name := range names {
-		if !allowed[name] {
-			t.Errorf("unexpected file in the share: %s", name)
+	for shared, listed := range names {
+		for _, name := range listed {
+			if !allowed[shared][name] {
+				t.Errorf("unexpected file in %s: %s", shared, name)
+			}
 		}
+	}
+	if len(names["out"]) == 0 || !slices.Contains(names["out"], "exit") {
+		t.Errorf("the guest wrote back %v", names["out"])
 	}
 }
 

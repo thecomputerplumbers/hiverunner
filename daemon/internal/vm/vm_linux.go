@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/sharefile"
 )
 
 // FencesNetwork is whether a guest here is held to its fence.Policy. It
@@ -47,10 +48,45 @@ type platformState struct {
 	unconfined bool
 	// complain says once, not for every VM, why there is no cache.
 	complain sync.Once
+	// readOnly is whether this host's virtiofsd can serve a directory the
+	// guest cannot change, asked once.
+	readOnly     sync.Once
+	readOnlyOK   bool
+	readOnlySaid sync.Once
+}
+
+// readOnlyShares reports whether virtiofsd at this path can serve what a
+// guest is handed read-only. virtiofsd 1.11 and later can. An older one,
+// as some distributions package, serves it writable: the host still never
+// writes through or reads back what the guest leaves there (see package
+// sharefile), but a guest could change what it was handed. That is said
+// once.
+func (r *Runner) readOnlyShares(virtiofsd string) bool {
+	state := &r.platform
+	state.readOnly.Do(func() {
+		said, _ := exec.Command(virtiofsd, "--help").CombinedOutput()
+		state.readOnlyOK = offersReadOnly(string(said))
+	})
+	if !state.readOnlyOK {
+		state.readOnlySaid.Do(func() {
+			r.Log.Warn("this machine's virtiofsd cannot share a directory read-only; a job's VM can change what it is handed. Install virtiofsd 1.11 or later", "virtiofsd", virtiofsd)
+		})
+	}
+	return state.readOnlyOK
+}
+
+// offersReadOnly reports whether virtiofsd's --help lists --readonly.
+func offersReadOnly(help string) bool {
+	for _, field := range strings.Fields(help) {
+		if strings.TrimRight(field, ",") == "--readonly" {
+			return true
+		}
+	}
+	return false
 }
 
 // The programs a VM is made of on Linux. KVM does the virtualization; QEMU
-// is the machine around it; virtiofsd serves the one shared directory; passt
+// is the machine around it; virtiofsd serves each shared directory; passt
 // is the guest's network, with no privileges and no way to the host's own
 // loopback.
 type tools struct {
@@ -298,16 +334,27 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 		}
 		return command, nil
 	}
-	shareSocket := filepath.Join(sockets, "fs")
+	inSocket := filepath.Join(sockets, "in")
+	outSocket := filepath.Join(sockets, "out")
 
 	// The whole of what the guest can see of the host's files, served from
-	// inside a namespace that contains nothing else.
-	share, err := run("virtiofsd.log", found.virtiofsd, nil,
-		"--socket-path="+shareSocket, "--shared-dir="+vm.share, "--cache=never")
+	// inside a namespace that contains nothing else: what it is handed, which
+	// it cannot change where virtiofsd can say so, and where it writes back.
+	handed := []string{"--socket-path=" + inSocket, "--shared-dir=" + vm.in, "--cache=never"}
+	if r.readOnlyShares(found.virtiofsd) {
+		handed = append(handed, "--readonly")
+	}
+	shareIn, err := run("virtiofsd-in.log", found.virtiofsd, nil, handed...)
 	if err != nil {
 		return "", err
 	}
-	helpers = append(helpers, share)
+	helpers = append(helpers, shareIn)
+	shareOut, err := run("virtiofsd-out.log", found.virtiofsd, nil,
+		"--socket-path="+outSocket, "--shared-dir="+vm.out, "--cache=never")
+	if err != nil {
+		return "", err
+	}
+	helpers = append(helpers, shareOut)
 
 	// The guest's network: out through this user's ordinary sockets, nothing
 	// in, and no address that means the host's own loopback.
@@ -362,8 +409,10 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 		return "", err
 	}
 	helpers = append(helpers, relay)
-	if err := waitFor(shareSocket, 10*time.Second, share, relay); err != nil {
-		return "", fmt.Errorf("%w (%s)", err, tail(vm.dir, "virtiofsd.log", "passt.log"))
+	for _, socket := range []string{inSocket, outSocket} {
+		if err := waitFor(socket, 10*time.Second, shareIn, shareOut, relay); err != nil {
+			return "", fmt.Errorf("%w (%s)", err, tail(vm.dir, "virtiofsd-in.log", "virtiofsd-out.log", "passt.log"))
+		}
 	}
 
 	var sysinfo unix.Sysinfo_t
@@ -389,8 +438,10 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 		// No option ROM: the kernel is booted directly, never from the
 		// network, and the ROM is a separate package some systems lack.
 		"-device", "virtio-net-pci,netdev=net,romfile=,mac=" + mac.String(),
-		"-chardev", "socket,id=share,path=" + shareSocket,
-		"-device", "vhost-user-fs-pci,chardev=share,tag=" + shareTag,
+		"-chardev", "socket,id=in,path=" + inSocket,
+		"-device", "vhost-user-fs-pci,chardev=in,tag=" + InTag,
+		"-chardev", "socket,id=out,path=" + outSocket,
+		"-device", "vhost-user-fs-pci,chardev=out,tag=" + OutTag,
 		// The guest's console goes to a file, for diagnosis. Nothing is
 		// wired to its input: there is no way to type into the guest.
 		"-device", "virtio-serial-pci",
@@ -629,11 +680,12 @@ func waitFor(socket string, limit time.Duration, helpers ...*exec.Cmd) error {
 }
 
 // tail is the end of a helper's log, for an error message. These logs are
-// the hypervisor's own, not the guest's console.
+// the hypervisor's own, not the guest's console, but what it says may still
+// be long: only the end is read.
 func tail(dir string, names ...string) string {
 	var parts []string
 	for _, name := range names {
-		raw, _ := os.ReadFile(filepath.Join(dir, name))
+		raw, _ := sharefile.Tail(filepath.Join(dir, name), 4<<10)
 		text := strings.TrimSpace(string(raw))
 		if len(text) > 400 {
 			text = text[len(text)-400:]

@@ -2,7 +2,7 @@ package vm
 
 import "net/http"
 
-// GuestServiceFile is the file in the share that tells the guest agent the
+// GuestServiceFile is the file handed to the guest that tells its agent the
 // host is offering its service to this job, and on which port.
 const GuestServiceFile = "cache"
 

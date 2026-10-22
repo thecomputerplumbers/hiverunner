@@ -21,14 +21,53 @@ import (
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/runnerrelease"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/sharefile"
 )
 
 const (
 	// What a job's disk can grow to. The disk is a clone or an overlay, so
 	// this costs nothing until the job writes.
 	diskBytes = 40 * gib
-	// The virtio-fs tag the guest agent mounts.
-	shareTag = "hive"
+	// The virtio-fs tags the guest agent mounts. What the host hands the
+	// guest (the job, the clock, a stop's reason) is under InTag, which the
+	// guest can only read. What it hands back (that it is ready, its exit
+	// code, how the job went) is under OutTag, and anything there may be a
+	// trap: see package sharefile. The host never writes there.
+	InTag  = "hive"
+	OutTag = "hive-out"
+)
+
+// MinImageVersion is the oldest guest image this daemon runs jobs in: the
+// first whose agent reads the job from InTag and writes its results under
+// OutTag.
+const MinImageVersion = 12
+
+// ReasonOldImage is why a machine whose guest image is older than
+// MinImageVersion declines jobs.
+const ReasonOldImage = "this machine's guest image is older than this hived can run jobs in; run hived update"
+
+// What the guest may leave where its results go, and how long each result
+// read back can be. The console is the guest's to fill, so only its end is
+// read.
+const (
+	mostOutBytes    = 1 << 20
+	mostOutEntries  = 64
+	mostExit        = 32
+	mostDiag        = 4 << 10
+	mostSelfTest    = 64 << 10
+	mostConsole     = 1 << 20
+	mostKeptConsole = 16 << 20
+	// A console longer than this is a guest filling the host's disk.
+	mostConsoleBytes = 256 << 20
+)
+
+// How often a running job's results are looked at, and how long GitHub
+// refusing the guest's runner declines jobs. Variables so the tests need
+// not wait.
+var (
+	outPoll  = time.Second
+	staleFor = time.Hour
 )
 
 // Runner runs jobs in virtual machines. It implements jobs.Runner.
@@ -71,14 +110,19 @@ type Runner struct {
 	macs [macSlots]bool
 	// teardowns counts warm VMs being destroyed in the background.
 	teardowns sync.WaitGroup
-	// stale is set once GitHub has refused this image's runner as too old.
-	// Nothing clears it: a new image means a new daemon start.
-	stale atomic.Bool
+	// staleUntil is when a runner GitHub refused stops declining jobs, in
+	// Unix nanoseconds. It expires because a job can write any exit code:
+	// one job must not switch this machine off for good.
+	staleUntil atomic.Int64
+	// latest stands in for GitHub in tests: see runnerrelease.Latest.
+	latest func(context.Context) (string, error)
 	// unable is why the last look found this machine could not run a VM,
 	// so that it is said when it changes and not on every look.
 	unable atomic.Value
-	// preflight stands in for Preflight in tests.
+	// preflight stands in for Preflight in tests, and fakeVM for the host's
+	// own launch.
 	preflight func() error
+	fakeVM    func(*instance) error
 	// What the host's hypervisor keeps between VMs, if anything.
 	platform platformState
 }
@@ -86,7 +130,10 @@ type Runner struct {
 // Unusable reports why this runner cannot run jobs, or "" if it can. It
 // implements jobs.Unusable.
 func (r *Runner) Unusable() string {
-	if r.stale.Load() {
+	if r.Image.ImageVersion < MinImageVersion {
+		return ReasonOldImage
+	}
+	if r.stale() {
 		return ReasonStaleImage
 	}
 	// Asked each time and not once at the start: what a VM needs of the
@@ -130,9 +177,12 @@ type instance struct {
 	// service reads it; the guest cannot set it.
 	pool atomic.Pointer[string]
 	// slot is the VM's network identity, or -1 for one made up on the spot.
-	slot    int
-	dir     string
-	share   string
+	slot int
+	dir  string
+	// in is what the guest is handed, read-only to it; out is where it
+	// writes back.
+	in      string
+	out     string
 	console string
 	vcpus   int
 	booted  time.Time
@@ -267,8 +317,8 @@ func (r *Runner) Run(ctx context.Context, job jobs.Job) (jobs.Result, error) {
 // binary work on this machine.
 func (r *Runner) SelfTest(ctx context.Context, vcpus int) (string, error) {
 	var report string
-	result, err := r.run(ctx, jobs.Job{AssignmentID: "selftest", Pool: "selftest", VCPUs: vcpus}, "selftest", "1", func(share string) {
-		raw, _ := os.ReadFile(filepath.Join(share, "selftest.out"))
+	result, err := r.run(ctx, jobs.Job{AssignmentID: "selftest", Pool: "selftest", VCPUs: vcpus}, "selftest", "1", func(out string) {
+		raw, _ := sharefile.Read(filepath.Join(out, "selftest.out"), mostSelfTest)
 		report = string(raw)
 	})
 	if err != nil {
@@ -284,9 +334,13 @@ func (r *Runner) SelfTest(ctx context.Context, vcpus int) (string, error) {
 // log before the plug is pulled.
 const stopGrace = 2 * time.Second
 
-func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, collect func(share string)) (result jobs.Result, err error) {
+func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, collect func(out string)) (result jobs.Result, err error) {
 	id := job.AssignmentID
 	started := time.Now()
+	// An older guest would be handed its job where it can write.
+	if r.Image.ImageVersion < MinImageVersion {
+		return jobs.Result{ExitCode: -1}, errors.New(ReasonOldImage)
+	}
 	r.mu.Lock()
 	r.active++
 	vm := r.takeWarmLocked(job.VCPUs)
@@ -303,7 +357,7 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 			return jobs.Result{ExitCode: -1}, err
 		}
 	}
-	// Whatever happens: the disk, the share and the credential go.
+	// Whatever happens: the disk, the shares and the credential go.
 	defer vm.destroy()
 	// What the guest may reach is what the owner allows now, not when a
 	// warm VM booted. It is set before the job is.
@@ -327,35 +381,17 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 	}
 	r.Log.Info("VM has the job", "job", id, "vcpus", job.VCPUs, "label", job.Label, "warm", warm)
 
-	select {
-	case <-vm.ended:
-		err = vm.failure
-	case <-ctx.Done():
-		err = ctx.Err()
-		// A timeout or daemon shutdown: give the guest a moment to write
-		// why into the GitHub log. A release is GitHub already finished.
-		r.askGuestToStop(vm, ctx)
-		if vm.alive() {
-			vm.stop()
-			select {
-			case <-vm.ended:
-			case <-time.After(15 * time.Second):
-			}
-		}
-	}
+	err = vm.wait(ctx, file, r.askGuestToStop)
 
 	if collect != nil {
-		collect(vm.share)
+		collect(vm.out)
 	}
-	code, hasExit := readExit(vm.share)
+	code, hasExit := readExit(vm.out)
 	if !hasExit && err == nil {
 		err = errors.New("the VM stopped without reporting a result")
 	}
-	if code == ExitRunnerDeprecated && file == "jitconfig" {
-		// Not a job that failed: a runner that will never take one. Every
-		// later VM from this image would do the same, so stop offering.
-		r.stale.Store(true)
-		r.Log.Error("GitHub refused the guest's runner as too old; this machine will decline jobs until the image is rebuilt", "runner", r.Image.RunnerVersion)
+	if code == ExitRunnerDeprecated && file == "jitconfig" && err == nil {
+		r.refused()
 	}
 	end := classifyStop(vm, job, code, hasExit, ctx, err)
 	result = jobs.Result{ExitCode: code, Reason: end.Reason, Detail: end.Detail}
@@ -378,6 +414,82 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 	return result, err
 }
 
+// wait returns when the VM has stopped, or when ctx ends, which stops it.
+// Meanwhile, once the guest says it has taken the job's file it is removed,
+// and a guest that leaves more where its results go than results can be, or
+// writes more to its console, is stopped.
+func (vm *instance) wait(ctx context.Context, file string, askToStop func(*instance, context.Context)) error {
+	tick := time.NewTicker(outPoll)
+	defer tick.Stop()
+	taken := false
+	for {
+		select {
+		case <-vm.ended:
+			return vm.failure
+		case <-ctx.Done():
+			// A timeout or daemon shutdown: give the guest a moment to
+			// write why into the GitHub log. A release is GitHub already
+			// finished.
+			askToStop(vm, ctx)
+			vm.halt()
+			return ctx.Err()
+		case <-tick.C:
+		}
+		if !taken && sharefile.Present(filepath.Join(vm.out, "taken")) {
+			// The agent has read the job, and nothing else in the VM
+			// needs it.
+			taken = true
+			_ = os.Remove(filepath.Join(vm.in, file))
+		}
+		if sharefile.Overfull(vm.out, mostOutEntries, mostOutBytes) {
+			vm.halt()
+			return errors.New("the VM wrote more where its results go than results can be")
+		}
+		if info, err := os.Lstat(vm.console); err == nil && info.Size() > mostConsoleBytes {
+			vm.halt()
+			return errors.New("the VM wrote more to its console than a console can be")
+		}
+	}
+}
+
+// halt pulls the plug and waits a while for the VM to go.
+func (vm *instance) halt() {
+	if vm.alive() {
+		vm.stop()
+		select {
+		case <-vm.ended:
+		case <-time.After(15 * time.Second):
+		}
+	}
+}
+
+// stale reports whether jobs are declined because GitHub refused the
+// guest's runner a short while ago.
+func (r *Runner) stale() bool { return time.Now().UnixNano() < r.staleUntil.Load() }
+
+// refused is a job's word that GitHub refused the guest's runner as too
+// old. A job can write any exit code, so it is believed only when GitHub's
+// latest runner is newer than the image's; then jobs are declined for a
+// while, and asked about again after.
+func (r *Runner) refused() {
+	latest := r.latest
+	if latest == nil {
+		latest = runnerrelease.Latest
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	newest, err := latest(ctx)
+	switch {
+	case err != nil:
+		r.Log.Warn("a job says GitHub refused the guest's runner, and GitHub could not be asked whether a newer one is out; carrying on", "runner", r.Image.RunnerVersion, "error", err)
+	case !runnerrelease.Older(r.Image.RunnerVersion, newest):
+		r.Log.Warn("a job says GitHub refused the guest's runner, but it is GitHub's latest; carrying on", "runner", r.Image.RunnerVersion)
+	default:
+		r.staleUntil.Store(time.Now().Add(staleFor).UnixNano())
+		r.Log.Error("GitHub refused the guest's runner as too old; jobs are declined for an hour", "runner", r.Image.RunnerVersion, "latest", newest)
+	}
+}
+
 func (r *Runner) askGuestToStop(vm *instance, ctx context.Context) {
 	cause := context.Cause(ctx)
 	reason := jobs.ReasonDaemonShutdown
@@ -387,7 +499,7 @@ func (r *Runner) askGuestToStop(vm *instance, ctx context.Context) {
 	case errors.Is(cause, jobs.ErrReleased):
 		return
 	}
-	_ = os.WriteFile(filepath.Join(vm.share, "stop-reason"), []byte(reason+"\n"), 0o600)
+	_ = sharefile.WriteFresh(filepath.Join(vm.in, "stop-reason"), []byte(reason+"\n"))
 	select {
 	case <-vm.ended:
 	case <-time.After(stopGrace):
@@ -395,9 +507,9 @@ func (r *Runner) askGuestToStop(vm *instance, ctx context.Context) {
 }
 
 func classifyStop(vm *instance, job jobs.Job, code int, hasExit bool, ctx context.Context, err error) jobs.End {
-	diag, _ := os.ReadFile(filepath.Join(vm.share, "diag"))
+	diag, _ := sharefile.Read(filepath.Join(vm.out, "diag"), mostDiag)
 	used, total, swapUsed, swapTotal, oom, disk := jobs.ParseDiag(string(diag))
-	console, _ := os.ReadFile(vm.console)
+	console, _ := sharefile.Tail(vm.console, mostConsole)
 	consoleOOM, consoleDisk, panicked := jobs.ScanConsole(string(console))
 	mem := vm.memory
 	if total > 0 {
@@ -434,8 +546,9 @@ func hostName() string {
 	return name
 }
 
-func readExit(share string) (int, bool) {
-	raw, err := os.ReadFile(filepath.Join(share, "exit"))
+// readExit is the exit code the guest reported, if it reported one.
+func readExit(out string) (int, bool) {
+	raw, err := sharefile.Read(filepath.Join(out, "exit"), mostExit)
 	if err != nil {
 		return -1, false
 	}
@@ -446,8 +559,8 @@ func readExit(share string) (int, bool) {
 	return parsed, true
 }
 
-// boot starts a fresh VM on a clone of the guest disk, with an empty share.
-// The guest agent then waits for a job to appear in the share.
+// boot starts a fresh VM on a clone of the guest disk, with empty shares.
+// The guest agent then waits for a job to appear in what it is handed.
 func (r *Runner) boot(vcpus int) (*instance, error) {
 	if err := os.MkdirAll(r.WorkDir, 0o700); err != nil {
 		return nil, err
@@ -459,7 +572,8 @@ func (r *Runner) boot(vcpus int) (*instance, error) {
 	}
 	vm := &instance{
 		dir:     dir,
-		share:   filepath.Join(dir, "share"),
+		in:      filepath.Join(dir, "in"),
+		out:     filepath.Join(dir, "out"),
 		console: filepath.Join(dir, "console.log"),
 		vcpus:   vcpus,
 		booted:  time.Now(),
@@ -467,9 +581,11 @@ func (r *Runner) boot(vcpus int) (*instance, error) {
 		stop:    func() {},
 	}
 	// The whole of what the guest can see of the host.
-	if err := os.Mkdir(vm.share, 0o700); err != nil {
-		os.RemoveAll(dir)
-		return nil, err
+	for _, shared := range []string{vm.in, vm.out} {
+		if err := os.Mkdir(shared, 0o700); err != nil {
+			os.RemoveAll(dir)
+			return nil, err
+		}
 	}
 	address, slot, release, err := r.mac()
 	if err != nil {
@@ -479,7 +595,11 @@ func (r *Runner) boot(vcpus int) (*instance, error) {
 	vm.slot = slot
 	vm.release = release
 	// launch leaves nothing running when it fails.
-	if err := r.launch(vm, address); err != nil {
+	launch := r.launch
+	if r.fakeVM != nil {
+		launch = func(vm *instance, _ net.HardwareAddr) error { return r.fakeVM(vm) }
+	}
+	if err := launch(vm, address); err != nil {
 		release()
 		os.RemoveAll(dir)
 		return nil, err
@@ -494,24 +614,26 @@ func (r *Runner) boot(vcpus int) (*instance, error) {
 
 // handoff gives the VM its job. The clock goes first, because the guest has
 // none it can trust and a warm VM may have been waiting a while. The job file
-// appears whole or not at all, so the guest never reads half of one.
+// appears whole or not at all, so the guest never reads half of one. Each is
+// a new file: where the guest can write after all (see readOnlyShares), a
+// name it left there is replaced, never written through.
 func (vm *instance) handoff(extras map[string]string, file, content string) error {
 	now := strconv.FormatInt(time.Now().Unix(), 10)
-	if err := os.WriteFile(filepath.Join(vm.share, "clock"), []byte(now), 0o600); err != nil {
+	if err := sharefile.WriteFresh(filepath.Join(vm.in, "clock"), []byte(now)); err != nil {
 		return err
 	}
 	for name, value := range extras {
-		if err := os.WriteFile(filepath.Join(vm.share, name), []byte(value), 0o600); err != nil {
+		if err := sharefile.WriteFresh(filepath.Join(vm.in, name), []byte(value)); err != nil {
 			return err
 		}
 	}
 	// Outside the share while it is being written: the guest sees only the
 	// finished file.
 	temporary := filepath.Join(vm.dir, "handoff.tmp")
-	if err := os.WriteFile(temporary, []byte(content), 0o600); err != nil {
+	if err := sharefile.WriteFresh(temporary, []byte(content)); err != nil {
 		return err
 	}
-	return os.Rename(temporary, filepath.Join(vm.share, file))
+	return os.Rename(temporary, filepath.Join(vm.in, file))
 }
 
 func (vm *instance) alive() bool {
@@ -535,7 +657,13 @@ func (vm *instance) destroy() {
 	if vm.unserve != nil {
 		vm.unserve()
 	}
-	os.RemoveAll(vm.dir)
+	if vm.alive() {
+		// Still writing, perhaps: nothing it left is given back
+		// permissions. What stays is swept at the next start.
+		os.RemoveAll(vm.dir)
+	} else {
+		sharefile.RemoveAll(vm.dir)
+	}
 	vm.release()
 }
 
@@ -627,7 +755,7 @@ func (r *Runner) tend(available bool) {
 	}
 	// Not during a job: booting would take cores from work that is paid for.
 	// And not from an image that cannot run one.
-	start := available && r.warm == nil && !r.warming && r.active == 0 && !r.stale.Load()
+	start := available && r.warm == nil && !r.warming && r.active == 0 && !r.stale() && r.Image.ImageVersion >= MinImageVersion
 	if start {
 		r.warming = true
 	}
@@ -651,21 +779,18 @@ func (r *Runner) tend(available bool) {
 
 // keepConsole says what became of the guest's console output. It is kept
 // only when HIVE_KEEP_CONSOLE names a directory, and then as a file readable
-// by its owner alone; otherwise it is deleted with the VM, unread.
+// by its owner alone, and only its end; otherwise it is deleted with the VM,
+// unread.
 func (vm *instance) keepConsole() string {
 	keep := os.Getenv("HIVE_KEEP_CONSOLE")
 	if keep == "" {
 		return "discarded (set HIVE_KEEP_CONSOLE to a directory to keep it)"
 	}
-	raw, err := os.ReadFile(vm.console)
-	if err != nil {
-		return "unavailable"
-	}
 	if err := os.MkdirAll(keep, 0o700); err != nil {
 		return "unavailable"
 	}
 	saved := filepath.Join(keep, filepath.Base(vm.dir)+".console.log")
-	if err := os.WriteFile(saved, raw, 0o600); err != nil {
+	if err := sharefile.CopyTail(vm.console, saved, mostKeptConsole); err != nil {
 		return "unavailable"
 	}
 	return saved

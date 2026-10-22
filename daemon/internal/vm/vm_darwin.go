@@ -38,7 +38,7 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) error {
 	if err := os.Truncate(disk, diskBytes); err != nil {
 		return err
 	}
-	machine, err := r.configure(vm.vcpus, disk, vm.share, vm.console, mac)
+	machine, err := r.configure(vm.vcpus, disk, vm.in, vm.out, vm.console, mac)
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func serve(vm *instance, machine *vz.VirtualMachine, guest *GuestService) error 
 	return nil
 }
 
-func (r *Runner) configure(vcpus int, disk, share, console string, mac net.HardwareAddr) (*vz.VirtualMachine, error) {
+func (r *Runner) configure(vcpus int, disk, in, out, console string, mac net.HardwareAddr) (*vz.VirtualMachine, error) {
 	if vcpus < 1 {
 		vcpus = 1
 	}
@@ -153,20 +153,17 @@ func (r *Runner) configure(vcpus int, disk, share, console string, mac net.Hardw
 	network.SetMACAddress(address)
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{network})
 
-	directory, err := vz.NewSharedDirectory(share, false)
-	if err != nil {
-		return nil, fmt.Errorf("share: %w", err)
-	}
-	single, err := vz.NewSingleDirectoryShare(directory)
+	// What the guest is handed, which it can only read, and where it
+	// writes back.
+	handed, err := shareOne(InTag, in, true)
 	if err != nil {
 		return nil, err
 	}
-	filesystem, err := vz.NewVirtioFileSystemDeviceConfiguration(shareTag)
+	results, err := shareOne(OutTag, out, false)
 	if err != nil {
 		return nil, err
 	}
-	filesystem.SetDirectoryShare(single)
-	config.SetDirectorySharingDevicesVirtualMachineConfiguration([]vz.DirectorySharingDeviceConfiguration{filesystem})
+	config.SetDirectorySharingDevicesVirtualMachineConfiguration([]vz.DirectorySharingDeviceConfiguration{handed, results})
 
 	// The guest's console goes to a file, for diagnosis. Nothing is wired to
 	// its input: there is no way to type into the guest.
@@ -204,6 +201,24 @@ func (r *Runner) configure(vcpus int, disk, share, console string, mac net.Hardw
 		return nil, fmt.Errorf("VM configuration is not valid: %w", err)
 	}
 	return vz.NewVirtualMachine(config)
+}
+
+// shareOne is a directory the guest mounts by its tag.
+func shareOne(tag, path string, readOnly bool) (*vz.VirtioFileSystemDeviceConfiguration, error) {
+	directory, err := vz.NewSharedDirectory(path, readOnly)
+	if err != nil {
+		return nil, fmt.Errorf("share: %w", err)
+	}
+	single, err := vz.NewSingleDirectoryShare(directory)
+	if err != nil {
+		return nil, err
+	}
+	share, err := vz.NewVirtioFileSystemDeviceConfiguration(tag)
+	if err != nil {
+		return nil, err
+	}
+	share.SetDirectoryShare(single)
+	return share, nil
 }
 
 // cloneFile makes an APFS copy-on-write clone: instant, and it shares every

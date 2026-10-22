@@ -1,13 +1,17 @@
 #!/bin/bash
 # Runs one job and powers the VM off.
 #
-# The host shares exactly one directory with this VM, holding exactly one
-# thing: the job's one-time runner configuration. This script reads it,
-# deletes it, runs GitHub's runner as an unprivileged user, writes the exit
-# code back, and shuts down. The disk is discarded by the host afterwards.
+# The host shares two directories with this VM. One, tagged hive, it can
+# only read: the job's one-time runner configuration, the clock and a stop's
+# reason. The other, tagged hive-out, is for what it says back: that it is
+# ready, that it has taken the job, how the job went and its exit code. This
+# script reads the job, runs GitHub's runner as an unprivileged user, writes
+# the exit code back, and shuts down. The disk is discarded by the host
+# afterwards.
 set -u
 
-share=/run/hive
+in=/run/hive
+out=/run/hive-out
 watchdog_pid=
 peak_used_kb=0
 swap_peak_kb=0
@@ -31,14 +35,14 @@ write_diag() {
     echo "swap_used_kb=${swap_used_kb:-0}"
     echo "oom=${saw_oom:-0}"
     echo "disk_full=${saw_disk_full:-0}"
-  } > "$share/diag.tmp" 2>/dev/null && mv "$share/diag.tmp" "$share/diag"
+  } > "$out/diag.tmp" 2>/dev/null && mv "$out/diag.tmp" "$out/diag"
 }
 
 # Put a notice in the GitHub job log, if the runner is still listening, and
-# always in the share and the kernel log so the host can classify a kill.
+# always where results go and the kernel log so the host can classify a kill.
 inject() {
   local kind="$1" msg="$2"
-  printf '%s\n' "$msg" >> "$share/notices" 2>/dev/null || true
+  printf '%s\n' "$msg" >> "$out/notices" 2>/dev/null || true
   echo "hive-agent: $msg" > /dev/kmsg 2>/dev/null || true
   for cmd in /proc/[0-9]*/cmdline; do
     if tr '\0' ' ' < "$cmd" 2>/dev/null | grep -q 'Runner.Worker'; then
@@ -51,8 +55,8 @@ inject() {
 
 host_where() {
   local host label
-  host=$(tr -cd 'A-Za-z0-9._-' < "$share/host" 2>/dev/null || true)
-  label=$(tr -cd 'A-Za-z0-9._-' < "$share/label" 2>/dev/null || true)
+  host=$(tr -cd 'A-Za-z0-9._-' < "$in/host" 2>/dev/null || true)
+  label=$(tr -cd 'A-Za-z0-9._-' < "$in/label" 2>/dev/null || true)
   host=${host:-guest}
   if [ -n "$label" ]; then
     echo "$host ($label)"
@@ -98,9 +102,9 @@ sample_memory() {
 }
 
 watch_job() {
-  while [ ! -e "$share/exit" ]; do
-    if [ -e "$share/stop-reason" ]; then
-      reason=$(tr -cd 'a-z_' < "$share/stop-reason")
+  while [ ! -e "$out/exit" ]; do
+    if [ -e "$in/stop-reason" ]; then
+      reason=$(tr -cd 'a-z_' < "$in/stop-reason")
       inject error "runner stopped: ${reason:-shutdown} on $(host_where)"
       write_diag
       return
@@ -114,9 +118,10 @@ finish() {
   [ -n "${watchdog_pid:-}" ] && kill "$watchdog_pid" 2>/dev/null || true
   write_diag
   # Written under another name first, so the host never reads half a file.
-  echo "$1" > "$share/exit.tmp" 2>/dev/null && mv "$share/exit.tmp" "$share/exit"
+  echo "$1" > "$out/exit.tmp" 2>/dev/null && mv "$out/exit.tmp" "$out/exit"
   sync
-  umount "$share" 2>/dev/null
+  umount "$out" 2>/dev/null
+  umount "$in" 2>/dev/null
   systemctl poweroff --no-block
   exit 0
 }
@@ -154,8 +159,8 @@ setup_memory_headroom() {
   echo 80 > /proc/sys/vm/swappiness 2>/dev/null || true
 }
 
-mkdir -p "$share"
-if ! mount -t virtiofs hive "$share"; then
+mkdir -p "$in" "$out"
+if ! mount -t virtiofs -o ro hive "$in" || ! mount -t virtiofs hive-out "$out"; then
   echo "hive-agent: no job share; shutting down"
   systemctl poweroff --no-block
   exit 1
@@ -167,10 +172,10 @@ setup_memory_headroom
 
 # A warm VM waits here, booted, for its job to arrive.
 # `ready` tells the host the boot is behind it.
-: > "$share/ready"
+: > "$out/ready"
 waited=0
-until [ -e "$share/jitconfig" ] || [ -e "$share/selftest" ]; do
-  if [ -e "$share/stop-reason" ]; then
+until [ -e "$in/jitconfig" ] || [ -e "$in/selftest" ]; do
+  if [ -e "$in/stop-reason" ]; then
     finish 143
   fi
   sleep 0.2
@@ -181,8 +186,8 @@ done
 
 # The guest has no clock of its own worth trusting, and TLS needs one. The
 # host writes the time beside the job; a wrong clock can only break the job.
-if [ -r "$share/clock" ]; then
-  date -u -s "@$(tr -cd '0-9' < "$share/clock")" >/dev/null 2>&1 || true
+if [ -r "$in/clock" ]; then
+  date -u -s "@$(tr -cd '0-9' < "$in/clock")" >/dev/null 2>&1 || true
 fi
 
 # The host may offer this job its Actions cache, on a socket that exists
@@ -190,8 +195,8 @@ fi
 # relay gives the socket one on this VM's own loopback. The cache is offered
 # to the job only once it has answered; otherwise the job uses GitHub's.
 cache=failed
-if [ -r "$share/cache" ]; then
-  port=$(tr -cd '0-9' < "$share/cache")
+if [ -r "$in/cache" ]; then
+  port=$(tr -cd '0-9' < "$in/cache")
   if [ -n "$port" ]; then
     modprobe vmw_vsock_virtio_transport >/dev/null 2>&1 || true
     socat "TCP-LISTEN:$port,bind=127.0.0.1,reuseaddr,fork" "VSOCK-CONNECT:2:$port" >/dev/null 2>&1 &
@@ -215,7 +220,7 @@ if [ -r "$share/cache" ]; then
   fi
 fi
 
-if [ -e "$share/selftest" ]; then
+if [ -e "$in/selftest" ]; then
   # No credential involved: proves boot, the share, the network, Docker
   # and the runner binary, and nothing more.
   {
@@ -229,9 +234,11 @@ if [ -e "$share/selftest" ]; then
     echo "RUNNER=$(sudo -u runner /opt/runner/bin/Runner.Listener --version)"
     if grep -q zram /proc/swaps 2>/dev/null; then echo "ZRAM=ok"; else echo "ZRAM=missing"; fi
     if grep -q /swapfile /proc/swaps 2>/dev/null; then echo "SWAP=ok"; else echo "SWAP=missing"; fi
+    # What the host handed over is not this VM's to change.
+    if : > "$in/.probe" 2>/dev/null; then echo "HANDED=writable"; rm -f "$in/.probe"; else echo "HANDED=read-only"; fi
     curl -fsS -o /dev/null -m 20 https://api.github.com/zen && echo "NETWORK=ok" || echo "NETWORK=failed"
     # Whether the host offered its cache, and whether this VM reached it.
-    [ -r "$share/cache" ] && echo "CACHE=$cache"
+    [ -r "$in/cache" ] && echo "CACHE=$cache"
     # Docker as a job has it: the runner's user, no sudo, and an engine that
     # starts when first spoken to. One container has to start and reach
     # GitHub through Docker's own bridge. It is made from a file already on
@@ -256,15 +263,16 @@ if [ -e "$share/selftest" ]; then
       # settings must arrive untouched too.
       echo "INPUTS[$which]=$(sudo -u runner env -i 'INPUT_GITHUB-TOKEN=kept' ACTIONS_RESULTS_URL=https://example.com/ "$node" -p 'process.env["INPUT_GITHUB-TOKEN"] + " " + process.env.ACTIONS_RESULTS_URL + " " + process.argv.slice(1).join(",")' a 'b c')"
     done
-  } > "$share/selftest.out" 2>&1
+  } > "$out/selftest.out" 2>&1
   finish 0
 fi
 
 watch_job &
 watchdog_pid=$!
 
-jit=$(cat "$share/jitconfig")
-rm -f "$share/jitconfig"
+jit=$(cat "$in/jitconfig")
+# The host removes it once told it has been read.
+: > "$out/taken"
 
 cd /opt/runner
 # A clean environment: nothing of the agent's leaks into the job. The one

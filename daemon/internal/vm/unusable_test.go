@@ -13,7 +13,7 @@ import (
 func TestARunnerDeclinesJobsWhileTheMachineCannotStartAVM(t *testing.T) {
 	var log bytes.Buffer
 	var wrong error
-	r := &Runner{Log: slog.New(slog.NewTextHandler(&log, nil)), preflight: func() error { return wrong }}
+	r := &Runner{Image: Image{ImageVersion: MinImageVersion}, Log: slog.New(slog.NewTextHandler(&log, nil)), preflight: func() error { return wrong }}
 	if reason := r.Unusable(); reason != "" {
 		t.Fatalf("a machine that can start a VM declined: %s", reason)
 	}

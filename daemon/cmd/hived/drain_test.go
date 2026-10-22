@@ -136,9 +136,13 @@ func TestAJobInHandIsAVMThatWasHandedOne(t *testing.T) {
 	for _, file := range []string{
 		// A VM kept warm for the next job, one running a job, and what
 		// else lives there.
-		"job-1/share/ready",
-		"job-2/share/ready", "job-2/share/clock",
-		"notes/share/clock", ".lock",
+		"job-1/out/ready",
+		"job-2/out/ready", "job-2/in/clock",
+		"notes/in/clock", ".lock",
+		// One an older daemon is running, while the installer drains it.
+		"job-3/share/ready", "job-3/share/clock",
+		// A link a guest left is not a clock the host wrote.
+		"job-4/out/ready",
 	} {
 		full := filepath.Join(work, filepath.FromSlash(file))
 		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
@@ -148,7 +152,13 @@ func TestAJobInHandIsAVMThatWasHandedOne(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := vmJobs(work); got != 1 {
-		t.Errorf("counted %d jobs where one VM has one", got)
+	if err := os.MkdirAll(filepath.Join(work, "job-4", "in"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(work, ".lock"), filepath.Join(work, "job-4", "in", "clock")); err != nil {
+		t.Fatal(err)
+	}
+	if got := vmJobs(work); got != 2 {
+		t.Errorf("counted %d jobs where two VMs have one", got)
 	}
 }

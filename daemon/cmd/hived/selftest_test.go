@@ -30,7 +30,7 @@ func TestASelfTestDoesNotNeedTheDaemonStopped(t *testing.T) {
 
 func TestASelfTestRefusesWhileAJobRuns(t *testing.T) {
 	work := t.TempDir()
-	clock := filepath.Join(work, "job-1", "share", "clock")
+	clock := filepath.Join(work, "job-1", "in", "clock")
 	if err := os.MkdirAll(filepath.Dir(clock), 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -197,7 +197,7 @@ func formatBytes(n uint64) string {
 	return fmt.Sprintf("%d MB", n/mib)
 }
 
-// ParseDiag reads the key=value file the guest writes into the share.
+// ParseDiag reads the key=value file the guest writes where its results go.
 func ParseDiag(text string) (used, total, swapUsed, swapTotal uint64, oom, diskFull bool) {
 	for _, line := range strings.Split(text, "\n") {
 		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")

@@ -504,7 +504,9 @@ func TestAHostileGuestReachesNothingOfTheHosts(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("Run never returned")
 			}
-			if err == nil || !strings.Contains(err.Error(), "without reporting") || result.ExitCode != -1 {
+			// A directory is more than results ever are, and may be
+			// caught as that first.
+			if err == nil || !strings.Contains(err.Error(), "without reporting") && !strings.Contains(err.Error(), "more where its results go") || result.ExitCode != -1 {
 				t.Fatalf("Run() = %+v, %v; want no result", result, err)
 			}
 			if r.Unusable() == ReasonStaleRunner {
@@ -717,23 +719,6 @@ func TestARefusalIsBelievedOnlyWhenGitHubHasANewerRunner(t *testing.T) {
 				t.Fatalf("declining = %v, want %v", got, test.stale)
 			}
 		})
-	}
-}
-
-func TestVersionsAreComparedAsNumbers(t *testing.T) {
-	for _, test := range []struct {
-		a, b string
-		want bool
-	}{
-		{"2.337.0", "2.338.0", true},
-		{"2.337.0", "2.337.0", false},
-		{"2.337.0", "2.99.0", false},
-		{"2.337.0", "2.337.1", true},
-		{"2.337.0", "nonsense", false},
-	} {
-		if got := older(test.a, test.b); got != test.want {
-			t.Errorf("older(%q, %q) = %v", test.a, test.b, got)
-		}
 	}
 }
 

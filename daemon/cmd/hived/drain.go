@@ -188,8 +188,9 @@ func jobsInHand(work string) int {
 }
 
 // vmJobs is how many VMs in a work directory have been handed a job. One
-// that has carries the time of the handing over in its share; one kept warm
-// for the next job does not.
+// that has carries the time of the handing over in what it was handed; one
+// kept warm for the next job does not. An older daemon, which the installer
+// may be draining, kept it in a share named share.
 func vmJobs(work string) int {
 	count := 0
 	entries, _ := os.ReadDir(work)
@@ -197,8 +198,13 @@ func vmJobs(work string) int {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "job-") {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(work, entry.Name(), "share", "clock")); err == nil {
-			count++
+		for _, handed := range []string{"in", "share"} {
+			// Not followed: a guest that could write there may have
+			// left a link, and a link is not the host's word.
+			if info, err := os.Lstat(filepath.Join(work, entry.Name(), handed, "clock")); err == nil && info.Mode().IsRegular() {
+				count++
+				break
+			}
 		}
 	}
 	return count

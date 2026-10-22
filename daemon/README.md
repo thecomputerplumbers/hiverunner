@@ -188,8 +188,9 @@ programs stand around it, all running as the daemon's own user:
 - **QEMU** is the machine. It boots the image's kernel directly, on a qcow2
   overlay of the image's disk: instant on any filesystem, holding only what
   the job writes, deleted with the job.
-- **virtiofsd** serves the job's one directory to the guest, from inside a
-  namespace that contains nothing else.
+- **virtiofsd** serves the job's two directories to the guest, each from
+  inside a namespace that contains nothing else: what the guest is handed,
+  read-only (virtiofsd 1.11 or later), and where it writes its results.
 - **passt** is the guest's network: out through the user's own sockets,
   nothing in, and no address that reaches the host's loopback.
 
@@ -740,7 +741,9 @@ machine's search domains: a job resolves the names it wrote. On a Mac the
 system's NAT answers the guest's questions itself, at an address no
 Tailscale claims, and does pass the Mac's search domains on.
 
-What it can see of the host's files: that one directory. Nothing listens in
+What it can see of the host's files: those two directories. The host never
+follows a link the guest leaves in either, never waits on a FIFO there, and
+reads back no more than a result's few bytes. Nothing listens in
 the guest and nothing can log in to it. A released job, or one past its
 timeout, has its VM stopped at once.
 

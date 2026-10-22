@@ -4,24 +4,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/runnerrelease"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/sharefile"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/vm"
 )
 
@@ -68,8 +65,6 @@ var (
 	stopWait      = 15 * time.Second
 	staleFor      = time.Hour
 	poll          = time.Second
-	// releases is where GitHub says which runner is its latest.
-	releases = "https://api.github.com/repos/actions/runner/releases/latest"
 	// runnerSHA256 is what the runner handed to each VM must hash to.
 	runnerSHA256 = native.RunnerSHA256
 )
@@ -204,10 +199,10 @@ func (r *Runner) claim() error {
 	if err != nil {
 		return err
 	}
+	// What cannot be cleared is said, and does not stop every job after.
 	swept, err := vm.SweepWorkDir(r.WorkDir)
-	if err != nil {
-		release()
-		return err
+	if err != nil && r.Log != nil {
+		r.Log.Warn("could not clear all the macOS VMs a previous run left behind", "error", err)
 	}
 	if swept > 0 && r.Log != nil {
 		r.Log.Info("cleared the macOS VMs a previous run left behind", "directories", swept)
@@ -297,7 +292,7 @@ func (r *Runner) Run(ctx context.Context, job jobs.Job) (jobs.Result, error) {
 func (r *Runner) refused() {
 	latest := r.latest
 	if latest == nil {
-		latest = latestRunner
+		latest = runnerrelease.Latest
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -305,60 +300,12 @@ func (r *Runner) refused() {
 	switch {
 	case err != nil:
 		r.Log.Warn("a macOS job says GitHub refused its runner, and GitHub could not be asked whether a newer one is out; carrying on", "runner", native.RunnerVersion, "error", err)
-	case !older(native.RunnerVersion, newest):
+	case !runnerrelease.Older(native.RunnerVersion, newest):
 		r.Log.Warn("a macOS job says GitHub refused its runner, but it is GitHub's latest; carrying on", "runner", native.RunnerVersion)
 	default:
 		r.staleUntil.Store(time.Now().Add(staleFor).UnixNano())
 		r.Log.Error("GitHub refused the macOS VMs' runner as too old; macOS jobs are declined for an hour", "runner", native.RunnerVersion, "latest", newest)
 	}
-}
-
-// latestRunner asks GitHub which runner release is its latest.
-func latestRunner(ctx context.Context) (string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, releases, nil)
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub answered %d", response.StatusCode)
-	}
-	var release struct {
-		Tag string `json:"tag_name"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&release); err != nil {
-		return "", err
-	}
-	return strings.TrimPrefix(release.Tag, "v"), nil
-}
-
-// older reports whether version a comes before version b, as 2.337.0 does
-// before 2.338.0. A version that does not read as one is not older.
-func older(a, b string) bool {
-	left, right := strings.Split(a, "."), strings.Split(b, ".")
-	for i := range max(len(left), len(right)) {
-		x, y := 0, 0
-		var err error
-		if i < len(left) {
-			if x, err = strconv.Atoi(left[i]); err != nil {
-				return false
-			}
-		}
-		if i < len(right) {
-			if y, err = strconv.Atoi(right[i]); err != nil {
-				return false
-			}
-		}
-		if x != y {
-			return x < y
-		}
-	}
-	return false
 }
 
 // take reserves one of the VMs.
@@ -530,26 +477,9 @@ func (guest *instance) wait(ctx context.Context) error {
 }
 
 // overfull reports whether the guest has left more where its results go
-// than a few small files. It is looked at as often as the results are, so
-// it bounds a mistake rather than a guest set on filling the disk between
-// two looks; macOS has no cheap quota for one directory.
-func overfull(out string) bool {
-	entries, size := 0, int64(0)
-	err := filepath.WalkDir(out, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || path == out {
-			return err
-		}
-		entries++
-		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() {
-			size += info.Size()
-		}
-		if entries > mostOutEntries || size > mostOutBytes {
-			return fs.SkipAll
-		}
-		return nil
-	})
-	return err == nil && (entries > mostOutEntries || size > mostOutBytes)
-}
+// than a few small files. It is looked at as often as the results are;
+// macOS has no cheap quota for one directory.
+func overfull(out string) bool { return sharefile.Overfull(out, mostOutEntries, mostOutBytes) }
 
 func stopReason(ctx context.Context) string {
 	cause := context.Cause(ctx)
@@ -576,7 +506,7 @@ func (r *Runner) release(guest *instance, slot int, id, digest string) {
 		}
 	}
 	gone := func() {
-		if err := os.RemoveAll(guest.dir); err != nil {
+		if err := sharefile.RemoveAll(guest.dir); err != nil {
 			r.Log.Error("could not delete a macOS VM's clone; the next start of hived will", "job", id, "error", err)
 		} else {
 			r.Log.Info("macOS VM deleted", "job", id, "image", digest)
