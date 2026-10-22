@@ -52,6 +52,11 @@ type Settings struct {
 	// separate user rather than in a VM. `hived macos setup` turns it on
 	// once the Mac is ready; it is never on by default.
 	MacOSJobs bool `json:"macosJobs"`
+	// MacOSIsolation is how a hive-macos job is kept from the Mac and from
+	// the jobs before it: IsolationUser, as the hiveworker user on the Mac
+	// itself, or IsolationVM, in a throwaway macOS VM cloned from an image
+	// the owner made. Empty is IsolationUser.
+	MacOSIsolation string `json:"macosIsolation,omitempty"`
 	// AutoUpdate lets the daemon update itself when a release is out and
 	// it has no job, by running the installer. Off, it only says so.
 	AutoUpdate bool `json:"autoUpdate"`
@@ -110,6 +115,15 @@ const (
 // chooses block for a machine enrolled from then on, which has no jobs yet
 // to break.
 func (s Settings) Isolation() string { return cmp.Or(s.NetworkIsolation, IsolationLAN) }
+
+// What MacOSIsolation may be.
+const (
+	IsolationUser = "user"
+	IsolationVM   = "vm"
+)
+
+// MacOSInVM reports whether hive-macos jobs run in a throwaway macOS VM.
+func (s Settings) MacOSInVM() bool { return s.MacOSIsolation == IsolationVM }
 
 // Sizes are the job sizes a machine can be offered, by guest vCPUs.
 var Sizes = []int{2, 4, 8}
@@ -231,6 +245,9 @@ func (s Settings) validate() error {
 	if s.IPv6Site != 0 && !slices.Contains(fence.Sites, s.IPv6Site) {
 		return errIPv6Site
 	}
+	if s.MacOSIsolation != "" && s.MacOSIsolation != IsolationUser && s.MacOSIsolation != IsolationVM {
+		return errMacOSIsolation
+	}
 	_, _, err := parseHours(s.Hours)
 	return err
 }
@@ -245,7 +262,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "auto-update", "data-dir", "cache-dir"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "macos-isolation", "auto-update", "data-dir", "cache-dir"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -345,6 +362,15 @@ func (s *Settings) Set(key, value string) error {
 			return errIPv6Site
 		}
 		s.IPv6Site = length
+	case "macos-isolation":
+		switch value {
+		case IsolationUser:
+			s.MacOSIsolation = ""
+		case IsolationVM:
+			s.MacOSIsolation = IsolationVM
+		default:
+			return errMacOSIsolation
+		}
 	case "hours":
 		if value == "any" {
 			value = ""
@@ -358,6 +384,8 @@ func (s *Settings) Set(key, value string) error {
 	}
 	return nil
 }
+
+var errMacOSIsolation = errors.New("macos-isolation takes user or vm")
 
 // reserve is a parsed reserve-memory: gigabytes, or a percent of the host's
 // memory. The zero value holds nothing back.

@@ -26,6 +26,9 @@ import (
 const (
 	imageName = "image"
 	cacheName = "actions-cache"
+	// macosImageName is the owner's macOS image, for macos-isolation vm.
+	// It goes where the Linux image goes, so a job's VM is a clone of it.
+	macosImageName = "macos-image"
 )
 
 // A move is a home that changed while what it holds was still in the old
@@ -164,6 +167,20 @@ func imageDir(current settings.Settings) (string, error) {
 	return filepath.Join(home, imageName), nil
 }
 
+// macosImageDir is the macOS image's directory, beside the Linux one.
+func macosImageDir(current settings.Settings) (string, error) {
+	home, err := dataHome(current)
+	if err != nil {
+		return "", err
+	}
+	if fallback, _ := defaultDataHome(); home != fallback {
+		if err := away("data-dir", home); err != nil {
+			return "", err
+		}
+	}
+	return filepath.Join(home, macosImageName), nil
+}
+
 // cacheDir is the Actions cache's directory. HIVE_CACHE comes first, as
 // HIVE_IMAGE does.
 func cacheDir(current settings.Settings) (string, error) {
@@ -247,11 +264,17 @@ func settle(current settings.Settings) (moved []string, err error) {
 	var failures []error
 	if next := pending.Data; next != nil {
 		from := filepath.Join(next.From, imageName)
-		if err := carry(from, filepath.Join(next.To, imageName), next.To); err != nil {
+		macOS := filepath.Join(next.From, macosImageName)
+		err := carry(from, filepath.Join(next.To, imageName), next.To)
+		if err == nil {
+			err = carry(macOS, filepath.Join(next.To, macosImageName), next.To)
+		}
+		if err != nil {
 			failures = append(failures, fmt.Errorf("the image: %w", err))
 		} else {
 			// What a job left behind is not worth carrying.
 			_ = os.RemoveAll(workDir(from))
+			_ = os.RemoveAll(workDir(macOS))
 			_ = os.Remove(next.From)
 			moved = append(moved, "the image and job disks are now in "+next.To)
 			pending.Data = nil

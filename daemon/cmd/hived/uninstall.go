@@ -58,7 +58,9 @@ func uninstall(args []string) error {
 	if current, err := settings.Load(); err == nil {
 		pending := loadMoves()
 		for _, home := range homes(current.DataDir, pending.Data) {
-			elsewhere = append(elsewhere, filepath.Join(home, imageName), workDir(filepath.Join(home, imageName)))
+			for _, name := range []string{imageName, macosImageName} {
+				elsewhere = append(elsewhere, filepath.Join(home, name), workDir(filepath.Join(home, name)))
+			}
 		}
 		for _, home := range homes(current.CacheDir, pending.Cache) {
 			elsewhere = append(elsewhere, filepath.Join(home, cacheName))

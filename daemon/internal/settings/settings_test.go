@@ -52,6 +52,8 @@ func TestSetRefusesWhatItCannotMean(t *testing.T) {
 		{"reserve-memory", "95%"},
 		{"reserve-memory", "lots"},
 		{"reserve-memory", "-4G"},
+		{"macos-isolation", "container"},
+		{"macos-isolation", "on"},
 	} {
 		if err := current.Set(bad[0], bad[1]); err == nil {
 			t.Errorf("set %s %s was accepted", bad[0], bad[1])
@@ -309,5 +311,33 @@ func TestTheOwnerSaysHowBigTheIPv6SiteIs(t *testing.T) {
 	}
 	if _, err := read(path); err == nil {
 		t.Error("an ipv6Site of 60 was read")
+	}
+}
+
+// A Mac runs hive-macos jobs as the hiveworker user until its owner asks
+// for a VM, and a file that says anything else is refused.
+func TestMacOSIsolation(t *testing.T) {
+	current := Default()
+	if current.MacOSInVM() {
+		t.Fatal("a Mac whose owner has decided nothing runs macOS jobs in a VM")
+	}
+	if err := current.Set("macos-isolation", " VM "); err != nil || !current.MacOSInVM() || current.MacOSIsolation != IsolationVM {
+		t.Fatalf("set macos-isolation vm: %+v %v", current, err)
+	}
+	if err := current.Set("macos-isolation", "user"); err != nil || current.MacOSInVM() || current.MacOSIsolation != "" {
+		t.Fatalf("set macos-isolation user: %+v %v", current, err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"macosIsolation":"jail"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := read(path); err == nil {
+		t.Error("an isolation that means nothing was read")
+	}
+	if err := os.WriteFile(path, []byte(`{"macosIsolation":"vm"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read(path); err != nil || !got.MacOSInVM() {
+		t.Errorf("read = %+v, %v", got, err)
 	}
 }

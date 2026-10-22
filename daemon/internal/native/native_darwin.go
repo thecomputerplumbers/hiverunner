@@ -217,7 +217,7 @@ func Setup(ctx context.Context, options SetupOptions) error {
 		if err := os.Chmod(dir, 0o755); err != nil {
 			return err
 		}
-		tarball, err := downloadRunner(ctx, dir)
+		tarball, err := DownloadRunner(ctx, dir)
 		if err != nil {
 			return err
 		}

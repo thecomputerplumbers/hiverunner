@@ -369,24 +369,6 @@ func run(ctx context.Context) error {
 		unlock()
 	}()
 
-	// macOS jobs, if the owner has set this Mac up for them. Built now,
-	// asked later: whether it is ready is checked when the setting is on.
-	var nativeRunner *native.Runner
-	if runtime.GOOS == "darwin" {
-		if built, err := native.New(log); err != nil {
-			log.Warn("macOS jobs are not available", "error", err)
-		} else {
-			nativeRunner = built
-		}
-	}
-	macOS := func() bool {
-		return nativeRunner != nil && live.Get().MacOSJobs && nativeRunner.Ready()
-	}
-	var native jobs.Runner
-	if nativeRunner != nil {
-		native = nativeRunner
-	}
-
 	// What the owner asked to be kept somewhere else is moved there now,
 	// before either place is opened.
 	moved, err := settle(live.Get())
@@ -397,6 +379,25 @@ func run(ctx context.Context) error {
 		log.Warn("could not move everything; carrying on from where it is", "error", err)
 	}
 	settled, gone := loadMoves(), absent(live.Get())
+
+	// macOS jobs, if the owner has set this Mac up for them, run either as
+	// the hiveworker user or in a throwaway macOS VM, as macos-isolation
+	// says. Built now, once anything waiting to move has moved, and asked
+	// later: whether it is ready is checked when the setting is on.
+	var macosJobs *macosRunner
+	if runtime.GOOS == "darwin" {
+		macosJobs = newMacOSRunner(log, live.Get)
+		if err := macosJobs.claim(); err != nil {
+			log.Warn("could not clear what a previous run's macOS VMs left behind", "error", err)
+		}
+	}
+	macOS := func() bool {
+		return macosJobs != nil && live.Get().MacOSJobs && macosJobs.Unusable() == ""
+	}
+	var native jobs.Runner
+	if macosJobs != nil {
+		native = macosJobs
+	}
 
 	// Without a guest image the machine still connects and reports presence;
 	// it declines jobs and says why.
@@ -464,6 +465,8 @@ func run(ctx context.Context) error {
 		if facts, err := host.ReadFacts(); err == nil {
 			maxJobs = min(maxJobs, memoryPlan(facts, current).Jobs)
 		}
+		// A macOS VM's own limits are set by its runner, once it is the
+		// one chosen for an offer: see jobs.Limiter.
 		return jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS(), Hold: hold,
 			Available: host.AvailableMemory(), Reserve: current.ReserveBytes(hostMemory()), GuestMemory: guestMemory}
 	}

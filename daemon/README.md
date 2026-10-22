@@ -225,29 +225,44 @@ the journal for the log (`journalctl --user -u hiveworker`).
 The machine's owner decides what it lends. `hived config` shows the settings
 and `hived config set <name> <value>` changes one:
 
-| Setting             | Values                      | What it does                                               |
-| ------------------- | --------------------------- | ---------------------------------------------------------- |
-| `max-jobs`          | `1` to `8`                  | How many jobs run at once                                  |
-| `max-vcpus`         | `2`, `4`, `8`, `auto`       | The largest job this Mac takes                             |
-| `warm`              | `on`, `off`                 | Keep one VM booted so a `hive` job starts sooner           |
-| `battery`           | `on`, `off`                 | Take jobs while unplugged                                  |
-| `lid`               | `on`, `off`                 | Take jobs with the lid closed                              |
-| `hours`             | `22:00-07:00`, `any`        | When jobs may start, in local time                         |
-| `cache`             | `on`, `off`                 | Keep an Actions cache on this Mac                          |
-| `cache-size`        | `1` to `2000`, `auto`       | The most disk the cache may use, in gigabytes              |
-| `reserve-memory`    | `24G`, `40%`, `off`         | Memory kept for everything else on this machine            |
-| `network-isolation` | `block`, `lan-allow`, `off` | What of the networks around this machine jobs are kept off |
-| `allow-network`     | a list, `none`              | Private places jobs may reach anyway                       |
-| `dns`               | `host`, `public`            | The resolvers jobs are given                               |
-| `ipv6-site`         | `48`, `56`, `64`            | The IPv6 site around this machine jobs are kept off        |
-| `data-dir`          | a path, `default`           | Where the image and each job's disk are kept               |
-| `cache-dir`         | a path, `default`           | Where the Actions cache is kept                            |
+| Setting             | Values                      | What it does                                                       |
+| ------------------- | --------------------------- | ------------------------------------------------------------------ |
+| `max-jobs`          | `1` to `8`                  | How many jobs run at once                                          |
+| `max-vcpus`         | `2`, `4`, `8`, `auto`       | The largest job this Mac takes                                     |
+| `warm`              | `on`, `off`                 | Keep one VM booted so a `hive` job starts sooner                   |
+| `battery`           | `on`, `off`                 | Take jobs while unplugged                                          |
+| `lid`               | `on`, `off`                 | Take jobs with the lid closed                                      |
+| `hours`             | `22:00-07:00`, `any`        | When jobs may start, in local time                                 |
+| `cache`             | `on`, `off`                 | Keep an Actions cache on this Mac                                  |
+| `cache-size`        | `1` to `2000`, `auto`       | The most disk the cache may use, in gigabytes                      |
+| `reserve-memory`    | `24G`, `40%`, `off`         | Memory kept for everything else on this machine                    |
+| `network-isolation` | `block`, `lan-allow`, `off` | What of the networks around this machine jobs are kept off         |
+| `allow-network`     | a list, `none`              | Private places jobs may reach anyway                               |
+| `dns`               | `host`, `public`            | The resolvers jobs are given                                       |
+| `ipv6-site`         | `48`, `56`, `64`            | The IPv6 site around this machine jobs are kept off                |
+| `macos-jobs`        | `on`, `off`                 | Take `hive-macos` jobs; see "macOS jobs" below                     |
+| `macos-isolation`   | `user`, `vm`                | Run each as the `hiveworker` user, or in a macOS VM (experimental) |
+| `data-dir`          | a path, `default`           | Where the image and each job's disk are kept                       |
+| `cache-dir`         | a path, `default`           | Where the Actions cache is kept                                    |
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
 
 When the machine is not taking jobs, `hived status` says why and what to do
 about it: `lid closed`, then `open the lid or run hived config set lid on`.
+
+## macOS jobs
+
+A Mac can also take `runs-on: hive-macos` jobs, for Xcode, iOS builds and
+signing. By default each runs on the Mac itself as a separate user,
+`hiveworker`, which `hived macos setup` makes. With
+`hived config set macos-isolation vm` each runs instead in a throwaway
+macOS VM: an APFS clone of an image its owner made once with
+`hived macos image create`, `open` and `seal`, with a machine identifier of
+its own, deleted when the job ends. The job reads the image's digest as
+`HIVE_IMAGE_DIGEST`. Two such VMs run at once at most, as Apple's licence
+allows. `docs/running-jobs.md` has both ways in full; the VM way has not yet
+run on real hardware.
 
 ## On another disk
 
@@ -261,7 +276,8 @@ Mac with a small one of its own:
 ```
 
 Each names a home, and hived keeps a directory of its own inside it (`image`
-and `image-jobs`, `actions-cache`), so both may name the same place. What is
+and `image-jobs`, `macos-image` and `macos-image-jobs`, `actions-cache`), so
+both may name the same place. What is
 already there is moved, not downloaded again: at once if no daemon is
 running, and otherwise by the daemon, which stops taking jobs, waits for the
 ones it has, moves, and starts itself again. Until then everything carries on
@@ -802,6 +818,7 @@ refuses, rather than sharing the machine with it.
 | `internal/bench`    | The speed score benchmark                                    |
 | `internal/config`   | The machine file                                             |
 | `internal/fence`    | What a job's guest may reach of the networks around it       |
+| `internal/macvm`    | `hive-macos` jobs in a throwaway macOS VM, and its image     |
 
 ## Tests
 

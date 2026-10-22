@@ -172,7 +172,8 @@ for the machine it is running on.
 ### macOS jobs (iOS builds)
 
 `runs-on: hive-macos` is for what only macOS can do: Xcode, iOS builds and
-signing, simulators. Such a job does not run in a VM. It runs on a member's
+signing, simulators. Unless the Mac's owner chooses a VM for each job (see
+"A macOS VM per job" below), such a job does not run in a VM. It runs on a member's
 Mac itself, as a separate local user named `hiveworker`, which keeps the
 owner's files and keychain out of reach and nothing more: the job can use the
 Xcode and other software installed on that Mac, and its network. It is the
@@ -224,6 +225,97 @@ jobs:
 
 Android EAS builds need no Mac: they run on the Linux labels with
 `setup-java` and `android-actions/setup-android`.
+
+#### A macOS VM per job (not yet run on real hardware)
+
+A Mac's owner can have each `hive-macos` job run in a throwaway macOS VM
+instead, so nothing one job leaves behind, a process still running or a
+file in a home folder, is there when the next one holds a signing key:
+
+```sh
+hived config set macos-isolation vm    # user, the default, is the hiveworker user
+```
+
+The label, the hive's "Allow macOS jobs" switch and the coordinator are the
+same; only the Mac decides, and it can change its mind for the jobs it is
+offered next. The VM
+is a clone of an image the owner makes once, from a macOS restore image
+(IPSW) they already have on the Mac. Nothing is downloaded but GitHub's
+runner:
+
+1. `hived macos image create --ipsw <file>` installs macOS into a new image
+   (a sparse disk, 150 GB unless `--disk-gb` says otherwise, the auxiliary
+   storage and the hardware model the IPSW asks for), beside the Linux
+   image in `data-dir`.
+2. `hived macos image open --share <folder>` starts the image itself in a
+   window. In it the owner goes through Setup Assistant with an admin user
+   named `runner` and FileVault off, has `runner` log in automatically,
+   installs Xcode (from a `.xip` in the shared folder, or copied from the
+   Mac's own `/Applications`), accepts its licence and finishes its first
+   launch, downloads the iOS platform, installs what every job needs
+   (CocoaPods, Node 24 with corepack, Java 17), runs the guest agent's
+   installer from `/Volumes/My Shared Files/hive`, and shuts the VM down.
+   The installer also turns Remote Login, Screen Sharing, Remote Management
+   and File Sharing off and has the firewall block every incoming
+   connection. `hived macos image help` lists the commands.
+3. `hived macos image seal` reads the whole image and takes its digest
+   (sha256 over the disk, the auxiliary storage and the hardware model),
+   and puts GitHub's runner, the version `hived` pins, beside it. A job
+   runs only from a sealed image. Its files' sizes and modification times
+   are kept with the digest, and a job refuses an image whose files no
+   longer match them until it is sealed again: that catches the image
+   opened and not sealed after, not a change made to look like none.
+   Moving `data-dir` to another disk changes them too, so seal it again
+   after.
+4. `hived config set macos-jobs on`.
+
+For each job hived makes an APFS clone of the disk and the auxiliary
+storage, gives the VM a machine identifier of its own, and shares two
+directories with it. One it can only read: GitHub's runner, checked against
+the checksum `hived` pins, the job's one-time runner configuration, removed
+once the agent has read it, and the image's digest. Results are read
+through the other, without following links, as regular files with a small
+size cap, and a VM that leaves more than a few small files there is
+stopped. That is looked at once a second; macOS has no cheap quota for one
+directory, so the free space on the Mac's disk is the real limit. The agent, a launch daemon in the
+image, waits for `runner`'s automatic login, unpacks the runner onto the
+VM's own disk and runs it as `runner` in that login session (which
+simulators, the keychain and Xcode want), with `HIVE_IMAGE_DIGEST` set to
+the digest, so a job's log can record which image built and signed it.
+
+The digest names an image; it does not vouch for one. The Mac computes it
+itself, and its owner, or anything running as them, can change the image
+and seal it again. It tells an honest Mac's jobs apart by image, and no
+more. The runner is not part of it. When the runner exits the agent
+writes its exit code back and shuts the VM down; hived then deletes the
+clone, whether the job passed, failed, timed out or was released, and logs
+`macOS VM deleted` with the digest. A VM whose agent has not said it is
+ready within five minutes is stopped and the job fails, rather than holding
+the Mac until its timeout.
+
+A VM has 4 vCPUs and 8 GB, or half the Mac's memory if that is less, and
+the Mac's NAT network: out to the internet and the Mac's own network. The
+two VMs that can run at once are on the same NAT subnet, with each other and
+with the Mac, and every clone has the same `runner` user and password. So
+the image keeps nothing listening, as its installer leaves it: no sharing
+services, and a firewall that blocks every incoming connection. Nothing on
+the host keeps the VMs apart on the network yet.
+Apple's macOS licence allows two macOS VMs on a Mac besides its own macOS,
+so a Mac takes two such jobs at once at most, whatever `max-jobs` says, and
+declines a third with that reason. Whether a job runs in a VM is decided when
+it is offered: changing `macos-isolation` changes the jobs offered after,
+not one already accepted. A job can report any exit code, so one saying
+GitHub refused its runner as too old (exit 7) is believed only when
+GitHub's latest runner is newer than the one `hived` pins; then the Mac
+declines macOS jobs for an hour, and asks again the next time. A daemon that starts clears any clone one that died
+left behind, whichever way it runs macOS jobs. A job is declined, too, when the Mac does
+not have the VM's memory free beside its reserve. Simulators run inside the
+VM; an Apple Silicon Mac needs no nested virtualization for them.
+
+Not done yet: the Actions cache is not offered to these VMs (their jobs use
+GitHub's), there is no read-only shared cache of pnpm, CocoaPods or Gradle
+stores, the VM's console and a stop's reason are not written into the job's
+log, and no image is published: each owner makes their own.
 
 Jobs install their own toolchains with `setup-*` actions; the system's
 `python3` is there for scripts. Docker is in the

@@ -601,3 +601,116 @@ func TestAMachineCoolingOffDeclinesEveryOffer(t *testing.T) {
 		t.Fatalf("offer after: %q", reason)
 	}
 }
+
+func macOSOffer(id string) *protocol.JobAssign {
+	return &protocol.JobAssign{AssignmentID: id, Label: "hive-macos", Arch: protocol.KindMacOS, VCPUs: 4, TimeoutMinutes: 60}
+}
+
+// A Mac that runs each macOS job in a VM runs two at most, whatever its
+// owner allows, and a Linux job still takes a slot beside them.
+func TestMacOSVMsAreHeldToTheLicence(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Native(newFake())
+	m.Limit(limited(Limits{MaxJobs: 4, MacOS: true, MostMacOS: 2}))
+	for _, id := range []string{"m-1", "m-2"} {
+		if reason := m.Offer("acme", macOSOffer(id)); reason != "" {
+			t.Fatalf("macOS job %s: %q", id, reason)
+		}
+	}
+	if reason := m.Offer("acme", macOSOffer("m-3")); reason != ReasonMacOSVMs {
+		t.Fatalf("a third macOS VM: %q, want %q", reason, ReasonMacOSVMs)
+	}
+	if reason := m.Offer("acme", offer("l-1")); reason != "" {
+		t.Fatalf("a Linux job beside two macOS VMs: %q", reason)
+	}
+	m.Release("acme", "m-1")
+	if reason := m.Offer("acme", macOSOffer("m-3")); reason != "" {
+		t.Fatalf("a macOS job once one has gone: %q", reason)
+	}
+}
+
+// A macOS job run in a VM needs that VM's memory free on the host. One run
+// on the Mac itself is not checked, as before.
+func TestAMacOSVMNeedsItsMemory(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Native(newFake())
+	m.Limit(limited(Limits{MaxJobs: 2, MacOS: true, Available: 8*gib + MemoryMargin - 1, GuestMemory: fourGiB, MacOSMemory: 8 * gib}))
+	if reason := m.Offer("acme", macOSOffer("m-1")); reason != ReasonLowMemory {
+		t.Fatalf("an 8 GiB macOS VM a byte short: %q, want low memory", reason)
+	}
+	m.Limit(limited(Limits{MaxJobs: 2, MacOS: true, Available: 8*gib + MemoryMargin - 1, GuestMemory: fourGiB}))
+	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
+		t.Fatalf("a macOS job on the Mac itself: %q", reason)
+	}
+	m.Release("acme", "m-1")
+	m.Limit(limited(Limits{MaxJobs: 2, MacOS: true, Available: 12*gib + MemoryMargin - 1, GuestMemory: fourGiB, MacOSMemory: 8 * gib}))
+	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
+		t.Fatalf("a macOS VM with room: %q", reason)
+	}
+	if reason := m.Offer("acme", sized("l-1", 2)); reason != ReasonLowMemory {
+		t.Fatalf("a Linux job past an accepted macOS VM: %q, want low memory", reason)
+	}
+}
+
+// chooser hands out whichever runner it is pointed at now.
+type chooser struct{ now Runner }
+
+func (c *chooser) Run(context.Context, Job) (Result, error) { panic("a chooser runs nothing itself") }
+
+func (c *chooser) Choose() Runner { return c.now }
+
+// The way a job runs is decided when it is offered. Changing it before the
+// job starts changes how later jobs run, not that one.
+func TestAJobRunsTheWayItWasAcceptedFor(t *testing.T) {
+	inVM, asUser := newFake(), newFake()
+	ways := &chooser{now: inVM}
+	m := New(newFake(), quiet)
+	m.Native(ways)
+	m.Limit(limited(Limits{MaxJobs: 2, MacOS: true}))
+	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
+		t.Fatalf("offer: %q", reason)
+	}
+	ways.now = asUser
+	if err := m.Start(context.Background(), "acme", start("m-1")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-inVM.started:
+	case <-asUser.started:
+		t.Fatal("a job accepted for a VM ran another way")
+	case <-within(t, "start"):
+		t.Fatal("the job never started")
+	}
+	inVM.finish <- 0
+	<-m.Exits("acme")
+
+	// A way that cannot run declines the offer with its reason.
+	ways.now = broken{}
+	if reason := m.Offer("acme", macOSOffer("m-2")); reason != (broken{}).Unusable() {
+		t.Fatalf("offer to an unusable way: %q", reason)
+	}
+}
+
+// oneAtATime is a way of running jobs that takes one at most.
+type oneAtATime struct{ *fake }
+
+func (oneAtATime) Limit(limits *Limits) { limits.MostMacOS = 1 }
+
+// An offer's limits are those of the way chosen for it, read once with the
+// choice: not the setting read again, which may have changed in between.
+func TestTheLimitsAreThoseOfTheWayChosen(t *testing.T) {
+	ways := &chooser{now: oneAtATime{newFake()}}
+	m := New(newFake(), quiet)
+	m.Native(ways)
+	m.Limit(limited(Limits{MaxJobs: 4, MacOS: true}))
+	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
+		t.Fatalf("first: %q", reason)
+	}
+	if reason := m.Offer("acme", macOSOffer("m-2")); reason != ReasonMacOSVMs {
+		t.Fatalf("second, past the chosen way's limit: %q", reason)
+	}
+	ways.now = newFake()
+	if reason := m.Offer("acme", macOSOffer("m-2")); reason != "" {
+		t.Fatalf("second, by a way with no limit of its own: %q", reason)
+	}
+}
