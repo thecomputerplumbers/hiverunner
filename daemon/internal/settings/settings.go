@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -65,6 +66,11 @@ type Settings struct {
 	// as `hived config set allow-network` takes it:
 	// "192.168.1.20:5432,10.0.0.0/24". Empty means nowhere.
 	AllowNetwork string `json:"allowNetwork,omitempty"`
+	// IPv6Site is the length of the IPv6 prefix this machine's site has:
+	// 56 for most homes, 48 for an office, 64 for a machine whose /64 is
+	// its own. Jobs are kept off the whole of it. Zero is the default,
+	// fence.DefaultSite. See fence.Policy.Site.
+	IPv6Site int `json:"ipv6Site"`
 	// DataDir is where the guest image and each job's disk are kept, for an
 	// owner who wants them on another disk. Empty means beside the machine
 	// file. The two cannot be apart: a job's disk is a clone of the image.
@@ -94,7 +100,7 @@ const MostJobs = 8
 // Default is a machine whose owner has decided nothing: it behaves as the
 // daemon did before there were settings.
 func Default() Settings {
-	return Settings{MaxJobs: 1, Warm: true, Battery: true, Cache: true, AutoUpdate: true}
+	return Settings{MaxJobs: 1, Warm: true, Battery: true, Cache: true, AutoUpdate: true, IPv6Site: fence.DefaultSite}
 }
 
 // Path is the settings file, beside the machine file.
@@ -130,6 +136,9 @@ func read(path string) (Settings, error) {
 	// A file written by hand may leave it out as zero.
 	if current.MaxJobs == 0 {
 		current.MaxJobs = 1
+	}
+	if current.IPv6Site == 0 {
+		current.IPv6Site = fence.DefaultSite
 	}
 	if err := current.validate(); err != nil {
 		return Default(), fmt.Errorf("%s: %w", path, err)
@@ -181,6 +190,10 @@ func (s Settings) validate() error {
 	if _, err := fence.ParseAllowances(s.AllowNetwork); err != nil {
 		return err
 	}
+	// Zero, from settings made before there was one, is the default.
+	if s.IPv6Site != 0 && !slices.Contains(fence.Sites, s.IPv6Site) {
+		return errIPv6Site
+	}
 	_, _, err := parseHours(s.Hours)
 	return err
 }
@@ -195,7 +208,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "private-network", "allow-network", "macos-jobs", "auto-update", "data-dir", "cache-dir"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "private-network", "allow-network", "ipv6-site", "macos-jobs", "auto-update", "data-dir", "cache-dir"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -288,6 +301,12 @@ func (s *Settings) Set(key, value string) error {
 			return err
 		}
 		s.AllowNetwork = fence.FormatAllowances(allowed)
+	case "ipv6-site":
+		length, err := strconv.Atoi(strings.TrimPrefix(value, "/"))
+		if err != nil || !slices.Contains(fence.Sites, length) {
+			return errIPv6Site
+		}
+		s.IPv6Site = length
 	case "hours":
 		if value == "any" {
 			value = ""
@@ -456,10 +475,12 @@ func (s Settings) holding(power host.Power, now time.Time) (reason, fix string) 
 	return "", ""
 }
 
+var errIPv6Site = errors.New("ipv6-site takes 48, 56 or 64: the length of the IPv6 prefix this machine's site has")
+
 // Network is what the owner lets a job's guest reach beyond the internet.
 func (s Settings) Network() fence.Policy {
 	allowed, _ := fence.ParseAllowances(s.AllowNetwork)
-	return fence.Policy{Open: s.PrivateNetwork, Allow: allowed}
+	return fence.Policy{Open: s.PrivateNetwork, Allow: allowed, Site: s.IPv6Site}
 }
 
 // Takes reports whether a job of this size is within the owner's limit.

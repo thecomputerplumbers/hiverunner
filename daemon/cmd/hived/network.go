@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"strings"
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
@@ -18,10 +19,13 @@ type networkState struct {
 	// Fenced is whether this machine holds jobs to that. A Mac does not
 	// yet, whatever the setting says.
 	Fenced bool `json:"fenced"`
+	// IPv6Site is the length of the IPv6 prefix jobs are kept off around
+	// this machine's own addresses.
+	IPv6Site int `json:"ipv6Site"`
 }
 
 func networkOf(current settings.Settings, fences bool) networkState {
-	state := networkState{PrivateNetwork: "block", Allow: []string{}, Fenced: fences && !current.PrivateNetwork}
+	state := networkState{PrivateNetwork: "block", Allow: []string{}, Fenced: fences && !current.PrivateNetwork, IPv6Site: cmp.Or(current.IPv6Site, fence.DefaultSite)}
 	if current.PrivateNetwork {
 		state.PrivateNetwork = "allow"
 	}

@@ -47,6 +47,8 @@ func TestTheGuestIsKeptOffWhatIsNotTheInternet(t *testing.T) {
 		{"64:ff9b:1:80a:0:1:808:808", true},
 		{"64:ff9b:1:abcd::808:808", true},
 		{"64:ff9b:1::c0a8:101", true},
+		// 8.8.8.8 at /96, and 0.0.0.0 at /64: refused, as the README says.
+		{"64:ff9b:1::808:808", true},
 		{"64:ff9b:2::c0a8:101", false},
 		{"::ffff:8.8.8.8", false},
 		// The internet, right up to each range's edges.
@@ -122,7 +124,10 @@ func TestTheOwnerSaysWhatElseAJobMayReach(t *testing.T) {
 		// same, and it reaches them past the router.
 		{"a neighbour on the host's public IPv4 subnet", protoTCP, "198.51.100.50", 445, false},
 		{"a neighbour in the host's global IPv6 /64", protoTCP, "2001:db8:1:1::50", 445, false},
-		{"the next IPv6 /64 along, which is the internet", protoTCP, "2001:db8:1:2::50", 443, true},
+		// The rest of the host's IPv6 site, a /56 unless the owner says.
+		{"another /64 of the host's site, such as guest Wi-Fi", protoTCP, "2001:db8:1:2::50", 445, false},
+		{"the last /64 of the host's site", protoTCP, "2001:db8:1:ff::50", 445, false},
+		{"the next site along, which is the internet", protoTCP, "2001:db8:1:100::50", 443, true},
 		{"the next IPv4 subnet along", protoTCP, "198.51.101.50", 443, true},
 		{"the internet", protoTCP, "140.82.112.3", 443, true},
 	} {
@@ -230,7 +235,8 @@ func TestTheHostsNetworksAreItsNeighboursUnlessItHasNone(t *testing.T) {
 		{"a DHCPv6 address, which says /128 and sits on a /64", up, "2001:db8:1:1::5", 128, "2001:db8:1:1::5/64"},
 		{"an IPv6 /56 on the link", up, "2001:db8:1:100::5", 56, "2001:db8:1:100::5/56"},
 		{"an IPv6 mask wider than any link's", up, "2001:db8:1:1::5", 32, "2001:db8:1:1::5/64"},
-		{"an IPv4 mask wider than any LAN's, which is a VPN's route", up, "203.0.113.7", 8, "203.0.113.7/32"},
+		{"an IPv4 mask wider than any LAN's, which is taken as a /16", up, "203.0.113.7", 8, "203.0.113.7/16"},
+		{"a /16 public LAN", up, "203.0.113.7", 16, "203.0.113.7/16"},
 		{"a tunnel to one peer", net.FlagUp | net.FlagPointToPoint, "100.101.102.103", 10, "100.101.102.103/32"},
 		{"a loopback", net.FlagUp | net.FlagLoopback, "127.0.0.1", 8, "127.0.0.1/32"},
 		{"an interface that is down", net.FlagBroadcast, "198.51.100.5", 24, "198.51.100.5/32"},
@@ -247,6 +253,35 @@ func TestTheHostsNetworksAreItsNeighboursUnlessItHasNone(t *testing.T) {
 	for _, network := range found {
 		if !network.IsValid() {
 			t.Errorf("an invalid network: %v", network)
+		}
+	}
+}
+
+func TestTheOwnerSaysHowBigTheHostsIPv6SiteIs(t *testing.T) {
+	host := []netip.Prefix{
+		netip.MustParsePrefix("2001:db8:1:1::5/64"),
+		// A tunnel's address is alone, and stays alone.
+		netip.MustParsePrefix("2001:db8:9:9::9/128"),
+	}
+	for _, test := range []struct {
+		site    int
+		address string
+		want    bool
+	}{
+		{0, "2001:db8:1:2::50", false},
+		{0, "2001:db8:1:100::50", true},
+		{56, "2001:db8:1:2::50", false},
+		{64, "2001:db8:1:1::50", false},
+		{64, "2001:db8:1:2::50", true},
+		{48, "2001:db8:1:100::50", false},
+		{48, "2001:db8:1:ffff::50", false},
+		{48, "2001:db8:2::50", true},
+		{48, "2001:db8:9:9::8", true},
+		{0, "2001:db8:9:9::9", false},
+	} {
+		policy := &Policy{Host: host, Site: test.site}
+		if got := policy.Reaches(protoTCP, netip.MustParseAddr(test.address), 445); got != test.want {
+			t.Errorf("site /%d, %s: reached %v, want %v", test.site, test.address, got, test.want)
 		}
 	}
 }

@@ -249,3 +249,45 @@ func TestJobsAreKeptOffPrivateNetworksUnlessTheOwnerSays(t *testing.T) {
 		t.Errorf("read = %+v, %v", got, err)
 	}
 }
+
+func TestTheOwnerSaysHowBigTheIPv6SiteIs(t *testing.T) {
+	current := Default()
+	if current.IPv6Site != 56 || current.Network().Site != 56 {
+		t.Fatalf("the default site is /%d", current.IPv6Site)
+	}
+	for _, typed := range []string{"48", "/64", "56"} {
+		if err := current.Set("ipv6-site", typed); err != nil {
+			t.Errorf("ipv6-site %s: %v", typed, err)
+		}
+	}
+	if current.IPv6Site != 56 {
+		t.Errorf("ipv6-site 56 stored as %d", current.IPv6Site)
+	}
+	for _, bad := range []string{"60", "128", "0", "site"} {
+		// "0" typed is refused; only a file may leave it out.
+		if err := current.Set("ipv6-site", bad); err == nil {
+			t.Errorf("ipv6-site %s was accepted", bad)
+		}
+	}
+	// A file from before the setting, or written by hand without it, is
+	// the default; one that says something else is refused.
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"maxJobs":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read(path); err != nil || got.IPv6Site != 56 {
+		t.Errorf("no ipv6Site: %d %v", got.IPv6Site, err)
+	}
+	if err := os.WriteFile(path, []byte(`{"ipv6Site":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read(path); err != nil || got.IPv6Site != 56 {
+		t.Errorf("ipv6Site 0: %d %v", got.IPv6Site, err)
+	}
+	if err := os.WriteFile(path, []byte(`{"ipv6Site":60}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := read(path); err == nil {
+		t.Error("an ipv6Site of 60 was read")
+	}
+}

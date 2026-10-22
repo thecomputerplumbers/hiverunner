@@ -16,6 +16,7 @@ import (
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/config"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/connection"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/cooldown"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/fence"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
@@ -551,6 +552,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("reserve-memory", reserve, "memory kept for everything else"),
 		row("private-network", privateNetwork, "whether jobs reach the LAN and tailnet"),
 		list("allow-network", allowNetworkText(current), "private places jobs may reach anyway"),
+		row("ipv6-site", "/"+strconv.Itoa(cmp.Or(current.IPv6Site, fence.DefaultSite)), "the IPv6 site jobs are kept off"),
 		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs on this Mac itself"),
 		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
 		place("data-dir", current.DataDir, "where the image and job disks are kept"),
@@ -639,6 +641,9 @@ hived config set <name> <value>  Change one
                                  so far: a Mac cannot keep jobs off yet)
   allow-network a list or none   private places jobs may reach anyway, like
                                  192.168.1.20:5432,10.0.0.0/24,[fd00::5]:80
+  ipv6-site  48, 56 or 64        the IPv6 prefix this machine's site has; jobs
+                                 are kept off all of it: 56 for most homes, 48
+                                 for an office, 64 if the /64 is its own
   macos-jobs on or off           take hive-macos jobs, run on this Mac itself
                                  as a separate user; hived macos setup first
   auto-update on or off          update to new releases when no job is running;
@@ -701,11 +706,13 @@ func configure(args []string) error {
 			now = cmp.Or(current.ReserveMemory, "off")
 		case "allow-network":
 			now = allowNetworkText(current)
+		case "ipv6-site":
+			now = "/" + strconv.Itoa(cmp.Or(current.IPv6Site, fence.DefaultSite))
 		}
 		if err := saved(current, args[1]+" is now "+now); err != nil {
 			return err
 		}
-		if args[1] == "private-network" || args[1] == "allow-network" {
+		if args[1] == "private-network" || args[1] == "allow-network" || args[1] == "ipv6-site" {
 			switch {
 			case !vm.FencesNetwork && !current.PrivateNetwork:
 				fmt.Println("\nBut " + thisMachine + " cannot yet keep jobs off its LAN and tailnet: its VMs are behind the system's NAT, which hived has no say over.")

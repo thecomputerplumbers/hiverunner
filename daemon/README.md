@@ -225,21 +225,22 @@ the journal for the log (`journalctl --user -u hiveworker`).
 The machine's owner decides what it lends. `hived config` shows the settings
 and `hived config set <name> <value>` changes one:
 
-| Setting           | Values                | What it does                                      |
-| ----------------- | --------------------- | ------------------------------------------------- |
-| `max-jobs`        | `1` to `8`            | How many jobs run at once                         |
-| `max-vcpus`       | `2`, `4`, `8`, `auto` | The largest job this Mac takes                    |
-| `warm`            | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner  |
-| `battery`         | `on`, `off`           | Take jobs while unplugged                         |
-| `lid`             | `on`, `off`           | Take jobs with the lid closed                     |
-| `hours`           | `22:00-07:00`, `any`  | When jobs may start, in local time                |
-| `cache`           | `on`, `off`           | Keep an Actions cache on this Mac                 |
-| `cache-size`      | `1` to `2000`, `auto` | The most disk the cache may use, in gigabytes     |
-| `reserve-memory`  | `24G`, `40%`, `off`   | Memory kept for everything else on this machine   |
-| `private-network` | `block`, `allow`      | Whether jobs reach this machine's LAN and tailnet |
-| `allow-network`   | a list, `none`        | Private places jobs may reach anyway              |
-| `data-dir`        | a path, `default`     | Where the image and each job's disk are kept      |
-| `cache-dir`       | a path, `default`     | Where the Actions cache is kept                   |
+| Setting           | Values                | What it does                                        |
+| ----------------- | --------------------- | --------------------------------------------------- |
+| `max-jobs`        | `1` to `8`            | How many jobs run at once                           |
+| `max-vcpus`       | `2`, `4`, `8`, `auto` | The largest job this Mac takes                      |
+| `warm`            | `on`, `off`           | Keep one VM booted so a `hive` job starts sooner    |
+| `battery`         | `on`, `off`           | Take jobs while unplugged                           |
+| `lid`             | `on`, `off`           | Take jobs with the lid closed                       |
+| `hours`           | `22:00-07:00`, `any`  | When jobs may start, in local time                  |
+| `cache`           | `on`, `off`           | Keep an Actions cache on this Mac                   |
+| `cache-size`      | `1` to `2000`, `auto` | The most disk the cache may use, in gigabytes       |
+| `reserve-memory`  | `24G`, `40%`, `off`   | Memory kept for everything else on this machine     |
+| `private-network` | `block`, `allow`      | Whether jobs reach this machine's LAN and tailnet   |
+| `allow-network`   | a list, `none`        | Private places jobs may reach anyway                |
+| `ipv6-site`       | `48`, `56`, `64`      | The IPv6 site around this machine jobs are kept off |
+| `data-dir`        | a path, `default`     | Where the image and each job's disk are kept        |
+| `cache-dir`       | a path, `default`     | Where the Actions cache is kept                     |
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
@@ -612,21 +613,39 @@ and a carrier's NAT's; 169.254.0.0/16, where a cloud keeps its metadata
 service, and Azure's 168.63.129.16; multicast and broadcast; fc00::/7,
 fe80::/10, fec0::/10 and IPv6 multicast; the loopback and unspecified
 addresses; and the machine's own addresses and the networks they are on,
-read again every few seconds while a job runs. That keeps a job off the
-machine's neighbours on a public network too, such as a printer with a
-global IPv6 address in the machine's /64, which the machine reaches past
-its router. A tunnel to one peer, and a mask wider than a /16, count as
-the address alone. The list is `fence.Private`. An IPv4 address written as
-IPv6, or behind NAT64's 64:ff9b::/96, is taken as that IPv4 address. One in
-a network's own NAT64 prefix, 64:ff9b:1::/48, is fenced if the IPv4 address
-at any place RFC 6052 allows is. The IPv4 addresses inside 6to4 and Teredo
-addresses are not read, nor those behind another network's own NAT64
-prefix, which matters only on a machine with such a tunnel or gateway. The resolvers the guest was given are the
-exception, on port 53 alone, so a router on the LAN still answers its names
-and nothing else. IPv4 fragments and IPv6 packets with extension headers go
-nowhere: passt reassembles neither, and finds the wrong port behind an
-extension header, so the fence could not judge them as passt would act on
-them.
+read again every few seconds while a job runs. The list is
+`fence.Private`. The resolvers the guest was given are the exception, on
+port 53 alone, so a router on the LAN still answers its names and nothing
+else. IPv4 fragments and IPv6 packets with extension headers go nowhere:
+passt reassembles neither, and finds the wrong port behind an extension
+header, so the fence could not judge them as passt would act on them.
+
+The machine's networks keep a job off its neighbours on a public network
+too, which the machine reaches past its router: a printer with a global
+IPv6 address, or a server on a public IPv4 LAN. An IPv4 mask wider than a
+/16 is taken as a /16. An IPv6 address is fenced with its site, the /56
+around it unless the owner says otherwise, so the other /64s of a home,
+such as its guest Wi-Fi, are fenced as well:
+`hived config set ipv6-site 48` for an office whose site is a /48, or `64`
+for a machine whose /64 is all it has. A tunnel to one peer counts as its
+address alone. Some things are not covered, or are covered more than a job
+may like:
+
+- An office /48 under the default /56: its other /56s are reachable until
+  the owner sets `ipv6-site 48`.
+- A provider that puts its customers on one shared public subnet: jobs
+  cannot reach the other customers' servers on it. That is by design: they
+  are the machine's neighbours. `allow-network` names any that a job needs.
+- An IPv4 address written as IPv6, or behind NAT64's 64:ff9b::/96, is taken
+  as that IPv4 address. One in a network's own NAT64 prefix, 64:ff9b:1::/48,
+  is fenced if the IPv4 address at any place RFC 6052 allows is. So on an
+  IPv6-only network that reaches IPv4 through that prefix, internet traffic
+  can be refused: 64:ff9b:1::808:808, which is 8.8.8.8, reads as 0.0.0.0 at
+  /64. `private-network allow` is the way round it there.
+- The IPv4 addresses inside 6to4 and Teredo addresses are not read, nor
+  those behind another network's own NAT64 prefix, which matters only on a
+  machine with such a tunnel or gateway. Nor is a VPN fenced beyond its own
+  address when it routes public ranges.
 
 The owner can let jobs at something private on purpose, such as a database
 the machine serves them:

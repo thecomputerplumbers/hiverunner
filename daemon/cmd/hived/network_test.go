@@ -50,7 +50,7 @@ func TestEverySettingFitsTheBox(t *testing.T) {
 		current.AllowNetwork = list
 		rows := settingRows(ui.Screen{}, current)
 		text := strings.Join(rows, "\n")
-		if !strings.Contains(text, "private-network") || !strings.Contains(text, "allow-network") {
+		if !strings.Contains(text, "private-network") || !strings.Contains(text, "allow-network") || !strings.Contains(text, "/56") {
 			t.Errorf("the network settings are not shown:\n%s", text)
 		}
 		for _, row := range rows {

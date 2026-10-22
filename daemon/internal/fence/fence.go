@@ -10,6 +10,7 @@
 package fence
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net"
@@ -250,6 +251,30 @@ type Policy struct {
 	// (see HostNetworks), kept from the guest whatever network that is:
 	// what the machine and its neighbours serve is not the job's.
 	Host []netip.Prefix
+	// Site is how much of the IPv6 address space around the machine is its
+	// site: the /64s beside its own, such as a home's guest Wi-Fi or an
+	// office's other floors, which it reaches from inside the site's
+	// firewall. Zero means DefaultSite. It widens a network in Host, and
+	// never a lone address.
+	Site int
+}
+
+// DefaultSite is the IPv6 site a machine is taken to be on unless its
+// owner says otherwise: a /56, what a provider usually delegates to a
+// home. An office's /48 needs the owner to say so.
+const DefaultSite = 56
+
+// Sites are the site prefixes an owner can choose.
+var Sites = []int{48, 56, 64}
+
+// site is the network a guest is kept from for one of the machine's: the
+// machine's IPv6 site, for an address on a link.
+func (p *Policy) site(network netip.Prefix) netip.Prefix {
+	length := cmp.Or(p.Site, DefaultSite)
+	if network.Addr().Is6() && network.Bits() <= 64 && length < network.Bits() {
+		return netip.PrefixFrom(network.Addr(), length)
+	}
+	return network
 }
 
 // Protocols a port is matched for.
@@ -288,7 +313,7 @@ func (p *Policy) reaches(address netip.Addr, port uint16) bool {
 	if port == 53 && slices.ContainsFunc(p.Resolvers, func(r netip.Addr) bool { return r.Unmap().WithZone("") == address }) {
 		return true
 	}
-	if slices.ContainsFunc(p.Host, func(h netip.Prefix) bool { return h.Contains(address) }) {
+	if slices.ContainsFunc(p.Host, func(h netip.Prefix) bool { return p.site(h).Contains(address) }) {
 		return false
 	}
 	_, fenced := Fenced(address)
@@ -339,20 +364,21 @@ func HostNetworks() ([]netip.Prefix, error) {
 
 // hostNetwork is the network an interface's address is on, as far as the
 // fence goes. It is the address alone where the interface has no
-// neighbours (a loopback, a tunnel to a single peer, an interface that is
-// down) and where its mask is wider than a LAN's: a mask that wide is a
-// VPN's route, and would fence off the internet with it. An IPv6 address
-// is on a /64 whatever its mask says, as one from DHCPv6 is.
+// neighbours: a loopback, a tunnel to a single peer, an interface that is
+// down. An IPv4 mask wider than a /16 is taken as a /16, the widest LAN
+// there is, so that it fences the machine's neighbours and not a share of
+// the internet. An IPv6 address is on a /64 whatever its mask says, as one
+// from DHCPv6 is; Policy.Site widens that to the machine's site.
 func hostNetwork(flags net.Flags, address netip.Addr, bits int) netip.Prefix {
 	alone := netip.PrefixFrom(address, address.BitLen())
 	if flags&net.FlagUp == 0 || flags&(net.FlagLoopback|net.FlagPointToPoint) != 0 {
 		return alone
 	}
 	if address.Is4() {
-		if bits < 16 || bits > 32 {
+		if bits > 32 {
 			return alone
 		}
-		return netip.PrefixFrom(address, bits)
+		return netip.PrefixFrom(address, max(bits, 16))
 	}
 	if bits < 48 || bits > 64 {
 		bits = 64
