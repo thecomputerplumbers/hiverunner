@@ -62,6 +62,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      pull-requests: write
     outputs:
       release: ${{ steps.plan.outputs.release }}
       images: ${{ steps.plan.outputs.images }}
@@ -75,6 +76,8 @@ jobs:
           ref: main
           fetch-depth: 0
       - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           fresh() { curl -fsS -H "Cache-Control: no-cache" "$RELEASES/$1?published=$(date +%s)"; }
@@ -103,7 +106,37 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -qm "Release $version" daemon/VERSION
-            git push -q origin HEAD:main
+
+            # main takes changes only through a pull request, so the bump is
+            # one, merged here, and the release is built from what it merged.
+            # A pull request this token opens starts no workflows, and main
+            # requires no checks, so there is nothing to wait for.
+            branch="release/$version"
+            api() { curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
+            repo="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY"
+            git push -qf origin "HEAD:refs/heads/$branch"
+            number=$(api "$repo/pulls?state=open&base=main&head=${GITHUB_REPOSITORY_OWNER}:$branch" | jq -r '.[0].number // empty')
+            if [ -z "$number" ]; then
+              number=$(jq -n --arg v "$version" --arg b "$branch" \
+                '{title: "Release \($v)", head: $b, base: "main", body: "Opened by the Release workflow, which merges it and then publishes \($v) from it."}' \
+                | api -X POST --data @- "$repo/pulls" | jq -r .number)
+            fi
+            # The pull request may not be mergeable the moment it is opened.
+            merged=
+            for try in 1 2 3 4 5 6 7 8 9 10; do
+              merged=$(jq -n --arg sha "$(git rev-parse HEAD)" --arg t "Release $version (#$number)" \
+                '{merge_method: "squash", sha: $sha, commit_title: $t, commit_message: ""}' \
+                | api -X PUT --data @- "$repo/pulls/$number/merge" | jq -r '.sha // empty') && [ -n "$merged" ] && break
+              sleep 3
+            done
+            if [ -z "$merged" ]; then
+              echo "Could not merge #$number, which bumps daemon/VERSION to $version. Merge it, then run Release again: it takes a version that is not out yet as it is." >&2
+              exit 1
+            fi
+            api -X DELETE "$repo/git/refs/heads/$branch" >/dev/null || true
+            git fetch -q origin main
+            git checkout -q "$merged"
+            [ "$(tr -d '[:space:]' < daemon/VERSION)" = "$version" ] || { echo "main as merged in #$number is not version $version." >&2; exit 1; }
           fi
 
           # The images are built only when the ones published are not the

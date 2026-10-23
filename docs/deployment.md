@@ -110,7 +110,11 @@ and `VERSION`. It compares main with the commit the current release was built
 from, so a change that ships nothing releases nothing. It then:
 
 1. Takes `daemon/VERSION` if that version is not out yet, and otherwise bumps
-   the patch number and commits that to main as `Release x.y.z`.
+   the patch number in a pull request, `Release x.y.z`, which it squash-merges
+   itself before building from the merged commit. main takes changes only
+   through pull requests, and requires no checks, so nothing waits on the
+   checks a pull request opened by the workflow's token never starts. If the
+   merge is refused, merge that pull request and run Release again.
 2. Builds the guest images and virtiofsd on GitHub's Linux runners, only when
    the published ones are not the ones the commit describes. The script names
    the published files again otherwise, so most releases need no Docker.
