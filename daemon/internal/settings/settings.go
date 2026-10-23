@@ -62,6 +62,10 @@ type Settings struct {
 	// which a job, root in its own, can come between the other and its
 	// gateway, so a second is the owner's choice to make.
 	MaxMacOSVMs int `json:"maxMacOSVMs,omitempty"`
+	// SpotlightExclude keeps Spotlight out of what a hive-macos job run as
+	// the hiveworker user writes: its runner, its jobs and their caches live
+	// in a folder named hive.noindex, which Spotlight skips. On by default.
+	SpotlightExclude bool `json:"spotlightExclude"`
 	// AutoUpdate lets the daemon update itself when a release is out and
 	// it has no job, by running the installer. Off, it only says so.
 	AutoUpdate bool `json:"autoUpdate"`
@@ -157,7 +161,7 @@ const MostJobs = 8
 // Default is a machine whose owner has decided nothing: it behaves as the
 // daemon did before there were settings.
 func Default() Settings {
-	return Settings{MaxJobs: 1, Warm: true, Battery: true, Cache: true, AutoUpdate: true, IPv6Site: fence.DefaultSite}
+	return Settings{MaxJobs: 1, Warm: true, Battery: true, Cache: true, AutoUpdate: true, IPv6Site: fence.DefaultSite, SpotlightExclude: true}
 }
 
 // Path is the settings file, beside the machine file.
@@ -277,7 +281,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "macos-isolation", "max-macos-vms", "auto-update", "data-dir", "cache-dir"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "macos-isolation", "max-macos-vms", "spotlight-exclude", "auto-update", "data-dir", "cache-dir"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -318,7 +322,7 @@ func (s *Settings) Set(key, value string) error {
 			return errors.New("max-vcpus takes 2, 4, 8 or auto")
 		}
 		s.MaxVCPUs = vcpus
-	case "warm", "battery", "lid", "cache", "macos-jobs", "auto-update":
+	case "warm", "battery", "lid", "cache", "macos-jobs", "spotlight-exclude", "auto-update":
 		on, err := parseSwitch(value)
 		if err != nil {
 			return fmt.Errorf("%s takes on or off", key)
@@ -332,6 +336,8 @@ func (s *Settings) Set(key, value string) error {
 			s.Lid = on
 		case "macos-jobs":
 			s.MacOSJobs = on
+		case "spotlight-exclude":
+			s.SpotlightExclude = on
 		case "auto-update":
 			s.AutoUpdate = on
 		default:

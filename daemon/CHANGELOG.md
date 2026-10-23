@@ -6,6 +6,23 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### Spotlight is kept out of macOS jobs
+
+A `hive-macos` job run as `hiveworker` no longer has Spotlight indexing
+everything it writes, which took a steady share of the CPU for the whole
+build (#110). With the new `spotlight-exclude` setting, on by default:
+
+- The runner and each job live in `~hiveworker/hive.noindex`, which
+  Spotlight skips. An existing `~hiveworker/runner` moves there by itself
+  when no job is running; nothing needs reinstalling.
+- CocoaPods', npm's, pnpm's, Gradle's and Xcode's DerivedData caches are kept
+  in `~hiveworker/hive.noindex/cache`, by variable or by symlink. A job's own
+  `env:` and `-derivedDataPath` still win.
+- `hived macos setup` says how to add `/Users/hiveworker` to Spotlight's
+  privacy list, and `hived doctor` has a `spotlight` note. Neither fails.
+
+`hived config set spotlight-exclude off` puts everything back where it was.
+
 ### Jobs are kept off the networks around a Linux machine
 
 A job's VM on Linux is now fenced off the networks around the machine that

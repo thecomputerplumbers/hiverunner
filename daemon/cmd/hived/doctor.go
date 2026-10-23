@@ -128,6 +128,7 @@ func doctor(args []string) error {
 		checks = append(checks, host.Check{Name: "storage", Found: strings.Join(kept, ", "), OK: true})
 	}
 	checks = append(checks, host.Unattended()...)
+	checks = append(checks, spotlight(current, runtime.GOOS, macOSInVM(current))...)
 
 	screen := ui.For(os.Stdout)
 	rows, problems := checkRows(screen, checks, true)

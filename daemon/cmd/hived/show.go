@@ -580,6 +580,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("macos-jobs", onOff(current.MacOSJobs), "take hive-macos jobs"),
 		row("macos-isolation", cmp.Or(current.MacOSIsolation, settings.IsolationUser), "the "+native.User+" user, or a VM per job"),
 		row("max-macos-vms", strconv.Itoa(current.MacOSVMs()), "how many macOS VMs run at once"),
+		row("spotlight-exclude", onOff(current.SpotlightExclude), "keep Spotlight out of macOS jobs"),
 		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
 		place("data-dir", current.DataDir, "where the image and job disks are kept"),
 		place("cache-dir", current.CacheDir, "where the Actions cache is kept"),
@@ -687,6 +688,9 @@ hived config set <name> <value>  Change one
   max-macos-vms 1 or 2           how many macOS VMs run at once; two share one
                                  network, on which one job can come between the
                                  other and its gateway
+  spotlight-exclude on or off    keep Spotlight from indexing what macOS jobs
+                                 write, by keeping it in ~` + native.User + `/` + native.NoIndexDir + `;
+                                 on by default
   auto-update on or off          update to new releases when no job is running;
                                  off, hived status and a notification say so
   data-dir   a path or default   where the Linux image and each job's disk are
@@ -775,6 +779,9 @@ func configure(args []string) error {
 			if problem := macosVMProblem(current); problem != "" {
 				fmt.Println("\nNo macOS job runs until that is put right: " + problem + "\nSee: hived macos image help")
 			}
+		}
+		if args[1] == "spotlight-exclude" {
+			fmt.Println("It applies from the next macOS job. The runner and the caches move when no job is running.")
 		}
 		if args[1] == "lid" {
 			if problem, fix := asleep(current, host.ReadPower()); problem != "" {

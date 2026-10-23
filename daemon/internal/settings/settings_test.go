@@ -351,3 +351,34 @@ func TestMacOSIsolation(t *testing.T) {
 		t.Errorf("read = %+v, %v", got, err)
 	}
 }
+
+func TestSpotlightExcludeIsOnUnlessTheOwnerTurnsItOff(t *testing.T) {
+	if !Default().SpotlightExclude {
+		t.Fatal("spotlight-exclude is off by default")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	// A file written before there was the setting keeps the default.
+	if err := os.WriteFile(path, []byte(`{"macosJobs": true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := read(path); err != nil || !current.SpotlightExclude {
+		t.Fatalf("an older file read as %+v, %v", current, err)
+	}
+	if err := os.WriteFile(path, []byte(`{"spotlightExclude": false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := read(path); err != nil || current.SpotlightExclude {
+		t.Fatalf("off read as %+v, %v", current, err)
+	}
+	current := Default()
+	if err := current.Set("spotlight-exclude", "off"); err != nil || current.SpotlightExclude {
+		t.Fatalf("set off: %+v, %v", current, err)
+	}
+	if err := current.Set("spotlight-exclude", "on"); err != nil || !current.SpotlightExclude {
+		t.Fatalf("set on: %+v, %v", current, err)
+	}
+	if err := current.Set("spotlight-exclude", "sometimes"); err == nil {
+		t.Fatal("set sometimes was accepted")
+	}
+}

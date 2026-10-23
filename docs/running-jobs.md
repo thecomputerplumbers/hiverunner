@@ -201,7 +201,9 @@ of GitHub's standard macOS runner, and compared with GitHub's price for it.
 Each job gets an APFS clone of the runner directory, GitHub's runner in it
 with a clean environment, and the clone is deleted afterwards. What the job
 leaves in the `hiveworker` user's home (CocoaPods, npm and Xcode caches) stays
-for the next job. The owner installs what every job needs, typically CocoaPods
+for the next job. With the owner's `spotlight-exclude` on, the default, the
+runner, the jobs and those caches are in `~hiveworker/hive.noindex`, which
+Spotlight skips; `daemon/README.md` has the layout. The owner installs what every job needs, typically CocoaPods
 and Fastlane with Homebrew. An Expo app:
 
 ```yaml
