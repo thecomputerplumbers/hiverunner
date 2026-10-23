@@ -414,11 +414,17 @@ test(
   "the installer refuses an image that will not fit, before it pauses the machine",
   { skip: unusable() || false },
   async (t) => {
-    const { published, service, install } = await setUp(t)
+    const { home, published, service, install } = await setUp(t)
     await install()
     published.state.image = 2
     published.publish()
-    rewriteRelease(published, { megabytes: 999999 })
+    // As large as the disk is free, so it never fits whatever disk this
+    // runs on: the installer wants three times the image.
+    const freeKb = execFileSync("df", ["-Pk", home], { encoding: "utf8" })
+      .split("\n")[1]
+      .trim()
+      .split(/\s+/)[3]
+    rewriteRelease(published, { megabytes: Math.ceil(Number(freeKb) / 1024) })
     const untilSpace = service.drains()
     const refused = await install({}, 1)
     assert.match(refused, /not enough room/)
