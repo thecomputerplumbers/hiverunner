@@ -364,7 +364,12 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 		}
 		need := memory + held + MemoryMargin + limits.Reserve
 		if budget > 0 && budget < need {
-			m.log.Warn("declining a job: not enough free memory", "assignment", offer.AssignmentID, "available_mb", budget>>20, "needed_mb", need>>20, "planned", limits.Available == 0)
+			// needed_mb is the sum of the rest, not the job's size: name
+			// each part so the total is not read as one guest.
+			m.log.Warn("declining a job: not enough free memory", "assignment", offer.AssignmentID,
+				"available_mb", budget>>20, "needed_mb", need>>20,
+				"guest_mb", memory>>20, "held_mb", held>>20, "margin_mb", uint64(MemoryMargin)>>20, "reserve_mb", limits.Reserve>>20,
+				"planned", limits.Available == 0)
 			return ReasonLowMemory
 		}
 	}
@@ -485,7 +490,11 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		if end.Reason == ReasonHostKilled && m.onHostKilled != nil {
 			m.onHostKilled()
 		}
-		m.log.Info("job ended", "assignment", job.AssignmentID, "exit", exitCode, "reason", end.Reason, "released", released)
+		ended := []any{"assignment", job.AssignmentID, "exit", exitCode, "reason", end.Reason, "released", released}
+		if result.PeakGuestBytes > 0 {
+			ended = append(ended, "peak_guest_mb", result.PeakGuestBytes>>20)
+		}
+		m.log.Info("job ended", ended...)
 		// Said for a released job too: its result is of no interest to the
 		// coordinator, but that its cores are free again is.
 		exited := protocol.NewJobExited(job.AssignmentID, exitCode)

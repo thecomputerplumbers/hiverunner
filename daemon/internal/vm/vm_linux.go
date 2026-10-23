@@ -506,6 +506,7 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 	go vm.watchHost(hostEvery)
 	go func() {
 		waitErr := <-exited
+		vm.peak.Store(peakBytes(machine.ProcessState))
 		// Powered off by the guest, or killed by us (which has no exit
 		// status): both are a stop. Any other end is the VM failing.
 		var exit *exec.ExitError
@@ -522,6 +523,27 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 		close(vm.ended)
 	}()
 	return "", nil
+}
+
+// peakBytes is the most memory an exited process held at once: its
+// resident high-water mark, what /proc/<pid>/status calls VmHWM, kept by the
+// kernel for the parent once the process is gone. The VM's memory is QEMU's,
+// so this is how much of its guest's memory the job touched, plus QEMU's own.
+// Zero if it cannot be read; it is only ever reported.
+func peakBytes(state *os.ProcessState) uint64 {
+	if state == nil {
+		return 0
+	}
+	return maxRSSBytes(state.SysUsage())
+}
+
+// maxRSSBytes reads ru_maxrss, which Linux gives in KiB.
+func maxRSSBytes(usage any) uint64 {
+	rusage, ok := usage.(*syscall.Rusage)
+	if !ok || rusage == nil || rusage.Maxrss <= 0 {
+		return 0
+	}
+	return uint64(rusage.Maxrss) << 10
 }
 
 var (

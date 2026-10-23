@@ -25,6 +25,9 @@ type Result struct {
 	ExitCode int
 	Reason   string
 	Detail   string
+	// PeakGuestBytes is the most memory the guest's VM process held at
+	// once, as the host saw it. Zero means it could not be read.
+	PeakGuestBytes uint64
 }
 
 // Evidence is what Classify needs to name a stop. Fields are optional; an

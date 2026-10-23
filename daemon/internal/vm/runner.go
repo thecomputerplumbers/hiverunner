@@ -200,6 +200,9 @@ type instance struct {
 	hostKilled bool
 	// availableAtKill is the host's MemAvailable when hostKilled was set.
 	availableAtKill uint64
+	// peak is the most memory the hypervisor process held at once, in
+	// bytes, read when it exited. Zero where that cannot be read.
+	peak atomic.Uint64
 	// stop pulls the plug. It is safe to call more than once, and on a VM
 	// that has already stopped.
 	stop func()
@@ -394,7 +397,7 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 		r.refused()
 	}
 	end := classifyStop(vm, job, code, hasExit, ctx, err)
-	result = jobs.Result{ExitCode: code, Reason: end.Reason, Detail: end.Detail}
+	result = jobs.Result{ExitCode: code, Reason: end.Reason, Detail: end.Detail, PeakGuestBytes: vm.peak.Load()}
 	if errors.Is(err, context.Canceled) {
 		// Stopped on purpose: released by the pool, or the daemon is
 		// shutting down. The caller knows which; it is not a VM failing.
