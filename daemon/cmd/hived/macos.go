@@ -107,6 +107,7 @@ func macos(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		native.SpotlightAdvice(os.Stdout, current.SpotlightExclude)
 		if !current.MacOSJobs {
 			current.MacOSJobs = true
 			if err := saved(current, "macos-jobs is now on"); err != nil {

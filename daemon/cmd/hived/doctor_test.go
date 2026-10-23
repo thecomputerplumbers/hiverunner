@@ -8,6 +8,7 @@ import (
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/connection"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/host"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/settings"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/ui"
 )
@@ -74,5 +75,42 @@ func TestDoctorSaysHowExposedAMacIsWithoutFailing(t *testing.T) {
 	}
 	if _, problems := checkRows(ui.Screen{}, []host.Check{{Name: "sleep", Found: "on", Fix: "sudo pmset -a disablesleep 1"}}, true); problems != 1 {
 		t.Fatalf("a problem counted %d", problems)
+	}
+}
+
+func TestDoctorSaysWhetherSpotlightIndexesMacOSJobsWithoutFailing(t *testing.T) {
+	moved, notYet := true, false
+	volume := "/System/Volumes/Data"
+	for _, test := range []struct {
+		report native.SpotlightReport
+		ok     bool
+		says   string
+	}{
+		{native.SpotlightReport{Volume: volume, Indexing: "off", NoIndex: true}, true, "not indexing"},
+		{native.SpotlightReport{Volume: volume, Indexing: "", NoIndex: true}, false, "mdutil -s " + volume},
+		{native.SpotlightReport{Volume: volume, Indexing: "on"}, false, "spotlight-exclude on"},
+		{native.SpotlightReport{Volume: volume, Indexing: "on", NoIndex: true, Moved: &notYet}, false, "when no job is running"},
+		{native.SpotlightReport{Volume: volume, Indexing: "on", NoIndex: true, Moved: &moved}, false, "Search Privacy"},
+		{native.SpotlightReport{Volume: volume, Indexing: "on", NoIndex: true}, false, "hive.noindex"},
+	} {
+		checks := spotlightChecks(test.report)
+		if len(checks) != 1 || checks[0].Name != "spotlight" || checks[0].OK != test.ok || !test.ok && !checks[0].Note {
+			t.Fatalf("%+v said %+v", test.report, checks)
+		}
+		if said := checks[0].Found + " " + checks[0].Fix; !strings.Contains(said, test.says) {
+			t.Errorf("%+v said %q, not %q", test.report, said, test.says)
+		}
+		if rows, problems := checkRows(ui.Screen{}, checks, true); problems != 0 {
+			t.Errorf("%+v made doctor fail: %q", test.report, rows)
+		}
+	}
+	if checks := spotlight(settings.Settings{MacOSJobs: true, SpotlightExclude: true}, "linux", false); checks != nil {
+		t.Fatalf("a Linux machine was told about Spotlight: %+v", checks)
+	}
+	if checks := spotlight(settings.Settings{MacOSJobs: true}, "darwin", true); checks != nil {
+		t.Fatalf("a Mac running macOS jobs in VMs was told about its own Spotlight: %+v", checks)
+	}
+	if checks := spotlight(settings.Settings{}, "darwin", false); checks != nil {
+		t.Fatalf("a Mac taking no macOS jobs was told about Spotlight: %+v", checks)
 	}
 }

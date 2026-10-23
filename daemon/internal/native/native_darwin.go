@@ -286,22 +286,23 @@ func Serve(ctx context.Context, stdin io.Reader, stdout io.Writer) int {
 		fmt.Fprintln(os.Stderr, "hived macos-job: bad request:", err)
 		return 2
 	}
+	where := arrange(ask.NoIndex)
 	switch {
 	case ask.Check:
 		version := ""
-		if _, err := os.Stat(filepath.Join(Home, "runner", RunnerVersion, "run.sh")); err == nil {
+		if _, err := os.Stat(filepath.Join(where.installed(RunnerVersion), RunnerVersion, "run.sh")); err == nil {
 			version = RunnerVersion
 		}
 		_ = json.NewEncoder(stdout).Encode(checkReply{OK: true, Runner: version})
 		return 0
 	case ask.Install != "":
-		if err := install(ctx, ask.Install, ask.Version); err != nil {
+		if err := install(ctx, where.runner(), ask.Install, ask.Version); err != nil {
 			fmt.Fprintln(os.Stderr, "hived macos-job:", err)
 			return 1
 		}
 		return 0
 	case ask.Job != nil:
-		return runJob(ctx, *ask.Job)
+		return runJob(ctx, where, *ask.Job)
 	}
 	fmt.Fprintln(os.Stderr, "hived macos-job: empty request")
 	return 2
@@ -309,11 +310,10 @@ func Serve(ctx context.Context, stdin io.Reader, stdout io.Writer) int {
 
 // install unpacks a runner tarball the parent verified into the runner
 // directory for its version, whole or not at all.
-func install(ctx context.Context, tarball, version string) error {
+func install(ctx context.Context, base, tarball, version string) error {
 	if version == "" || strings.ContainsAny(version, "/\\ ") {
 		return errors.New("bad runner version")
 	}
-	base := filepath.Join(Home, "runner")
 	final := filepath.Join(base, version)
 	staging := final + ".tmp"
 	os.RemoveAll(staging)
@@ -337,17 +337,18 @@ func install(ctx context.Context, tarball, version string) error {
 // runJob runs one job: a clone of the runner directory, GitHub's runner in
 // it with a clean environment, and nothing left behind. A SIGTERM, which
 // sudo relays from the daemon, stops the runner and still cleans up.
-func runJob(ctx context.Context, job jobRequest) int {
+func runJob(ctx context.Context, where layout, job jobRequest) int {
 	if job.JITConfig == "" || job.ID == "" || strings.ContainsAny(job.ID, "/\\ ") {
 		fmt.Fprintln(os.Stderr, "hived macos-job: incomplete job")
 		return 2
 	}
-	source := filepath.Join(Home, "runner", RunnerVersion)
+	defer running()()
+	source := filepath.Join(where.installed(RunnerVersion), RunnerVersion)
 	if _, err := os.Stat(filepath.Join(source, "run.sh")); err != nil {
 		fmt.Fprintln(os.Stderr, "hived macos-job: no runner installed; run hived macos setup")
 		return 1
 	}
-	jobs := filepath.Join(Home, "jobs")
+	jobs := where.jobs()
 	if err := os.MkdirAll(jobs, 0o700); err != nil {
 		fmt.Fprintln(os.Stderr, "hived macos-job:", err)
 		return 1
@@ -376,7 +377,7 @@ func runJob(ctx context.Context, job jobRequest) int {
 	cmd.Dir = runner
 	// Nothing of this process leaks into the job but what is listed. The
 	// one setting asks the runner to exit 7 when GitHub refuses its version.
-	cmd.Env = []string{
+	cmd.Env = append([]string{
 		"HOME=" + Home,
 		"USER=" + User,
 		"LOGNAME=" + User,
@@ -385,7 +386,7 @@ func runJob(ctx context.Context, job jobRequest) int {
 		"LANG=en_US.UTF-8",
 		"PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
 		"ACTIONS_RUNNER_RETURN_VERSION_DEPRECATED_EXIT_CODE=1",
-	}
+	}, where.env()...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	// Its own process group, so stopping it stops every process the job

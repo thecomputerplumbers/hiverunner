@@ -244,6 +244,7 @@ and `hived config set <name> <value>` changes one:
 | `macos-jobs`        | `on`, `off`                 | Take `hive-macos` jobs; see "macOS jobs" below                     |
 | `macos-isolation`   | `user`, `vm`                | Run each as the `hiveworker` user, or in a macOS VM (experimental) |
 | `max-macos-vms`     | `1`, `2`                    | How many macOS VMs run at once                                     |
+| `spotlight-exclude` | `on`, `off`                 | Keep Spotlight out of what macOS jobs write (on by default)        |
 | `data-dir`          | a path, `default`           | Where the image and each job's disk are kept                       |
 | `cache-dir`         | a path, `default`           | Where the Actions cache is kept                                    |
 
@@ -270,6 +271,55 @@ has both ways in full.
 has not yet run on real hardware. Every job is root in a clone of the image,
 so never sign in to an Apple Account or iCloud in it, give `runner` a random
 password, and get Xcode through `--share`.
+
+### Keeping Spotlight out
+
+Spotlight indexes whatever is written under `/Users`, and a macOS job writes a
+great deal: a checkout, `node_modules`, Pods, DerivedData, Gradle's outputs,
+all deleted when the job ends. Indexing it fights the compiler for the whole
+job (#110). Spotlight skips any folder whose name ends in `.noindex`, so with
+`spotlight-exclude on`, the default, a job run as `hiveworker` keeps
+everything in one:
+
+| Where                             | What                                                         |
+| --------------------------------- | ------------------------------------------------------------ |
+| `~hiveworker/hive.noindex/runner` | GitHub's runner, as `hived macos setup` installs it          |
+| `~hiveworker/hive.noindex/jobs`   | Each job's clone of the runner, and its `TMPDIR`; gone after |
+| `~hiveworker/hive.noindex/cache`  | Caches kept for the next job                                 |
+
+The caches a job keeps get there two ways. `CP_HOME_DIR` (CocoaPods) and
+`npm_config_cache` are set for the runner, so a job's own `env:` still wins.
+Where a variable would move more than a cache, the cache directory is moved
+into `cache` and a symlink left in its place: `~/.gradle/caches` and
+`~/.gradle/wrapper` (`GRADLE_USER_HOME` would take `gradle.properties` with
+it, which jobs often write), `~/Library/Developer/Xcode/DerivedData` (Xcode
+has no variable for it; `-derivedDataPath` still wins),
+`~/Library/Caches/CocoaPods` and `~/Library/pnpm`, pnpm's store. A symlink
+already there is left alone.
+
+The move happens in `hived macos-job`, as `hiveworker`, and only while no job
+is running: every job holds `~hiveworker/.hived-jobs.lock` shared and the move
+takes it exclusively, or waits for the next request. The runner moves whole by
+one rename, a stale copy left behind is removed, and doing it again changes
+nothing. `~hiveworker/jobs`, left by an older hived, is removed then too.
+Turning the setting off moves the runner and the linked caches back.
+
+`hiveworker`'s home also gets a `.metadata_never_index`, which asks Spotlight
+to leave the rest of it alone; macOS honours that less reliably than a
+`.noindex` name. To be sure, add `/Users/hiveworker` in System Settings >
+Spotlight > Search Privacy, which `hived macos setup` says how to do: macOS
+has no supported command for that list, and `mdutil -i off` turns indexing
+off for a whole volume.
+
+**Follow-up for the macOS VM image (#109).** A guest's home is indexed the
+same way, and nothing here changes the image or `internal/macvm/guest`. When
+the image is next rebuilt: `hive-agent` should unpack the runner into
+`~runner/hive.noindex/actions-runner` rather than `~runner/actions-runner`,
+and `install.sh` could turn indexing off in the guest altogether with
+`mdutil -i off /`, which loses nothing since every clone is deleted after its
+job. Either reaches an existing image only when its owner runs `install.sh`
+in it again and seals it. Until then a VM job pays for indexing inside its own
+VM.
 
 ## On another disk
 
@@ -336,11 +386,16 @@ is wrong:
 | `power cut`     | macOS desktops: starts up again by itself (`autorestart 1`)                                  |
 | `auto-login`    | macOS: the user hived runs as is logged in at start-up, since hived is a launch agent        |
 | `FileVault`     | macOS: off, since a restart otherwise stops at the unlock screen                             |
+| `spotlight`     | macOS jobs as `hiveworker`: Spotlight is not indexing their directories                      |
 | `start at boot` | Linux: lingering is on for the user, so the service starts without a login                   |
 
 FileVault, and the auto-login it rules out, trade the disk's protection for
 coming back unattended, and running on battery with `battery on` is allowed.
-`hived doctor` says these and does not count them: only what is certainly
+Spotlight indexing what a macOS job writes slows the job and stops none, so
+the `spotlight` check, which reads `mdutil -s` for the volume holding
+`/Users/hiveworker` and says whether the job directories are in
+`hive.noindex` yet, is a note too. `hived doctor` says these and does not
+count them: only what is certainly
 wrong makes it exit 1. A MacBook closed with a display and power attached
 stays awake without `SleepDisabled`, so there the warning says it is awake
 only while they are attached. The daemon repeats the sleep warning in its log

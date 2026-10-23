@@ -65,6 +65,9 @@ type request struct {
 	Version string `json:"version,omitempty"`
 	// Job runs one.
 	Job *jobRequest `json:"job,omitempty"`
+	// NoIndex is the owner's spotlight-exclude, which the child cannot read
+	// for itself: whether the runner and the jobs live in hive.noindex.
+	NoIndex bool `json:"noIndex,omitempty"`
 }
 
 type jobRequest struct {
@@ -182,7 +185,7 @@ func (r *Runner) Run(ctx context.Context, job jobs.Job) (jobs.Result, error) {
 	if err := cmd.Start(); err != nil {
 		return jobs.Result{ExitCode: -1}, err
 	}
-	err = json.NewEncoder(stdin).Encode(request{Job: &jobRequest{ID: job.AssignmentID, JITConfig: job.JITConfig}})
+	err = json.NewEncoder(stdin).Encode(request{Job: &jobRequest{ID: job.AssignmentID, JITConfig: job.JITConfig}, NoIndex: spotlightExcluded()})
 	stdin.Close()
 	if err != nil {
 		_ = cmd.Process.Kill()
@@ -210,6 +213,7 @@ func (r *Runner) Run(ctx context.Context, job jobs.Job) (jobs.Result, error) {
 // askChild runs `hived macos-job` as the hiveworker user with one request
 // and returns what it printed. -n: a rule that would prompt is no rule.
 func askChild(exe string, ask request) ([]byte, error) {
+	ask.NoIndex = spotlightExcluded()
 	raw, err := json.Marshal(ask)
 	if err != nil {
 		return nil, err
