@@ -814,7 +814,8 @@ timeout, has its VM stopped at once.
 
 The guest image is Ubuntu 24.04 arm64 with GitHub's runner, pinned by the hash
 GitHub publishes. It has git, curl, sudo, jq, the usual archive tools and
-the system's `python3` (3.12, with `venv`); jobs install toolchains with
+the system's `python3` (3.12, with `venv`) and a C and C++ compiler (gcc,
+g++, make), for cgo, Rust's linker and native modules; jobs install toolchains with
 `setup-*` actions, as they would anywhere.
 
 It also has Docker: the engine, `docker buildx` and `docker compose`, from
