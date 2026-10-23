@@ -6,6 +6,15 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### The log says more about a job's memory
+
+A job declined for want of memory is logged with what made up the memory it
+needed: `guest_mb` for the job's own VM, `held_mb` for jobs already accepted,
+`margin_mb` and the owner's `reserve_mb`. `needed_mb` is their sum, not the
+size of the job. On Linux, `job ended` also says `peak_guest_mb`, the most
+memory the job's VM held at once; it is left out where it cannot be read,
+including on a Mac.
+
 ### macOS jobs as the hiveworker user: run `hived macos setup` again
 
 A Mac that takes macOS jobs as the `hiveworker` user declines them after
