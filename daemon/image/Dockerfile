@@ -25,6 +25,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # a job that wants a particular Python still asks setup-python for it. The
 # build fails if it cannot read TOML or make a venv with pip in it, which is
 # what that glue does.
+#
+# So is a C and C++ compiler. GitHub's runners have one, and much that never
+# says "C" needs it: cgo (`go test -race` refuses to run without it), the
+# linker Rust's toolchain calls as `cc`, node-gyp, and Python packages built
+# from source. It is gcc, g++, make and libc6-dev, which is build-essential
+# without dpkg-dev, about 220 MB. The build fails if it cannot compile and
+# run a C++ program.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       systemd systemd-sysv systemd-resolved dbus udev kmod \
@@ -32,13 +39,17 @@ RUN apt-get update \
       ca-certificates curl git sudo iproute2 iputils-ping \
       jq tar gzip unzip zip xz-utils zstd openssh-client locales socat \
       libatomic1 python3 python3-venv \
+      gcc g++ make libc6-dev \
  && kernel=$(ls /lib/modules | sort -V | tail -1) \
  && { apt-get install -y --no-install-recommends "linux-modules-extra-$kernel" \
       || apt-get install -y --no-install-recommends linux-image-extra-virtual; } \
  && locale-gen en_US.UTF-8 \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -c 'import json, sqlite3, ssl, tomllib' \
- && python3 -m venv /tmp/venv && /tmp/venv/bin/pip --version && rm -rf /tmp/venv
+ && python3 -m venv /tmp/venv && /tmp/venv/bin/pip --version && rm -rf /tmp/venv \
+ && printf '#include <iostream>\nint main() { std::cout << "ok"; }\n' > /tmp/t.cc \
+ && c++ /tmp/t.cc -o /tmp/t && [ "$(/tmp/t)" = ok ] && rm /tmp/t /tmp/t.cc \
+ && cc --version >/dev/null && make --version >/dev/null
 
 # GitHub's own runner, pinned and verified against the hash in its release.
 RUN useradd --create-home --uid 1001 --shell /bin/bash runner \

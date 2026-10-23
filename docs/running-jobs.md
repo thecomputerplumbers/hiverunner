@@ -353,7 +353,8 @@ stores, the VM's console and a stop's reason are not written into the job's
 log, and no image is published: each owner makes their own.
 
 Jobs install their own toolchains with `setup-*` actions; the system's
-`python3` is there for scripts. Docker is in the
+`python3` is there for scripts, and gcc, g++ and make for cgo, Rust's
+linker and native modules, as on GitHub's runners. Docker is in the
 VM, with buildx and compose, for `docker` in a step, `services:` and
 `container:`; a `container:` image needs Perl or to be Alpine (see "What it
 does not do yet" in `daemon/README.md`). Every job starts from a clean disk,
