@@ -210,6 +210,8 @@ func TestWhatTheGuestLeavesForTheHostIsNeverFollowed(t *testing.T) {
 					trap.plant(t, filepath.Join(vm.out, name))
 				}
 			})
+			// What this machine has installed is not what is tested here.
+			r.preflight = func() error { return nil }
 			result := within(t, 10*time.Second, func() jobs.Result {
 				result, _ := r.Run(context.Background(), jobs.Job{AssignmentID: "a-1", Pool: "p", VCPUs: 2, JITConfig: "c"})
 				return result
