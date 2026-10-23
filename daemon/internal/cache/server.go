@@ -227,7 +227,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, pool string) {
 		w.WriteHeader(http.StatusNotFound)
 	case errors.Is(err, ErrTooLarge):
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
-	case errors.Is(err, ErrNoRoom):
+	case errors.Is(err, ErrNoRoom), errors.Is(err, ErrBusy):
 		w.WriteHeader(http.StatusInsufficientStorage)
 	default:
 		s.Log.Warn("a cache upload failed", "error", err)

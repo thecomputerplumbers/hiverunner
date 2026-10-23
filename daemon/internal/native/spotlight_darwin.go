@@ -87,7 +87,7 @@ func SpotlightAdvice(out io.Writer, noIndex bool) {
 		say("keep it out of the job directories: hived config set spotlight-exclude on")
 		return
 	}
-	say("Jobs keep their runner, checkouts and caches in " + filepath.Join(Home, NoIndexDir) + ",")
+	say("Jobs keep their checkouts and caches in " + filepath.Join(Home, NoIndexDir) + ",")
 	say("which Spotlight skips. To keep the rest of " + Home + " out of the index")
 	say("too, add it in System Settings > Spotlight > Search Privacy: press +, then")
 	say("Shift-Command-G, and type " + Home + ".")

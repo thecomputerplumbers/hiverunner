@@ -145,6 +145,11 @@ func macos(ctx context.Context, args []string) error {
 		fmt.Println(field("user", yesNo(report.UserExists)))
 		fmt.Println(field("sudo rule", yesNo(report.Sudo)))
 		fmt.Println(field("runner", orDash(report.Runner)))
+		if home, open := native.HomeOpen(); open != "" {
+			fmt.Println(field("home folder", home+" is "+open+"; close it with: "+native.CloseHome))
+		} else if report.UserExists {
+			fmt.Println(field("home folder", "closed to "+native.User))
+		}
 		fmt.Println(field("macos-jobs", onOff(current.MacOSJobs)))
 		if report.Problem != "" {
 			return errors.New(report.Problem)

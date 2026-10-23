@@ -184,8 +184,9 @@ agree before one runs:
   `hiveworker` user (hidden, no usable password, in the `_developer` group),
   writes one rule to `/etc/sudoers.d/hiveworker` that lets the owner run
   exactly `hived macos-job` as that user, downloads GitHub's macOS runner
-  (`native.RunnerVersion`, pinned with its checksum), and turns on the
-  `macos-jobs` setting. `hived macos status` says what is in place;
+  (`native.RunnerVersion`, pinned with its checksum) and unpacks it as
+  root's in `/Library/Application Support/Hive Runner/runner`, and turns on
+  the `macos-jobs` setting. `hived macos status` says what is in place;
   `hived macos remove` undoes it all. The daemon says `macos: true` in its
   hello only while the setting is on and the Mac is ready.
 - An owner of the hive turns on "Allow macOS jobs" in its settings
@@ -193,17 +194,28 @@ agree before one runs:
   capacity for the label, creates no scale set for it, and answers capacity
   probes for it with no.
 
+`hiveworker` is in the `staff` group, as every user on a Mac is, so the
+owner's files are out of its reach only while the owner's home folder is
+closed to `staff` and to everyone. `hived macos setup`, `hived macos status`
+and `hived doctor` say when it is not; `chmod 700 ~` closes it.
+
 The label's kind is `macos` in `@workspace/pricing`, beside the two
 architectures, and `machineServes` there is the one place that decides which
 machine is which kind; the coordinator's `serves()` calls it. A job is billed as 4 vCPUs, the size
 of GitHub's standard macOS runner, and compared with GitHub's price for it.
 
-Each job gets an APFS clone of the runner directory, GitHub's runner in it
-with a clean environment, and the clone is deleted afterwards. What the job
-leaves in the `hiveworker` user's home (CocoaPods, npm and Xcode caches) stays
-for the next job. With the owner's `spotlight-exclude` on, the default, the
-runner, the jobs and those caches are in `~hiveworker/hive.noindex`, which
-Spotlight skips; `daemon/README.md` has the layout. The owner installs what every job needs, typically CocoaPods
+One macOS job runs at a time. Each gets an APFS clone of the runner
+directory, GitHub's runner in it with a clean environment and its JIT config
+in `ACTIONS_RUNNER_INPUT_JITCONFIG` rather than on its command line, and the
+clone is deleted afterwards. No job can change the runner the next one
+clones: it is root's. Before and after each job every process of the
+`hiveworker` user's is stopped and its crontab removed, so nothing a job
+started runs on into the next; if one will not stop, the Mac declines macOS
+jobs for ten minutes. What the job leaves in the `hiveworker` user's home
+(CocoaPods, npm and Xcode caches) stays for the next job. With the owner's
+`spotlight-exclude` on, the default, the jobs and those caches are in
+`~hiveworker/hive.noindex`, which Spotlight skips; `daemon/README.md` has the
+layout. The owner installs what every job needs, typically CocoaPods
 and Fastlane with Homebrew. An Expo app:
 
 ```yaml

@@ -6,15 +6,48 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### macOS jobs as the hiveworker user: run `hived macos setup` again
+
+A Mac that takes macOS jobs as the `hiveworker` user declines them after
+this update until its owner runs `hived macos setup` once more. Setup now
+unpacks GitHub's runner as root's in
+`/Library/Application Support/Hive Runner/runner`, where no job can change
+it, instead of in `hiveworker`'s home; the next clean removes the old copy.
+`hived macos status` says when setup is needed.
+
+Also:
+
+- One macOS job runs at a time on a Mac, however many jobs it may take.
+- Before and after each job, every process the `hiveworker` user has is
+  stopped, and its crontab removed, so nothing a job started runs on into the
+  next. If one will not stop, the Mac declines macOS jobs for ten minutes and
+  logs what was left.
+- The runner reads its JIT config from its environment rather than its
+  command line.
+- `hived macos remove` also removes the runner.
+- `hived macos setup` writes its sudo rule, checks it and puts it in place
+  all inside `/etc/sudoers.d`.
+- `hived macos setup`, `hived macos status` and `hived doctor` say when the
+  owner's home folder can be read or opened by `hiveworker`, and how to close
+  it: `chmod 700 ~`.
+- `hived drain`, which the updater waits on, counts a macOS job only when the
+  daemon started it, and counts jobs in macOS VMs too.
+
+### Actions cache: saves are held to the cache's size as they arrive
+
+Every save in progress counts toward the cache's size, whether or not it said
+its length up front, and one cache is at most 10 GB, as on GitHub. A machine
+takes at most 64 saves at once, and drops one that has sent nothing for ten
+minutes or is two hours old. A save past what the machine will keep fails as
+an ordinary cache-save failure; the job goes on.
+
 ### Spotlight is kept out of macOS jobs
 
 A `hive-macos` job run as `hiveworker` no longer has Spotlight indexing
 everything it writes, which took a steady share of the CPU for the whole
 build (#110). With the new `spotlight-exclude` setting, on by default:
 
-- The runner and each job live in `~hiveworker/hive.noindex`, which
-  Spotlight skips. An existing `~hiveworker/runner` moves there by itself
-  when no job is running; nothing needs reinstalling.
+- Each job lives in `~hiveworker/hive.noindex`, which Spotlight skips.
 - CocoaPods', npm's, pnpm's, Gradle's and Xcode's DerivedData caches are kept
   in `~hiveworker/hive.noindex/cache`, by variable or by symlink. A job's own
   `env:` and `-derivedDataPath` still win.

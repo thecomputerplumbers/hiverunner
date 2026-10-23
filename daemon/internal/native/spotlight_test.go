@@ -39,11 +39,11 @@ func gone(t *testing.T, path string) {
 
 func TestLayoutKeepsTheJobsWhereSpotlightLooksOnlyWhenAskedTo(t *testing.T) {
 	on, off := layout{home: "/Users/hw", noIndex: true}, layout{home: "/Users/hw"}
-	if on.runner() != "/Users/hw/hive.noindex/runner" || on.jobs() != "/Users/hw/hive.noindex/jobs" || on.cache() != "/Users/hw/hive.noindex/cache" {
-		t.Fatalf("on: %s %s %s", on.runner(), on.jobs(), on.cache())
+	if on.legacyRunner() != "/Users/hw/hive.noindex/runner" || on.jobs() != "/Users/hw/hive.noindex/jobs" || on.cache() != "/Users/hw/hive.noindex/cache" {
+		t.Fatalf("on: %s %s %s", on.legacyRunner(), on.jobs(), on.cache())
 	}
-	if off.runner() != "/Users/hw/runner" || off.jobs() != "/Users/hw/jobs" {
-		t.Fatalf("off: %s %s", off.runner(), off.jobs())
+	if off.legacyRunner() != "/Users/hw/runner" || off.jobs() != "/Users/hw/jobs" {
+		t.Fatalf("off: %s %s", off.legacyRunner(), off.jobs())
 	}
 	if env := off.env(); env != nil {
 		t.Fatalf("off gave the job %q", env)
@@ -63,7 +63,7 @@ func TestLayoutKeepsTheJobsWhereSpotlightLooksOnlyWhenAskedTo(t *testing.T) {
 	}
 }
 
-func TestArrangeMovesTheRunnerAndCachesIntoHiveNoindexAndBack(t *testing.T) {
+func TestArrangeMovesTheCachesIntoHiveNoindexAndBack(t *testing.T) {
 	home := t.TempDir()
 	mkfile(t, filepath.Join(home, "runner", RunnerVersion, "run.sh"), "runner")
 	mkfile(t, filepath.Join(home, "jobs", "left-123", "runner", "x"), "left")
@@ -78,22 +78,15 @@ func TestArrangeMovesTheRunnerAndCachesIntoHiveNoindexAndBack(t *testing.T) {
 	}
 
 	on := layout{home: home, noIndex: true}
-	// Before it moves, the runner is found where it is.
-	if got := on.installed(RunnerVersion); got != filepath.Join(home, "runner") {
-		t.Fatalf("installed before the move: %s", got)
-	}
 	for range 2 {
 		if err := on.arrange(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if read(t, filepath.Join(on.runner(), RunnerVersion, "run.sh")) != "runner" {
-		t.Fatal("the runner did not move whole")
-	}
-	if got := on.installed(RunnerVersion); got != on.runner() {
-		t.Fatalf("installed after the move: %s", got)
-	}
+	// The runner hiveworker unpacked for itself is not moved but removed:
+	// jobs clone root's.
 	gone(t, filepath.Join(home, "runner"))
+	gone(t, on.legacyRunner())
 	gone(t, filepath.Join(home, "jobs"))
 	if info, err := os.Stat(on.base()); err != nil || info.Mode().Perm() != 0o700 {
 		t.Fatalf("hive.noindex: %v %v", info, err)
@@ -123,25 +116,21 @@ func TestArrangeMovesTheRunnerAndCachesIntoHiveNoindexAndBack(t *testing.T) {
 		t.Fatalf("npm's cache was not made: %v", err)
 	}
 
-	// A stale copy left in the old place goes; the moved one stays.
+	// One unpacked in either layout goes.
 	mkfile(t, filepath.Join(home, "runner", RunnerVersion, "run.sh"), "stale")
+	mkfile(t, filepath.Join(on.legacyRunner(), RunnerVersion, "run.sh"), "stale")
 	if err := on.arrange(); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, filepath.Join(home, "runner"))
-	if read(t, filepath.Join(on.runner(), RunnerVersion, "run.sh")) != "runner" {
-		t.Fatal("the stale runner replaced the moved one")
-	}
+	gone(t, on.legacyRunner())
 
 	// Off puts everything back where it was.
 	off := layout{home: home}
 	if err := off.arrange(); err != nil {
 		t.Fatal(err)
 	}
-	if read(t, filepath.Join(home, "runner", RunnerVersion, "run.sh")) != "runner" {
-		t.Fatal("the runner did not move back")
-	}
-	gone(t, on.runner())
+	gone(t, filepath.Join(home, "runner"))
 	if info, err := os.Lstat(filepath.Join(home, ".gradle", "caches")); err != nil || !info.IsDir() {
 		t.Fatalf("~/.gradle/caches is not a directory again: %v %v", info, err)
 	}

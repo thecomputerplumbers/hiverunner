@@ -45,19 +45,26 @@ func TestDoctorSaysWhatTheRunningDaemonCannotOpen(t *testing.T) {
 }
 
 func TestDoctorSaysHowExposedAMacIsWithoutFailing(t *testing.T) {
-	on := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", false)
+	on := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", false, "", "")
 	if len(on) != 1 || on[0].OK || !on[0].Note || !strings.Contains(on[0].Found, "hiveworker") || !strings.Contains(on[0].Fix, "macos-jobs off") {
 		t.Fatalf("macOS jobs on said %+v", on)
 	}
-	if off := macOSJobs(settings.Settings{}, "darwin", false); len(off) != 1 || !off[0].OK {
+	if off := macOSJobs(settings.Settings{}, "darwin", false, "", ""); len(off) != 1 || !off[0].OK {
 		t.Fatalf("macOS jobs off said %+v", off)
 	}
 	// A job in a throwaway VM of its own leaves nothing for the next.
-	if vm := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", true); len(vm) != 1 || !vm[0].OK || vm[0].Note || strings.Contains(vm[0].Found, "hiveworker") {
+	if vm := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", true, "/Users/ada", "readable by everyone"); len(vm) != 1 || !vm[0].OK || vm[0].Note || strings.Contains(vm[0].Found, "hiveworker") {
 		t.Fatalf("macOS jobs in VMs said %+v", vm)
 	}
-	if linux := macOSJobs(settings.Settings{MacOSJobs: true}, "linux", false); len(linux) != 0 {
+	if linux := macOSJobs(settings.Settings{MacOSJobs: true}, "linux", false, "/home/ada", "readable by everyone"); len(linux) != 0 {
 		t.Fatalf("a Linux machine was told about macOS jobs: %+v", linux)
+	}
+
+	// A home folder native.User can see into is said, with how to close it,
+	// and fails nothing.
+	open := macOSJobs(settings.Settings{MacOSJobs: true}, "darwin", false, "/Users/ada", "readable by its group, which hiveworker is in")
+	if len(open) != 2 || open[1].OK || !open[1].Note || !strings.Contains(open[1].Found, "/Users/ada is readable by its group") || open[1].Fix != "chmod 700 ~" {
+		t.Fatalf("an open home folder said %+v", open)
 	}
 
 	// What is said and not counted shows its fix, and makes nothing exit 1.

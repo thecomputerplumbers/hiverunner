@@ -205,6 +205,16 @@ func cacheDir(current settings.Settings) (string, error) {
 // directories and separate network identities.
 func workDir(image string) string { return image + "-jobs" }
 
+// macosWorkDir is where the macOS VMs' jobs live, or "" if the data
+// directory is not there to hold any.
+func macosWorkDir(current settings.Settings) string {
+	dir, err := macosImageDir(current)
+	if err != nil {
+		return ""
+	}
+	return workDir(dir)
+}
+
 // relocate records that a home changed, to be settled now or by the daemon.
 // It makes the new home and checks it can be written to, so a typo or a
 // read-only disk is said at once rather than found by a daemon later.
