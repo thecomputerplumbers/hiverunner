@@ -102,6 +102,26 @@ RUN install -m 0755 -d /etc/apt/keyrings \
       modinfo -k "$kernel" "$module" >/dev/null || { echo "the kernel has no $module" >&2; exit 1; }; \
     done
 
+# What a headless browser needs of the system, so a job's browser tests do
+# not install it themselves. Playwright's `install --with-deps chromium` runs
+# apt as root on every job for about 94 packages: 36 MB of package lists and
+# 325 MB written, the heaviest moment of the job, and on hive VMs that step
+# crashed (exit 139) or hung until the job timed out. These are Playwright's
+# own lists for Ubuntu 24.04, chromium and tools, the same on arm64 and x64;
+# with them in place `playwright install-deps --dry-run chromium` finds
+# nothing to do. The browser itself is not here: its revision changes with
+# every Playwright release, and a job caches the one it pins.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcairo2 \
+      libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 libnspr4 libnss3 \
+      libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+      libxkbcommon0 libxrandr2 \
+      xvfb fonts-noto-color-emoji fonts-unifont libfontconfig1 libfreetype6 \
+      xfonts-cyrillic xfonts-scalable fonts-liberation fonts-ipafont-gothic \
+      fonts-wqy-zenhei fonts-tlwg-loma-otf fonts-freefont-ttf \
+ && rm -rf /var/lib/apt/lists/*
+
 # The runner starts every JavaScript action with one of its own copies of
 # Node. Each is put behind hive-node, which points the action at the host's
 # cache when there is one and otherwise changes nothing. The build fails if

@@ -6,6 +6,16 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### Browser tests find what a headless browser needs already installed
+
+Guest image 14 carries the system libraries, fonts and xvfb that Playwright
+installs for Chromium on Ubuntu 24.04, so `playwright install-deps
+--dry-run chromium` finds nothing to do and a job need not run apt as root
+to get them. That step (`install chromium --with-deps`) was the heaviest
+moment of a browser-test job and had crashed or hung on hive VMs. The image
+is about 325 MB larger unpacked. The browser itself is still the job's to
+download or cache, since its revision follows the Playwright version.
+
 ### An update cut off halfway no longer leaves the machine half updated
 
 The installer used to put the new daemon in place before it downloaded the
