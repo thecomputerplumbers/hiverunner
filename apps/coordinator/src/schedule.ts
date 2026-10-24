@@ -217,3 +217,16 @@ export function demand(
     available: Math.max(counts?.totalAvailableJobs ?? 0, unclaimed),
   }
 }
+
+/**
+ * How many jobs are queued for a label with no machine readied for them:
+ * those GitHub has assigned and not started, and those still on offer, less
+ * the runners readied and not yet started. A machine that comes free goes
+ * to these first, so a workflow asking where to run should not count it.
+ */
+export function queued(wanted: ReturnType<typeof demand>, unstarted: number) {
+  return Math.max(
+    0,
+    Math.max(0, wanted.assigned - wanted.running) + wanted.available - unstarted
+  )
+}

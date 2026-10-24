@@ -61,16 +61,25 @@ export async function capacityResponse(
       )
         return respond({ error: "Repository is not installed" }, 403)
     }
-    const available =
+    const free =
       (await canAcquireJobs(db, identity.organizationId)) &&
       // A macOS job runs on a member's Mac itself; the hive must allow it.
       (size.arch !== "macos" ||
-        (await macosJobsAllowed(db, identity.organizationId))) &&
-      (await env.POOL.getByName(identity.organizationId).availableCapacity(
-        identity.organizationId,
-        { vcpus: size.vcpus, arch: size.arch }
-      ))
-    return respond({ available: Boolean(available), label: size.label })
+        (await macosJobsAllowed(db, identity.organizationId)))
+        ? await env.POOL.getByName(identity.organizationId).availableCapacity(
+            identity.organizationId,
+            { vcpus: size.vcpus, arch: size.arch }
+          )
+        : 0
+    // A free machine goes to the jobs already queued for it first. Counted
+    // free while they wait, it took a workflow's jobs behind them: three
+    // pushes at once queued nine 4-core jobs behind one free Mac.
+    const waiting = free
+      ? await env.LISTENER.getByName(
+          `${identity.organizationId}:${size.label}`
+        ).waiting()
+      : 0
+    return respond({ available: free > waiting, label: size.label })
   } catch {
     // Neither credentials nor upstream responses belong in diagnostics.
     return respond({ error: "Capacity temporarily unavailable" }, 503)
