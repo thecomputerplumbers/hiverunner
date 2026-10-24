@@ -204,6 +204,9 @@ type Manager struct {
 	// onHostKilled is told when a job's VM was killed by the host. Nil is
 	// nobody.
 	onHostKilled func()
+	// awake is held by each running job until its runner returns. Nil is
+	// none.
+	awake Awake
 
 	mu    sync.Mutex
 	held  map[string]*slot
@@ -241,6 +244,20 @@ func (m *Manager) Native(runner Runner) {
 // killed its VM. Call it before the first offer.
 func (m *Manager) OnHostKilled(fn func()) {
 	m.onHostKilled = fn
+}
+
+// Awake keeps the machine from sleeping. Each Hold is matched by one
+// Release.
+type Awake interface {
+	Hold()
+	Release()
+}
+
+// KeepAwake sets what keeps the machine awake while a job runs: a machine
+// that sleeps freezes the job's VM, and GitHub gives the job up as lost.
+// Call it before the first offer.
+func (m *Manager) KeepAwake(awake Awake) {
+	m.awake = awake
 }
 
 func (m *Manager) limit() Limits {
@@ -474,9 +491,17 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 	}
 	runner := held.runner
 	m.running.Add(1)
+	if m.awake != nil {
+		m.awake.Hold()
+	}
 	go func() {
 		defer m.running.Done()
 		defer cancel(nil)
+		if m.awake != nil {
+			// Deferred after Done, so it runs first: the machine is
+			// let sleep only once the VM is gone, before Wait returns.
+			defer m.awake.Release()
+		}
 		m.log.Info("job started", "assignment", job.AssignmentID, "runner", job.RunnerName, "kind", job.Kind, "vcpus", job.VCPUs, "label", job.Label)
 		// Run returns once the VM and its files are gone, or once a VM that
 		// will not stop is counted by its runner instead of this slot.

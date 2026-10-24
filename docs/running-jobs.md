@@ -48,7 +48,13 @@ Build the image once with Docker, then build the daemon with Go:
 `login` opens the browser to approve machine enrollment. The GitHub App must
 be installed on the organization and its repository must be accessible to the
 runner group. The daemon pauses availability when the lid is closed, unless
-its owner sets `lid on`, and keeps running on battery. One machine runs one job at a time across all its pools unless its
+its owner sets `lid on`, and keeps running on battery. While it holds a job
+it keeps the machine from sleeping when idle (`caffeinate -i -s` on a Mac, a
+`systemd-inhibit` lock on Linux where systemd runs), and lets it sleep again
+once the last job's VM is gone: a machine asleep under a job freezes its VM,
+and GitHub gives the job up as lost. Nothing but `sudo pmset -a disablesleep
+1` keeps a MacBook awake with its lid closed, so closing it under a job still
+loses that job. One machine runs one job at a time across all its pools unless its
 owner raises `max-jobs`, and always leaves two cores for its owner.
 
 The daemon keeps itself current. Once a day it reads the release manifest

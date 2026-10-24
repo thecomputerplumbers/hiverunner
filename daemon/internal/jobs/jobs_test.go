@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -864,5 +865,89 @@ func TestTheReasonsForBeingFullSaySo(t *testing.T) {
 		if strings.Contains(reason, " is running as many ") {
 			t.Errorf("%q reads as the machine being full", reason)
 		}
+	}
+}
+
+// counted is an Awake that counts its holds.
+type counted struct {
+	mu   sync.Mutex
+	held int
+	most int
+}
+
+func (c *counted) Hold() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.held++
+	c.most = max(c.most, c.held)
+}
+
+func (c *counted) Release() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.held--
+}
+
+func (c *counted) holds() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.held
+}
+
+// A machine that sleeps under a job freezes its VM and GitHub gives the
+// job up as lost, so each running job keeps it awake until its VM is gone,
+// a released one too.
+func TestEveryRunningJobKeepsTheMachineAwake(t *testing.T) {
+	runner := newFake()
+	runner.started = make(chan Job, 2)
+	awake := &counted{}
+	m := New(runner, quiet)
+	m.Limit(limited(Limits{MaxJobs: 2, Cores: 18}))
+	m.KeepAwake(awake)
+
+	for _, id := range []string{"a-1", "a-2"} {
+		if reason := m.Offer("acme", offer(id)); reason != "" {
+			t.Fatalf("offer %s: %q", id, reason)
+		}
+	}
+	if awake.holds() != 0 {
+		t.Fatal("an offer not yet started kept the machine awake")
+	}
+	for _, id := range []string{"a-1", "a-2"} {
+		if err := m.Start(context.Background(), "acme", start(id)); err != nil {
+			t.Fatal(err)
+		}
+		<-runner.started
+	}
+	if awake.holds() != 2 {
+		t.Fatalf("two running jobs hold %d, want 2", awake.holds())
+	}
+
+	// One finishes; the other still keeps the machine awake.
+	runner.finish <- 0
+	select {
+	case <-m.Exits("acme"):
+	case <-within(t, "the first exit"):
+		t.Fatal("no job reported its exit")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for awake.holds() != 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if awake.holds() != 1 {
+		t.Fatalf("with one job left running, %d holds, want 1", awake.holds())
+	}
+
+	// The other is released by the coordinator: it lets go once its VM
+	// is gone, which is before Wait returns.
+	held := m.Holding("acme")
+	if len(held) != 1 {
+		t.Fatalf("holding %v, want one job", held)
+	}
+	m.Release("acme", held[0])
+	<-runner.stopped
+	m.Wait()
+	if awake.holds() != 0 || awake.most != 2 {
+		t.Fatalf("after every job: %d holds (most %d), want 0 (most 2)", awake.holds(), awake.most)
 	}
 }

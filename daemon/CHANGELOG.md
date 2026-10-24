@@ -6,6 +6,19 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### A machine no longer falls asleep under a job
+
+A Mac set to sleep when idle went to sleep a few minutes into a job, with
+nobody at the keyboard, which is when it is lent. Its VMs froze, GitHub gave
+every job on it up as "The self-hosted runner lost communication with the
+server" about ten minutes later, and the VMs finished their jobs for nobody
+when it woke. Now, from the first job's start until the last job's VM is
+gone, hived holds `caffeinate -i -s` (against idle sleep, and against any
+sleep on AC power), which ends with hived itself. On Linux it holds a
+`systemd-inhibit` lock against sleep and idle where systemd runs. A MacBook
+whose lid is closed still sleeps unless its owner has run `sudo pmset -a
+disablesleep 1`, as `hived doctor` says.
+
 ### Browser tests find what a headless browser needs already installed
 
 Guest image 14 carries the system libraries, fonts and xvfb that Playwright
