@@ -346,7 +346,7 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 	}
 	r.mu.Lock()
 	r.active++
-	vm := r.takeWarmLocked(job.VCPUs)
+	vm := r.takeWarmLocked(job.VCPUs, job.MemoryBytes)
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
@@ -356,7 +356,7 @@ func (r *Runner) run(ctx context.Context, job jobs.Job, file, content string, co
 
 	warm := vm != nil
 	if vm == nil {
-		if vm, err = r.boot(job.VCPUs); err != nil {
+		if vm, err = r.boot(job.VCPUs, job.MemoryBytes); err != nil {
 			return jobs.Result{ExitCode: -1}, err
 		}
 	}
@@ -564,7 +564,8 @@ func readExit(out string) (int, bool) {
 
 // boot starts a fresh VM on a clone of the guest disk, with empty shares.
 // The guest agent then waits for a job to appear in what it is handed.
-func (r *Runner) boot(vcpus int) (*instance, error) {
+// memory is less than its size gives, or zero for that.
+func (r *Runner) boot(vcpus int, memory uint64) (*instance, error) {
 	if err := os.MkdirAll(r.WorkDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -579,6 +580,7 @@ func (r *Runner) boot(vcpus int) (*instance, error) {
 		out:     filepath.Join(dir, "out"),
 		console: filepath.Join(dir, "console.log"),
 		vcpus:   vcpus,
+		memory:  memory,
 		booted:  time.Now(),
 		ended:   make(chan struct{}),
 		stop:    func() {},
@@ -710,10 +712,11 @@ func (r *Runner) mac() (net.HardwareAddr, int, func(), error) {
 	return hardware, slot, release, nil
 }
 
-// takeWarmLocked hands over the warm VM if it suits the job.
-func (r *Runner) takeWarmLocked(vcpus int) *instance {
+// takeWarmLocked hands over the warm VM if it suits the job. A job given
+// less memory than its size does not get one: the warm VM has its size's.
+func (r *Runner) takeWarmLocked(vcpus int, memory uint64) *instance {
 	vm := r.warm
-	if vm == nil || vm.vcpus != vcpus || !vm.alive() {
+	if vm == nil || vm.vcpus != vcpus || memory != 0 || !vm.alive() {
 		return nil
 	}
 	r.warm = nil
@@ -767,7 +770,7 @@ func (r *Runner) tend(available bool) {
 		return
 	}
 
-	vm, err := r.boot(r.WarmVCPUs)
+	vm, err := r.boot(r.WarmVCPUs, 0)
 	r.mu.Lock()
 	r.warming = false
 	if err != nil {

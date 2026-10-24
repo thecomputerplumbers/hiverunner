@@ -418,7 +418,7 @@ func (r *Runner) start(found tools, vm *instance, mac net.HardwareAddr, disk str
 	var sysinfo unix.Sysinfo_t
 	_ = unix.Sysinfo(&sysinfo)
 	vcpus := min(max(vm.vcpus, 1), runtime.NumCPU())
-	vm.memory = GuestMemoryBytes(vcpus, uint64(sysinfo.Totalram)*uint64(sysinfo.Unit))
+	vm.memory = sized(vm.memory, GuestMemoryBytes(vcpus, uint64(sysinfo.Totalram)*uint64(sysinfo.Unit)))
 	megabytes := vm.memory >> 20
 	memory := strconv.FormatUint(megabytes, 10) + "M"
 

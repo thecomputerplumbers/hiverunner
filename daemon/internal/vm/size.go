@@ -14,6 +14,24 @@ func GuestMemoryBytes(vcpus int, hostBytes uint64) uint64 {
 	return memory
 }
 
+// LeanestGuestMemoryBytes is the least a job's VM may be given when the
+// host has less free than its size asks: three quarters of it, and never
+// less than the smallest VM's 4 GiB. The guest's compressed swap and swap
+// file absorb the difference; below this a job is declined instead.
+func LeanestGuestMemoryBytes(vcpus int, hostBytes uint64) uint64 {
+	full := GuestMemoryBytes(vcpus, hostBytes)
+	return min(full, max(full/4*3, 4*gib))
+}
+
+// sized is the memory a VM boots with: what it was given, when that is
+// less than its size's, or its size's.
+func sized(given, size uint64) uint64 {
+	if given == 0 || given > size {
+		return size
+	}
+	return given
+}
+
 // GuestZramBytes is compressed swap inside the guest: half of the guest's
 // RAM, so memory pressure compresses before the OOM killer runs. The guest
 // sizes this from MemTotal at boot; the formula lives here so a label's

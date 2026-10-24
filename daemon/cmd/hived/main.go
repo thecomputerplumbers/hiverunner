@@ -470,7 +470,7 @@ func run(ctx context.Context) error {
 		// one chosen for an offer: see jobs.Limiter. Its memory is set here
 		// too, so that a Linux offer counts the macOS VMs accepted.
 		limits := jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS(), Hold: hold,
-			Available: host.AvailableMemory(), Reserve: current.ReserveBytes(hostMemory()), GuestMemory: guestMemory}
+			Available: host.AvailableMemory(), Reserve: current.ReserveBytes(hostMemory()), GuestMemory: guestMemory, LeanestGuest: leanestGuest}
 		if current.MacOSInVM() {
 			limits.MacOSMemory = macvm.Memory(hostMemory())
 		}
