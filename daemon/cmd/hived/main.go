@@ -514,6 +514,7 @@ func run(ctx context.Context) error {
 	}
 	slot.Native(native)
 	slot.Limit(limits)
+	slot.KeepAwake(host.NewAwake(log))
 
 	// Once a day, whether a release is out. If the owner allows it, the
 	// daemon updates itself when it has no job, which ends this process.
