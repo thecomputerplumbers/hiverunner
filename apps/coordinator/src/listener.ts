@@ -21,7 +21,7 @@ import {
 } from "@workspace/github/scale-sets"
 import { runnerSize } from "@workspace/pricing"
 import { githubTestAPI } from "./config"
-import { demand } from "./schedule"
+import { demand, queued } from "./schedule"
 import type { Pool } from "./pool"
 
 type Settings = { organizationId: string; label: string; vcpus: number }
@@ -95,6 +95,20 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       })
       await this.ctx.storage.setAlarm(Date.now() + 5000)
     }
+  }
+
+  /**
+   * How many of this label's jobs GitHub holds that no machine here has
+   * been readied for: queued jobs a free machine would go to first. Read
+   * from GitHub's last counts and what this listener knows beyond them.
+   */
+  async waiting() {
+    const state = await this.ctx.storage.get<State>("state")
+    if (!state) return 0
+    return queued(
+      demand(state.statistics, state.available, state.claims),
+      Object.values(state.slots).filter((slot) => !slot.githubStarted).length
+    )
   }
 
   private async tick() {

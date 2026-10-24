@@ -7,6 +7,7 @@ import {
   full,
   offerBackoff,
   pickMachine,
+  queued,
   refusing,
   room,
   routeBackoff,
@@ -254,4 +255,24 @@ test("only a full machine's refusal leaves it counted", () => {
   )
   assert.ok(!full("this machine does not have the memory free for this job"))
   assert.ok(!full("this job is larger than this machine's owner allows"))
+})
+
+test("jobs already queued for a label come before a workflow asking", () => {
+  const counts = (assigned, running, available) =>
+    demand(
+      {
+        totalAssignedJobs: assigned,
+        totalRunningJobs: running,
+        totalAvailableJobs: available,
+      },
+      {},
+      {}
+    )
+  // Three pushes' worth of jobs waiting, none readied: all queued.
+  assert.equal(queued(counts(0, 0, 9), 0), 9)
+  // Running jobs wait for nothing; ones assigned and not running do.
+  assert.equal(queued(counts(4, 3, 0), 0), 1)
+  // A runner readied for a waiting job has its machine already.
+  assert.equal(queued(counts(4, 3, 2), 2), 1)
+  assert.equal(queued(counts(1, 1, 0), 3), 0)
 })

@@ -351,10 +351,14 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     return total
   }
 
-  /** An idle, currently authorized machine. Assigned listener slots don't count. */
+  /**
+   * How many more jobs of this size idle, currently authorized machines
+   * could start now. Assigned listener slots don't count.
+   */
   async availableCapacity(organizationId: string, size: JobSize) {
     const sockets = this.ctx.getWebSockets()
     const ids = sockets.map((socket) => this.attachment(socket).machineId)
+    let free = 0
     for (let i = 0; i < ids.length; i += 50) {
       const batch = ids.slice(i, i + 50)
       const rows = await this.db
@@ -395,25 +399,23 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       const active = new Set(rows.map((row) => row.id))
       // Re-read attachments after D1 awaits: a concurrent offer may have reserved it.
       const now = Date.now()
-      if (
-        sockets.some((socket) => {
-          const state = this.attachment(socket)
-          return (
-            socket.readyState === WebSocket.OPEN &&
-            state.organizationId === organizationId &&
-            state.greeted &&
-            state.presence === "online" &&
-            room(state, size) > 0 &&
-            // One that keeps refusing this size would leave the job queued.
-            !refusing(state, size.vcpus, now, routeBackoff) &&
-            active.has(state.machineId) &&
-            !occupied.has(state.machineId)
-          )
-        })
-      )
-        return true
+      for (const socket of sockets) {
+        const state = this.attachment(socket)
+        if (
+          batch.includes(state.machineId) &&
+          socket.readyState === WebSocket.OPEN &&
+          state.organizationId === organizationId &&
+          state.greeted &&
+          state.presence === "online" &&
+          // One that keeps refusing this size would leave the job queued.
+          !refusing(state, size.vcpus, now, routeBackoff) &&
+          active.has(state.machineId) &&
+          !occupied.has(state.machineId)
+        )
+          free += room(state, size)
+      }
     }
-    return false
+    return free
   }
 
   private async wakeListeners(state: Attachment) {
