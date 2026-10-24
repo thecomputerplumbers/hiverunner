@@ -256,10 +256,32 @@ async function setUp(t) {
   mkdirSync(home)
 
   let served
+  // How many more requests for a path are cut off halfway, as a stream a
+  // busy server resets is; and every path asked for from somewhere in it.
+  const cuts = new Map()
+  const resumed = []
   const server = createServer((request, response) => {
-    const file = join(served, new URL(request.url, "http://x").pathname)
+    const path = new URL(request.url, "http://x").pathname
+    const file = join(served, path)
     if (!existsSync(file)) return response.writeHead(404).end()
-    response.end(readFileSync(file))
+    let body = readFileSync(file)
+    const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "")
+    if (range && Number(range[1]) > 0) {
+      resumed.push(path)
+      const from = Number(range[1])
+      if (from >= body.length) return response.writeHead(416).end()
+      response.writeHead(206, {
+        "Content-Range": `bytes ${from}-${body.length - 1}/${body.length}`,
+        "Content-Length": body.length - from,
+      })
+      body = body.subarray(from)
+    } else response.writeHead(200, { "Content-Length": body.length })
+    if ((cuts.get(path) ?? 0) > 0) {
+      cuts.set(path, cuts.get(path) - 1)
+      response.write(body.subarray(0, Math.ceil(body.length / 2)))
+      return setTimeout(() => response.socket.destroy(), 50)
+    }
+    response.end(body)
   })
   server.listen(0, "127.0.0.1")
   await once(server, "listening")
@@ -278,6 +300,7 @@ async function setUp(t) {
         XDG_CONFIG_HOME: "",
         HIVE_RELEASES: origin,
         HIVE_DEV: "1",
+        HIVE_RETRY_SECONDS: "0",
         PATH: `${service.bin}:${process.env.PATH}`,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -293,8 +316,11 @@ async function setUp(t) {
     return said
   }
   const asked = () => readFileSync(join(root, "asked.log"), "utf8")
-  return { root, home, published, service, install, asked }
+  return { root, home, published, service, install, asked, cuts, resumed }
 }
+
+const imagePiece = (image) =>
+  mac ? `/image-${image}.aar.aa` : `/image-${image}.tar.gz.aa`
 
 test(
   "the installer never restarts a daemon under a job it need not cancel",
@@ -495,5 +521,52 @@ test(
 
     // Anything else on the command line is refused before anything is done.
     assert.match(await install({}, 2, ["--hives", "acme"]), /--hive <name>/)
+  }
+)
+
+test(
+  "a cut-off update replaces nothing, and the next run carries on from where it stopped",
+  { skip: unusable() || false },
+  async (t) => {
+    const { home, published, service, install, cuts, resumed } = await setUp(t)
+    await install()
+    const dataHome = mac
+      ? join(home, "Library/Application Support/HiveWorker")
+      : join(home, ".config/HiveWorker")
+    const daemon = () =>
+      readFileSync(join(home, ".local/bin/hived"), "utf8").split("\n")[1]
+    const image = () =>
+      JSON.parse(readFileSync(join(dataHome, "image/manifest.json"), "utf8"))
+        .imageVersion
+
+    // A new daemon and a new image, and an image that is cut off every
+    // time it is asked for: the installer gives up, having replaced neither.
+    published.state.version = "9.9.1"
+    published.state.daemon = "newer"
+    published.state.image = 2
+    published.publish()
+    cuts.set(imagePiece(2), 100)
+    const failed = await install({}, 1)
+    assert.match(failed, /kept being cut off/)
+    assert.match(failed, /carries on from there/)
+    assert.match(failed, /put back as it was/)
+    assert.equal(daemon(), "# ", "the new daemon went in without its image")
+    assert.equal(image(), 1, "the old image was replaced")
+    assert.equal(service.restarts(), 1)
+    assert.ok(resumed.includes(imagePiece(2)), "no try carried on from another")
+
+    // The link is better now, though the first try is still cut off: the
+    // piece is finished from what is on disk, and everything goes in.
+    cuts.set(imagePiece(2), 1)
+    const before = resumed.length
+    await install()
+    assert.ok(resumed.length > before, "the next run started over")
+    assert.equal(daemon(), "# newer")
+    assert.equal(image(), 2)
+    assert.equal(service.restarts(), 2)
+    assert.ok(
+      !existsSync(join(dataHome, "staging")),
+      "the staging directory was left behind"
+    )
   }
 )

@@ -24,8 +24,10 @@
 # Run it again to update. A daemon that is running jobs is not restarted
 # under them: it stops taking new ones, and the update waits for the ones it
 # has. HIVE_NOW=1 does not wait, and cancels them. The guest image is staged
-# on the data disk, not in /tmp. If the update fails, the machine is put
-# back as it was. To remove everything: `hived uninstall`.
+# on the data disk, not in /tmp, and nothing is replaced until the daemon and
+# the image are both downloaded and checked. If the update fails, the machine
+# is put back as it was; a download that was cut off is picked up where it
+# stopped by the next run. To remove everything: `hived uninstall`.
 set -eu
 
 # Which hives to add this machine to, if the person signing in is in more
@@ -78,9 +80,11 @@ fail() {
 
 # A failed install must not leave the machine paused. drain records that it
 # paused this machine; cleanup lifts that pause unless a new daemon started
-# to. The guest image is staged on the data disk, never in /tmp.
+# to. The guest image is staged on the data disk, never in /tmp. What of it
+# was downloaded is kept, in $pieces, for the next run to carry on from.
 work=""
 stage=""
+pieces=""
 drained=""
 restarted=""
 cleanup() {
@@ -92,7 +96,12 @@ cleanup() {
       printf 'hiveworker: the update did not finish. If this machine is not taking jobs, run: hived drain --end\n' >&2
     fi
   fi
-  [ -n "$stage" ] && rm -rf "$stage"
+  if [ -n "$stage" ] && [ -n "$pieces" ] && [ -d "$pieces" ]; then
+    find "$stage" -mindepth 1 -maxdepth 1 ! -path "$pieces" -exec rm -rf {} +
+    printf 'hiveworker: what was downloaded of the image is kept; running this again carries on from there.\n' >&2
+  elif [ -n "$stage" ]; then
+    rm -rf "$stage"
+  fi
   [ -n "$work" ] && rm -rf "$work"
   exit "$status"
 }
@@ -115,27 +124,89 @@ free_kb() {
 }
 
 # The guest image is staged beside where it will be installed. $1 is that
-# home, $2 the published size in megabytes.
+# home, $2 the published size in megabytes, $3 its published checksum, which
+# names the pieces an earlier run downloaded of this image and no other.
 prepare_image_download() {
   home=$1
   mb=$2
+  stage="$home/staging"
+  pieces="$stage/pieces-$(printf %.16s "$3")"
   mkdir -p "$home" || fail "could not make $home"
   case $mb in
     '' | *[!0-9]*) mb=800 ;;
   esac
   # The archive, an unpacked copy beside the old image, and a little room.
+  # Pieces already here count as room: they are part of the archive.
   need_mb=$((mb * 3 + 64))
   free=$(free_kb "$home")
   case $free in
     '' | *[!0-9]*) fail "could not see how much room is in $home" ;;
   esac
-  free_mb=$((free / 1024))
+  have=0
+  [ -d "$pieces" ] && have=$(du -sk "$pieces" | awk '{ print $1 }')
+  free_mb=$(((free + have) / 1024))
   if [ "$free_mb" -lt "$need_mb" ]; then
+    pieces=""
+    stage=""
     fail "there is not enough room in $home for the guest image (${mb} MB to download; about $need_mb MB free is needed, and $free_mb MB is free). Free some space and run this again."
   fi
-  stage="$home/staging"
-  rm -rf "$stage"
-  mkdir "$stage" || fail "could not make $stage"
+  # Anything else here is from a run that was stopped, or of another image.
+  mkdir -p "$stage" || fail "could not make $stage"
+  find "$stage" -mindepth 1 -maxdepth 1 ! -path "$pieces" -exec rm -rf {} +
+  mkdir -p "$pieces" || fail "could not make $pieces"
+}
+
+# Downloads the image's pieces into $pieces, each one picked up where an
+# earlier try, or an earlier run, left it, and joins them into $1. curl's
+# own retries do not cover a connection cut in the middle of a piece, which
+# a long download over a busy link meets: HTTP/2 resets the stream (curl's
+# exit 92) or the body ends early (18). $2 is the URL the pieces are named
+# after, and the rest are their names. HIVE_RETRY_SECONDS is for tests.
+fetch_image() {
+  joined=$1
+  url=$2
+  shift 2
+  for part in "$@"; do
+    [ -f "$pieces/$part" ] && continue
+    tries=0
+    while :; do
+      # HTTP/1.1: one long response, not a stream a busy server may reset.
+      fetch -# --http1.1 -C - -o "$pieces/$part.partial" "$url.$part" && break
+      status=$?
+      tries=$((tries + 1))
+      [ "$tries" -lt 6 ] || fail "the image download kept being cut off (curl exit $status). Run this again to carry on from where it stopped."
+      # A server that cannot carry on sends the piece whole, or refuses the
+      # range: start the piece again.
+      case $status in 22 | 33 | 36) rm -f "$pieces/$part.partial" ;; esac
+      wait=$((tries * ${HIVE_RETRY_SECONDS:-5}))
+      say "The download was cut off (curl exit $status); carrying on in ${wait}s."
+      sleep "$wait"
+    done
+    mv "$pieces/$part.partial" "$pieces/$part"
+  done
+  : >"$joined"
+  for part in "$@"; do
+    cat "$pieces/$part" >>"$joined"
+  done
+}
+
+# Checks the joined image, and forgets its pieces when it does not match:
+# one of them is wrong, and the next run starts the download afresh.
+check_image() {
+  actual=$(sum "$1")
+  if [ "$actual" != "$2" ]; then
+    rm -rf "$pieces"
+    pieces=""
+    fail "$(basename "$1") does not match its published checksum. Nothing was installed."
+  fi
+}
+
+# Puts the new daemon in place in one step, so that a daemon started at any
+# moment is either the old one or the new one, never part of either.
+install_daemon() {
+  install -m 0755 "$work/daemon/hived" "$BIN_DIR/hived.new"
+  mv -f "$BIN_DIR/hived.new" "$BIN_DIR/hived"
+  say "Installed $BIN_DIR/hived"
 }
 
 # Said in place of signing in, to a machine that already is. Someone running
@@ -221,9 +292,10 @@ fetch() {
   esac
 }
 field() { plutil -extract "$1" raw -o - "$work/latest.json" 2>/dev/null || true; }
+sum() { shasum -a 256 "$1" | cut -d' ' -f1; }
 check() {
   # $1 file, $2 expected sha256
-  actual=$(shasum -a 256 "$1" | cut -d' ' -f1)
+  actual=$(sum "$1")
   [ "$actual" = "$2" ] || fail "$(basename "$1") does not match its published checksum. Nothing was installed."
 }
 
@@ -263,12 +335,15 @@ mkdir -p "$BIN_DIR"
 changed=""
 running=""
 launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 && running=yes
+# The new daemon goes in once the image it needs is in place too: a daemon
+# on disk that is newer than the image beside it is a half-done update.
+new_daemon=""
 if ! cmp -s "$work/daemon/hived" "$BIN_DIR/hived"; then
   changed=yes
+  new_daemon=yes
   [ -z "$running" ] || drain "$work/daemon/hived"
 fi
-install -m 0755 "$work/daemon/hived" "$BIN_DIR/hived"
-say "Installed $BIN_DIR/hived"
+say "Checked the daemon"
 
 step "Installing the Linux image jobs run in"
 image_home=$(image_home)
@@ -281,36 +356,34 @@ if [ "$have" = "$image_version" ]; then
   say "Already up to date ($image_version)."
 else
   changed=yes
-  prepare_image_download "$image_home" "$image_mb"
-  [ -z "$running" ] || drain "$BIN_DIR/hived"
+  prepare_image_download "$image_home" "$image_mb" "$image_sha"
+  [ -z "$running" ] || drain "$work/daemon/hived"
   say "Downloading ${image_mb:-about 300} MB. This is the slow part."
   # The image is published in pieces. The checksum is of the whole. A
   # manifest that names no pieces is of an image published whole.
   if [ -n "$image_parts" ]; then
-    : >"$stage/image.aar"
-    for part in $image_parts; do
-      fetch -# -o "$stage/image.part" "$image_url.$part"
-      cat "$stage/image.part" >>"$stage/image.aar"
-      rm -f "$stage/image.part"
-    done
+    # shellcheck disable=SC2086 # the pieces' names are words
+    fetch_image "$stage/image.aar" "$image_url" $image_parts
   else
     fetch -# -o "$stage/image.aar" "$image_url"
   fi
-  check "$stage/image.aar" "$image_sha"
+  check_image "$stage/image.aar" "$image_sha"
   rm -rf "$image_home/image.new"
   mkdir "$image_home/image.new"
   aa extract -d "$image_home/image.new" -i "$stage/image.aar" || fail "could not unpack the image."
   [ -f "$image_home/image.new/manifest.json" ] || fail "the image download is incomplete."
   rm -rf "$stage"
   stage=""
-  # Swapped in whole. A daemon running jobs keeps using the image it has
-  # open until it is restarted below.
+  pieces=""
+  # Swapped in whole, and the daemon right after it. A daemon running jobs
+  # keeps using the image it has open until it is restarted below.
   rm -rf "$image_home/image.old"
   [ -d "$image_dir" ] && mv "$image_dir" "$image_home/image.old"
   mv "$image_home/image.new" "$image_dir"
   rm -rf "$image_home/image.old"
   say "Installed image $image_version"
 fi
+[ -z "$new_daemon" ] || install_daemon
 
 if [ "${HIVE_NO_START:-}" = "1" ]; then
   say ""
@@ -512,8 +585,9 @@ fetch() {
 }
 # The Linux manifest is lines of name=value: no JSON parser is on every box.
 field() { sed -n "s/^$1=//p" "$work/latest" | head -1; }
+sum() { sha256sum "$1" | cut -d' ' -f1; }
 check() {
-  actual=$(sha256sum "$1" | cut -d' ' -f1)
+  actual=$(sum "$1")
   [ "$actual" = "$2" ] || fail "$(basename "$1") does not match its published checksum. Nothing was installed."
 }
 
@@ -543,12 +617,15 @@ mkdir -p "$BIN_DIR"
 changed=""
 running=""
 systemctl --user is-active --quiet "$UNIT" 2>/dev/null && running=yes
+# The new daemon goes in once the image it needs is in place too: a daemon
+# on disk that is newer than the image beside it is a half-done update.
+new_daemon=""
 if ! cmp -s "$work/daemon/hived" "$BIN_DIR/hived"; then
   changed=yes
+  new_daemon=yes
   [ -z "$running" ] || drain "$work/daemon/hived"
 fi
-install -m 0755 "$work/daemon/hived" "$BIN_DIR/hived"
-say "Installed $BIN_DIR/hived"
+say "Checked the daemon"
 
 if [ -z "$virtiofsd" ]; then
   # This system packages no virtiofsd that runs without root. Hive Runner's
@@ -578,17 +655,13 @@ if [ "$have" = "$image_version" ]; then
   say "Already up to date ($image_version)."
 else
   changed=yes
-  prepare_image_download "$image_home" "$image_mb"
-  [ -z "$running" ] || drain "$BIN_DIR/hived"
+  prepare_image_download "$image_home" "$image_mb" "$image_sha"
+  [ -z "$running" ] || drain "$work/daemon/hived"
   say "Downloading ${image_mb:-about 300} MB. This is the slow part."
   # The image is published in pieces. The checksum is of the whole.
-  : >"$stage/image.tar.gz"
-  for part in $image_parts; do
-    fetch -# -o "$stage/image.part" "$image_url.$part"
-    cat "$stage/image.part" >>"$stage/image.tar.gz"
-    rm -f "$stage/image.part"
-  done
-  check "$stage/image.tar.gz" "$image_sha"
+  # shellcheck disable=SC2086 # the pieces' names are words
+  fetch_image "$stage/image.tar.gz" "$image_url" $image_parts
+  check_image "$stage/image.tar.gz" "$image_sha"
   rm -rf "$image_home/image.new"
   mkdir "$image_home/image.new"
   # Sparse, so the disk takes the room its contents do and no more.
@@ -596,12 +669,15 @@ else
   [ -f "$image_home/image.new/manifest.json" ] || fail "the image download is incomplete."
   rm -rf "$stage"
   stage=""
+  pieces=""
+  # Swapped in whole, and the daemon right after it.
   rm -rf "$image_home/image.old"
   [ -d "$image_dir" ] && mv "$image_dir" "$image_home/image.old"
   mv "$image_home/image.new" "$image_dir"
   rm -rf "$image_home/image.old"
   say "Installed image $image_version"
 fi
+[ -z "$new_daemon" ] || install_daemon
 
 if [ "${HIVE_NO_START:-}" = "1" ]; then
   say ""

@@ -63,9 +63,21 @@ type State struct {
 	// Notified is the version the owner was last told about, so they are
 	// told about each one once.
 	Notified string `json:"notified,omitempty"`
-	// Failed is when applying an update last failed; another attempt waits
-	// a day from then.
-	Failed time.Time `json:"failed,omitzero"`
+	// Failed is when applying an update last failed, and Failures how many
+	// times in a row it has; another attempt waits RetryAfter from then.
+	Failed   time.Time `json:"failed,omitzero"`
+	Failures int       `json:"failures,omitempty"`
+}
+
+// RetryAfter is how long a failed update waits before it is tried again: an
+// hour after the first failure, twice that after each one more, and a day at
+// most. The installer carries on from what it downloaded, so a download cut
+// off halfway is finished within the hour, not a day later.
+func (s State) RetryAfter() time.Duration {
+	if s.Failures <= 1 {
+		return time.Hour
+	}
+	return min(Every, time.Hour<<min(s.Failures-1, 5))
 }
 
 func statePath() (string, error) {
@@ -372,17 +384,23 @@ func Watch(ctx context.Context, options Options) {
 			return
 		case <-timer.C:
 		}
-		tick(ctx, options)
+		retry := tick(ctx, options)
 		// Within two hours either side of a day, so a fleet spreads out.
 		wait := every
 		if options.Every == 0 {
 			wait += rand.N(4*time.Hour) - 2*time.Hour
 		}
+		if retry > 0 && retry < wait {
+			// A failed update is tried again sooner, and spread out too.
+			wait = retry + rand.N(retry/4+1)
+		}
 		timer.Reset(wait)
 	}
 }
 
-func tick(ctx context.Context, options Options) {
+// tick checks once and updates if it should. It returns how soon to try
+// again when the update failed, and zero otherwise.
+func tick(ctx context.Context, options Options) (retry time.Duration) {
 	state, err := LoadState()
 	if err != nil {
 		options.Log.Warn("could not read the update state", "error", err)
@@ -399,7 +417,9 @@ func tick(ctx context.Context, options Options) {
 		have = options.Image()
 	}
 	if !Needed(options.Version, latest, have) {
-		return
+		// Current: whatever failed before is over.
+		state.Failed, state.Failures = time.Time{}, 0
+		return 0
 	}
 	if Newer(options.Version, latest.Version) && state.Notified != latest.Version {
 		options.Log.Warn("a newer Hive Runner is available", "installed", options.Version, "available", latest.Version, "update", "hived update")
@@ -423,8 +443,8 @@ func tick(ctx context.Context, options Options) {
 	if options.AutoUpdate == nil || !options.AutoUpdate() || !installed() {
 		return
 	}
-	if !state.Failed.IsZero() && time.Since(state.Failed) < Every {
-		return
+	if !state.Failed.IsZero() && time.Since(state.Failed) < state.RetryAfter() {
+		return state.RetryAfter() - time.Since(state.Failed)
 	}
 	// No new jobs from here; wait for the ones in hand, but not forever.
 	options.Updating.Store(true)
@@ -448,12 +468,15 @@ func tick(ctx context.Context, options Options) {
 	}
 	_ = SaveState(state)
 	if err := apply(ctx); err != nil {
-		options.Log.Error("the update did not take; carrying on with this version", "error", err)
 		state.Failed = time.Now()
+		state.Failures++
+		options.Log.Error("the update did not take; carrying on with this version", "error", err,
+			"again_in", state.RetryAfter().String())
 		options.Updating.Store(false)
-		return
+		return state.RetryAfter()
 	}
 	// The installer restarted the service, which means this process is
 	// about to end, or has ended already as far as the service manager is
 	// concerned. Nothing more to do.
+	return 0
 }

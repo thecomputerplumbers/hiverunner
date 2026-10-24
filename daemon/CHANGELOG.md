@@ -6,6 +6,23 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### An update cut off halfway no longer leaves the machine half updated
+
+The installer used to put the new daemon in place before it downloaded the
+guest image. A download cut off partway (curl's exit 92, an HTTP/2 stream
+reset, partway through a 700 MB image) left the new daemon on disk beside
+the old image while the old daemon carried on running. Now nothing is
+replaced until the daemon and the image are both downloaded and checked, and
+then the image and the daemon are swapped in one after the other, each in a
+single step.
+
+The image's pieces are fetched over HTTP/1.1, and a piece that is cut off is
+picked up where it stopped, up to six tries. The pieces downloaded so far are
+kept on the data disk, so the next run carries on from there instead of
+starting again. A failed automatic update is tried again an hour later, then
+two, then four, and never more than a day apart, instead of a day later
+every time.
+
 ### A job that does not quite fit runs with a little less memory
 
 A Linux job whose VM would cut into `reserve-memory` at its full size (2 GB
