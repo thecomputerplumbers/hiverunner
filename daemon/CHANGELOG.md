@@ -6,6 +6,23 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### A job that does not quite fit runs with a little less memory
+
+A Linux job whose VM would cut into `reserve-memory` at its full size (2 GB
+a core) now runs with what fits instead of being declined, down to three
+quarters of its size and never under 4 GB. The reserve is kept either way.
+The log says `giving a job less memory than its size, to fit what is free`
+with `guest_mb` and `size_mb`. Below that floor the job is declined, as
+before. A 4-core job on a host with 12.6 GB free and 4 GB reserved used to
+be declined forever; it now runs with 7.5 GB.
+
+### A released job no longer says the daemon was shutting down
+
+When the coordinator backs out of a running job, because GitHub cancelled
+it, the job's VM was stopped as if the daemon were shutting down: `VM
+stopped reason=daemon_shutdown` in the log, and "daemon shutting down" in
+the job's own log. It now says `released`.
+
 ### The log says more about a job's memory
 
 A job declined for want of memory is logged with what made up the memory it

@@ -38,6 +38,10 @@ type Job struct {
 	Timeout time.Duration
 	// Label is the runs-on label, for kill-reason messages.
 	Label string
+	// MemoryBytes is the memory its VM is given when that is less than its
+	// size asks, because the host had less free when it was offered. Zero
+	// is the size's own.
+	MemoryBytes uint64
 }
 
 // ErrTimeout is the cause when a job exceeds its limit.
@@ -134,6 +138,10 @@ type Limits struct {
 	// GuestMemory is the memory a job of this many vCPUs is given. Nil
 	// means memory is not checked.
 	GuestMemory func(vcpus int) uint64
+	// LeanestGuest is the least memory a Linux job of this many vCPUs may
+	// be given when what is free cannot give it GuestMemory. Nil, or no less
+	// than GuestMemory, means a job is given its size or declined.
+	LeanestGuest func(vcpus int) uint64
 	// Hold declines every offer, as the reason it is giving: a machine
 	// waiting out a host kill that already runs one job at most.
 	Hold bool
@@ -150,6 +158,9 @@ func (l Limits) memory(kind string, vcpus int) uint64 {
 // MemoryMargin is what a job leaves free on the host beyond its guest's
 // memory: the hypervisor, the daemon and the owner's own programs.
 const MemoryMargin = 1 << 30
+
+// leanStep is what a lean guest's memory is rounded down to.
+const leanStep = 256 << 20
 
 type phase int
 
@@ -170,7 +181,9 @@ type slot struct {
 	// memory is what its guest takes from the host, as the limits had it
 	// when it was offered: a macOS VM's too, whatever the next offer is.
 	memory uint64
-	phase  phase
+	// lean is set when memory is less than the job's size asks.
+	lean  bool
+	phase phase
 	// cancel stops the start timer (accepted) or the runner (running).
 	cancel func()
 	// released means the coordinator backed out of a running job: its VM is
@@ -345,7 +358,7 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 	if limits.Cores > 0 && used > 0 && used+offer.VCPUs+OwnerCores > limits.Cores {
 		return ReasonNoCores
 	}
-	memory := uint64(0)
+	memory, lean := uint64(0), uint64(0)
 	if limits.GuestMemory != nil {
 		memory = limits.memory(kind, offer.VCPUs)
 	}
@@ -363,7 +376,20 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 			}
 		}
 		need := memory + held + MemoryMargin + limits.Reserve
-		if budget > 0 && budget < need {
+		// A Linux guest that does not fit at its size may still fit a
+		// little smaller: its swap takes up the rest. The reserve is kept
+		// all the same; it is the owner's, not the job's.
+		if budget > 0 && budget < need && kind != protocol.KindMacOS && limits.LeanestGuest != nil && budget > need-memory {
+			if fit := (budget - (need - memory)) &^ (leanStep - 1); fit >= limits.LeanestGuest(offer.VCPUs) && fit < memory {
+				lean = fit
+			}
+		}
+		if lean > 0 {
+			m.log.Info("giving a job less memory than its size, to fit what is free", "assignment", offer.AssignmentID,
+				"guest_mb", lean>>20, "size_mb", memory>>20, "available_mb", budget>>20, "held_mb", held>>20,
+				"margin_mb", uint64(MemoryMargin)>>20, "reserve_mb", limits.Reserve>>20)
+			memory = lean
+		} else if budget > 0 && budget < need {
 			// needed_mb is the sum of the rest, not the job's size: name
 			// each part so the total is not read as one guest.
 			m.log.Warn("declining a job: not enough free memory", "assignment", offer.AssignmentID,
@@ -382,6 +408,7 @@ func (m *Manager) Offer(pool string, offer *protocol.JobAssign) (reason string) 
 		label:        offer.Label,
 		runner:       runner,
 		memory:       memory,
+		lean:         lean > 0,
 		phase:        accepted,
 	}
 	// If the coordinator never follows up, the machine must not stay
@@ -419,9 +446,11 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		timed, stop := context.WithTimeoutCause(runCtx, held.timeout, ErrTimeout)
 		runCtx = timed
 		held.phase = running
+		// The cause first: stopping the timer first would end the job's
+		// context as cancelled, which reads as the daemon shutting down.
 		held.cancel = func() {
-			stop()
 			cancel(ErrReleased)
+			stop()
 		}
 	} else {
 		held.phase = running
@@ -439,6 +468,9 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 		VCPUs:        held.vcpus,
 		Timeout:      held.timeout,
 		Label:        held.label,
+	}
+	if held.lean {
+		job.MemoryBytes = held.memory
 	}
 	runner := held.runner
 	m.running.Add(1)

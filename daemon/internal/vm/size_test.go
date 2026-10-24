@@ -41,3 +41,21 @@ func TestGuestSwapHeadroomFollowsTheLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestLeanestGuestMemoryBytes(t *testing.T) {
+	for _, c := range []struct {
+		vcpus int
+		host  uint64
+		want  uint64
+	}{
+		{2, 64 * gib, 4 * gib},
+		{4, 64 * gib, 6 * gib},
+		{8, 64 * gib, 12 * gib},
+		// Never more than the size itself, on a host that caps it.
+		{4, 6 * gib, 3 * gib},
+	} {
+		if got := LeanestGuestMemoryBytes(c.vcpus, c.host); got != c.want {
+			t.Errorf("LeanestGuestMemoryBytes(%d, %d GiB) = %d GiB, want %d", c.vcpus, c.host/gib, got/gib, c.want/gib)
+		}
+	}
+}

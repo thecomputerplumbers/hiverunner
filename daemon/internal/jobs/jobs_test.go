@@ -760,3 +760,92 @@ func TestAMacPlansItsMemory(t *testing.T) {
 		t.Fatalf("a Linux job into the owner's reserve: %q, want low memory", reason)
 	}
 }
+
+// causing is a runner that reports why its context ended, as the VM runner
+// does when it decides what to tell the guest and the pool.
+type causing struct {
+	started chan struct{}
+	cause   chan error
+}
+
+func (r *causing) Run(ctx context.Context, _ Job) (Result, error) {
+	close(r.started)
+	<-ctx.Done()
+	r.cause <- context.Cause(ctx)
+	return Result{ExitCode: -1}, ctx.Err()
+}
+
+// A released job's runner is told it was released, whatever its timeout:
+// read as a plain cancel, it said the daemon was shutting down.
+func TestARunnerSeesItsJobWasReleased(t *testing.T) {
+	runner := &causing{started: make(chan struct{}), cause: make(chan error, 1)}
+	m := New(runner, quiet)
+	m.Offer("acme", offer("a-1"))
+	if err := m.Start(context.Background(), "acme", start("a-1")); err != nil {
+		t.Fatal(err)
+	}
+	<-runner.started
+	m.Release("acme", "a-1")
+	select {
+	case cause := <-runner.cause:
+		if !errors.Is(cause, ErrReleased) {
+			t.Fatalf("the runner saw %v, want ErrReleased", cause)
+		}
+	case <-within(t, "the release"):
+		t.Fatal("the runner was never stopped")
+	}
+}
+
+func twoGiBACore(vcpus int) uint64   { return uint64(max(vcpus*2, 4)) * gib }
+func threeQuarters(vcpus int) uint64 { return max(twoGiBACore(vcpus)/4*3, 4*gib) }
+
+// A job that does not fit at its size, beside the reserve, runs with less
+// memory, rounded down; its VM is told how much.
+func TestAJobThatDoesNotFitItsSizeRunsLeaner(t *testing.T) {
+	log, logger := recording()
+	runner := newFake()
+	m := New(runner, logger)
+	// The host that queued Versal's jobs: 12917 MB free, 4 GB reserved.
+	m.Limit(limited(Limits{MaxJobs: 1, Available: 12917 << 20, Reserve: 4 * gib, GuestMemory: twoGiBACore, LeanestGuest: threeQuarters}))
+	if reason := m.Offer("acme", sized("a-1", 4)); reason != "" {
+		t.Fatalf("offer declined: %s", reason)
+	}
+	if err := m.Start(context.Background(), "acme", start("a-1")); err != nil {
+		t.Fatal(err)
+	}
+	job := <-runner.started
+	if want := uint64(7680) << 20; job.MemoryBytes != want {
+		t.Fatalf("the job's VM was given %d MB, want %d", job.MemoryBytes>>20, want>>20)
+	}
+	record := log.find(t, "giving a job less memory than its size, to fit what is free")
+	if record == nil || record["guest_mb"] != float64(7680) || record["size_mb"] != float64(8192) {
+		t.Fatalf("the lean job was logged as %v", record)
+	}
+	runner.finish <- 0
+	<-m.Exits("acme")
+}
+
+// Below three quarters of its size a job is declined, as before; at its
+// size it is given its size.
+func TestALeanJobHasAFloor(t *testing.T) {
+	m := New(newFake(), quiet)
+	m.Limit(limited(Limits{MaxJobs: 1, Available: 6*gib + MemoryMargin + 4*gib - 1, Reserve: 4 * gib, GuestMemory: twoGiBACore, LeanestGuest: threeQuarters}))
+	if reason := m.Offer("acme", sized("a-1", 4)); reason != ReasonLowMemory {
+		t.Fatalf("offer below the floor: %q, want low memory", reason)
+	}
+
+	runner := newFake()
+	m = New(runner, quiet)
+	m.Limit(limited(Limits{MaxJobs: 1, Available: 8*gib + MemoryMargin + 4*gib, Reserve: 4 * gib, GuestMemory: twoGiBACore, LeanestGuest: threeQuarters}))
+	if reason := m.Offer("acme", sized("a-1", 4)); reason != "" {
+		t.Fatalf("offer that fits: %q", reason)
+	}
+	if err := m.Start(context.Background(), "acme", start("a-1")); err != nil {
+		t.Fatal(err)
+	}
+	if job := <-runner.started; job.MemoryBytes != 0 {
+		t.Fatalf("a job that fits was given %d MB, want its size", job.MemoryBytes>>20)
+	}
+	runner.finish <- 0
+	<-m.Exits("acme")
+}

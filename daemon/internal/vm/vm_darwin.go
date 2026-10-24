@@ -38,12 +38,12 @@ func (r *Runner) launch(vm *instance, mac net.HardwareAddr) error {
 	if err := os.Truncate(disk, diskBytes); err != nil {
 		return err
 	}
-	machine, err := r.configure(vm.vcpus, disk, vm.in, vm.out, vm.console, mac)
+	total, _ := unix.SysctlUint64("hw.memsize")
+	vm.memory = sized(vm.memory, GuestMemoryBytes(vm.vcpus, total))
+	machine, err := r.configure(vm.vcpus, vm.memory, disk, vm.in, vm.out, vm.console, mac)
 	if err != nil {
 		return err
 	}
-	total, _ := unix.SysctlUint64("hw.memsize")
-	vm.memory = GuestMemoryBytes(vm.vcpus, total)
 	// Listening before the guest boots, so it never finds the socket shut.
 	// A VM without the service still runs jobs; they use GitHub's cache.
 	if r.Guest != nil {
@@ -104,15 +104,13 @@ func serve(vm *instance, machine *vz.VirtualMachine, guest *GuestService) error 
 	return nil
 }
 
-func (r *Runner) configure(vcpus int, disk, in, out, console string, mac net.HardwareAddr) (*vz.VirtualMachine, error) {
+func (r *Runner) configure(vcpus int, memory uint64, disk, in, out, console string, mac net.HardwareAddr) (*vz.VirtualMachine, error) {
 	if vcpus < 1 {
 		vcpus = 1
 	}
 	if host := runtime.NumCPU(); vcpus > host {
 		vcpus = host
 	}
-	total, _ := unix.SysctlUint64("hw.memsize")
-	memory := GuestMemoryBytes(vcpus, total)
 
 	boot, err := vz.NewLinuxBootLoader(
 		r.Image.path(r.Image.Kernel),

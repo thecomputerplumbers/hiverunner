@@ -23,6 +23,10 @@ var hostMemory = sync.OnceValue(func() uint64 {
 // guestMemory is the memory a job of this many vCPUs is given on this host.
 func guestMemory(vcpus int) uint64 { return vm.GuestMemoryBytes(vcpus, hostMemory()) }
 
+// leanestGuest is the least a job of this many vCPUs is given when the host
+// has less free than its size asks.
+func leanestGuest(vcpus int) uint64 { return vm.LeanestGuestMemoryBytes(vcpus, hostMemory()) }
+
 // overcommit says so when the owner's settings would, at their fullest, ask
 // for more memory than the host can give now: every job slot filled with the
 // largest job it takes, and the warm VM on top. It is "" when they fit, and

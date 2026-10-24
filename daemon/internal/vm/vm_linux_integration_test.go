@@ -41,7 +41,7 @@ func TestTwoVMsWantingOneSocketAddress(t *testing.T) {
 	second := &Runner{Image: first.Image, WorkDir: first.WorkDir, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	second.Guest = answering(47082, &secondSaw, &lock)
 
-	held, err := first.boot(2)
+	held, err := first.boot(2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
