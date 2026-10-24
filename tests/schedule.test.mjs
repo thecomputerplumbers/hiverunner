@@ -1,10 +1,15 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
+  declined,
   demand,
   fits,
+  full,
+  offerBackoff,
   pickMachine,
+  refusing,
   room,
+  routeBackoff,
   serves,
 } from "../apps/coordinator/src/schedule.ts"
 
@@ -202,4 +207,51 @@ test("a batch of jobs is wanted whole, whatever counts came with it", () => {
     running: 0,
     available: 1,
   })
+})
+
+test("a machine that refused a job is passed over for a while", () => {
+  const now = 1_000_000
+  const refused = declined(undefined, 4, true, now)
+  const both = [
+    machine("short", { arch: "x64", speedScore: 3, declined: refused }),
+    machine("other", { arch: "x64", speedScore: 1 }),
+  ]
+  // The faster machine refused 4 vCPUs a moment ago: the job goes elsewhere,
+  // and so does a larger one, but a smaller one may still fit it.
+  assert.equal(pickMachine(both, x64(4), "fastest", {}, now).machineId, "other")
+  assert.equal(pickMachine(both, x64(8), "fastest", {}, now).machineId, "other")
+  assert.equal(pickMachine(both, x64(2), "fastest", {}, now).machineId, "short")
+  // Once the backoff has passed, it is offered again.
+  assert.equal(
+    pickMachine(both, x64(4), "fastest", {}, now + offerBackoff(1)).machineId,
+    "short"
+  )
+  // A second refusal in a row waits longer, up to a minute.
+  assert.equal(offerBackoff(1), 5000)
+  assert.equal(offerBackoff(2), 10000)
+  assert.equal(offerBackoff(9), 60000)
+  // Taking a job of that size, or a larger one, clears it.
+  assert.deepEqual(declined(refused, 4, false, now), {})
+  assert.deepEqual(declined(refused, 2, false, now), refused)
+})
+
+test("a machine that keeps refusing a size is not counted free for routing", () => {
+  const now = 1_000_000
+  const once = { declined: declined(undefined, 4, true, now) }
+  const twice = { declined: declined(once.declined, 4, true, now) }
+  assert.equal(refusing(once, 4, now + 1000, routeBackoff), false)
+  assert.equal(refusing(twice, 4, now + 1000, routeBackoff), true)
+  assert.equal(refusing(twice, 8, now + 9 * 60000, routeBackoff), true)
+  assert.equal(refusing(twice, 2, now + 1000, routeBackoff), false)
+  assert.equal(refusing(twice, 4, now + 10 * 60000, routeBackoff), false)
+})
+
+test("only a full machine's refusal leaves it counted", () => {
+  // The daemon's ReasonBusy and ReasonMacOSVMs.
+  assert.ok(full("this machine is running as many jobs as its owner allows"))
+  assert.ok(
+    full("this Mac is running as many macOS VMs as Apple's licence allows")
+  )
+  assert.ok(!full("this machine does not have the memory free for this job"))
+  assert.ok(!full("this job is larger than this machine's owner allows"))
 })

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -848,4 +849,20 @@ func TestALeanJobHasAFloor(t *testing.T) {
 	}
 	runner.finish <- 0
 	<-m.Exits("acme")
+}
+
+// The coordinator tells a machine that is full from one a job does not fit
+// by these words (`full` in apps/coordinator/src/schedule.ts): only the
+// first are passed over without counting against the machine.
+func TestTheReasonsForBeingFullSaySo(t *testing.T) {
+	for _, reason := range []string{ReasonBusy, ReasonMacOSVMs} {
+		if !strings.Contains(reason, " is running as many ") {
+			t.Errorf("%q does not say the machine is full", reason)
+		}
+	}
+	for _, reason := range []string{ReasonLowMemory, ReasonNoCores, ReasonTooLarge, ReasonCoolingOff, ReasonNoRunner, ReasonWrongArch, ReasonNoMacOS} {
+		if strings.Contains(reason, " is running as many ") {
+			t.Errorf("%q reads as the machine being full", reason)
+		}
+	}
 }

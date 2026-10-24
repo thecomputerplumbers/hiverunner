@@ -25,6 +25,73 @@ export type Candidate = {
    * of, by assignment: offered, running, or being torn down.
    */
   jobs?: Record<string, { vcpus: number }>
+  /** The sizes it has lately refused. See `refusing`. */
+  declined?: Declines
+}
+
+/**
+ * A machine's refusals of jobs, by the vCPUs asked for: how many in a row,
+ * and when the last was. The daemon refuses a job it cannot take now, for
+ * want of memory most often; a size refused stands for every larger one.
+ */
+export type Declines = Record<string, { at: number; count: number }>
+
+/**
+ * How long a machine is not offered a size again after refusing it: five
+ * seconds, twice as long for each refusal in a row, and a minute at most.
+ * Offered at once, a machine short of memory refused the same job once a
+ * second for as long as it was queued.
+ */
+export function offerBackoff(count: number) {
+  return Math.min(5000 * 2 ** Math.max(count - 1, 0), 60000)
+}
+
+/**
+ * How long a machine that keeps refusing a size is not counted as free for
+ * it when a workflow asks where to run: ten minutes from the last refusal,
+ * once it has refused twice in a row. Counted, it took a job it would not
+ * run, and the job waited at GitHub with nowhere else to go.
+ */
+export function routeBackoff(count: number) {
+  return count >= 2 ? 10 * 60000 : 0
+}
+
+/**
+ * Whether a refusal says only that the machine is full right now, which
+ * another job ending changes, rather than that this job does not fit it.
+ * These are the daemon's own words, `ReasonBusy` and `ReasonMacOSVMs` in
+ * `daemon/internal/jobs`; its tests hold them to this.
+ */
+export function full(reason: string) {
+  return / is running as many /.test(reason)
+}
+
+/** Whether a machine refused this size, or a smaller one, within its backoff. */
+export function refusing(
+  candidate: Pick<Candidate, "declined">,
+  vcpus: number,
+  now: number,
+  backoff: (count: number) => number = offerBackoff
+) {
+  return Object.entries(candidate.declined ?? {}).some(
+    ([size, { at, count }]) =>
+      Number(size) <= vcpus && now - at < backoff(count)
+  )
+}
+
+/** The refusals left after a machine refused, or took, a job of this size. */
+export function declined(
+  declines: Declines | undefined,
+  vcpus: number,
+  refused: boolean,
+  now: number
+): Declines {
+  const left: Declines = {}
+  for (const [size, entry] of Object.entries(declines ?? {}))
+    // Taking a job says the machine has room for any no larger.
+    if (refused || Number(size) > vcpus) left[size] = entry
+  if (refused) left[vcpus] = { at: now, count: (left[vcpus]?.count ?? 0) + 1 }
+  return left
 }
 
 /**
@@ -79,12 +146,16 @@ export function room(candidate: Candidate, size: JobSize) {
  * - `round-robin`: the one that has waited longest since it was last given a
  *   job, by `turns` (larger is more recent), so every machine gets work whatever its speed. One never
  *   given a job goes first; between equals, the fastest.
+ *
+ * A machine that has just refused a job this large is passed over for a
+ * while (`offerBackoff`), so another machine gets it.
  */
 export function pickMachine(
   candidates: Candidate[],
   size: JobSize,
   policy: RoutingPolicy = "fastest",
-  turns: Record<string, number> = {}
+  turns: Record<string, number> = {},
+  now = Date.now()
 ) {
   const faster = (a: Candidate, b: Candidate) => b.speedScore - a.speedScore
   const idler = (a: Candidate, b: Candidate) => load(a) - load(b)
@@ -97,7 +168,12 @@ export function pickMachine(
   }[policy]
   let best: Candidate | null = null
   for (const candidate of candidates) {
-    if (candidate.presence !== "online" || !room(candidate, size)) continue
+    if (
+      candidate.presence !== "online" ||
+      !room(candidate, size) ||
+      refusing(candidate, size.vcpus, now)
+    )
+      continue
     // Negative when the candidate goes before the best so far.
     const before = best
       ? (order.map((by) => by(candidate, best!)).find(Boolean) ?? 0)

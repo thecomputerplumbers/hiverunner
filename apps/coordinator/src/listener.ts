@@ -25,6 +25,9 @@ import { demand } from "./schedule"
 import type { Pool } from "./pool"
 
 type Settings = { organizationId: string; label: string; vcpus: number }
+
+/** How long a runner must stay idle, by GitHub's word, before it is let go. */
+const IDLE_CONFIRM_MS = 5000
 type Slot = {
   assignmentId: string
   machineId: string
@@ -561,7 +564,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           if (slot.phase === "running") {
             // GitHub gives a waiting job to any idle runner of the set, so
             // this one may have been handed another. Only an idle one goes.
-            await this.releaseIfIdle(client, pool, state, slot)
+            await this.releaseIfIdle(client, pool, state, slot, "spare")
             continue
           }
           await pool.release(slot.assignmentId)
@@ -585,7 +588,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           (await pool.offerStatus(slot.assignmentId)) === "pending"
         )
           continue
-        await this.releaseIfIdle(client, pool, state, slot)
+        await this.releaseIfIdle(client, pool, state, slot, "unstarted")
       }
     } catch (error) {
       if (pollSignal.aborted) {
@@ -612,17 +615,34 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
    * Gives up a machine whose VM has a runner GitHub has started no job on,
    * once GitHub confirms the runner is idle (or already gone). Unknown or
    * busy runners are preserved; an API error retries without a kill.
+   *
+   * GitHub says so twice, a few seconds apart. Its runner status trails a
+   * job being handed to the runner, and the start message trails both: a
+   * runner given a job a moment ago can read idle, and stopping its VM then
+   * fails the job ten minutes later as having lost communication.
    */
   private async releaseIfIdle(
     client: ScaleSetClient,
     pool: DurableObjectStub<Pool>,
     state: State,
-    slot: Slot
+    slot: Slot,
+    why: "spare" | "unstarted"
   ) {
     this.stage = "runner-status"
-    const runner = await client.runnerByName(slot.runnerName)
-    const status = runner ? await client.runnerStatus(runner.id) : null
-    if (status?.busy) return
+    const idle = async () => {
+      const runner = await client.runnerByName(slot.runnerName)
+      const status = runner ? await client.runnerStatus(runner.id) : null
+      return { runner, idle: !status?.busy }
+    }
+    if (!(await idle()).idle) return
+    await scheduler.wait(IDLE_CONFIRM_MS)
+    const { runner, idle: still } = await idle()
+    if (!still) return
+    console.info("Scale runner released", {
+      label: (await this.ctx.storage.get<Settings>("settings"))?.label,
+      why,
+      present: Boolean(runner),
+    })
     await pool.release(slot.assignmentId)
     if (runner) await client.removeRunner(runner.id)
     delete state.slots[slot.assignmentId]

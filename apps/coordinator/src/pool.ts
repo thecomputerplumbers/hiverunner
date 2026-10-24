@@ -20,9 +20,13 @@ import {
 } from "@workspace/protocol"
 
 import {
+  declined,
   fits,
+  full,
   pickMachine,
+  refusing,
   room,
+  routeBackoff,
   serves,
   type Candidate,
   type JobSize,
@@ -140,6 +144,9 @@ export class Pool extends DurableObject<CoordinatorEnv> {
         return socket.close(CLOSE.UNSUPPORTED, "Update the Hive Runner daemon")
       state.greeted = true
       state.jobs = {}
+      // A daemon that has started again, or whose owner changed what it
+      // lends, is asked afresh.
+      state.declined = {}
       for (const assignmentId of message.holding ?? []) {
         const reservation = await this.ctx.storage.get<Reservation>(
           `assignment:${assignmentId}`
@@ -177,6 +184,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     const held = state.jobs[message.assignmentId]
     if (!held) return
     if (message.type === "job.accepted") {
+      state.declined = declined(state.declined, held.vcpus, false, Date.now())
       held.accepted = true
       held.offerExpires = Date.now() + 20000
       await this.reserve(message.assignmentId, state, held)
@@ -200,7 +208,20 @@ export class Pool extends DurableObject<CoordinatorEnv> {
           { ...held, machineId: state.machineId, exited: true }
         )
       else await this.ctx.storage.delete(`assignment:${message.assignmentId}`)
-    } else await this.ctx.storage.delete(`assignment:${message.assignmentId}`)
+    } else {
+      await this.ctx.storage.delete(`assignment:${message.assignmentId}`)
+      // Full is not a no to the job. Anything else is, for this size: it
+      // goes to another machine for a while (see `offerBackoff`).
+      if (!full(message.reason)) {
+        state.declined = declined(state.declined, held.vcpus, true, Date.now())
+        const refusal = state.declined[held.vcpus]!
+        if (refusal.count === 1 || refusal.count % 20 === 0)
+          console.info("Machine refused a job", {
+            vcpus: held.vcpus,
+            refusals: refusal.count,
+          })
+      }
+    }
     delete state.jobs[message.assignmentId]
     return this.setPresence(socket, state, state.presence)
   }
@@ -373,6 +394,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       )
       const active = new Set(rows.map((row) => row.id))
       // Re-read attachments after D1 awaits: a concurrent offer may have reserved it.
+      const now = Date.now()
       if (
         sockets.some((socket) => {
           const state = this.attachment(socket)
@@ -382,6 +404,8 @@ export class Pool extends DurableObject<CoordinatorEnv> {
             state.greeted &&
             state.presence === "online" &&
             room(state, size) > 0 &&
+            // One that keeps refusing this size would leave the job queued.
+            !refusing(state, size.vcpus, now, routeBackoff) &&
             active.has(state.machineId) &&
             !occupied.has(state.machineId)
           )

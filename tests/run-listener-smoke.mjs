@@ -59,6 +59,8 @@ let runnerName,
   successfulPolls = 0,
   runnerPresent = false,
   runnerBusy = false,
+  // GitHub hands the runner a job just after it is next looked at.
+  busyAfterLook = false,
   runnerStatusQueries = 0
 const apiPaths = []
 const fake = createServer(async (req, res) => {
@@ -83,7 +85,12 @@ const fake = createServer(async (req, res) => {
       res.statusCode = 404
       return res.end()
     }
-    return json({ busy: runnerBusy, status: runnerBusy ? "online" : "offline" })
+    const busy = runnerBusy
+    if (busyAfterLook) {
+      busyAfterLook = false
+      runnerBusy = true
+    }
+    return json({ busy, status: busy ? "online" : "offline" })
   }
   if (url.pathname === "/actions/runner-registration")
     return json({ url: `${api}/tenant`, token: "admin" })
@@ -406,6 +413,22 @@ try {
       frames.some(released),
       false,
       "A runner GitHub handed another job outlives the cancelled one"
+    )
+    // GitHub's runner status trails a job being handed to the runner: it
+    // reads idle, and a moment later busy. The runner is kept.
+    runnerBusy = false
+    busyAfterLook = true
+    const looked = ackCount
+    queue.push({ messageId: ++lastMessage, jobs: [cancelled(90)] })
+    await eventually(
+      () => ackCount > looked,
+      "Cancellation acknowledged while the runner was handed a job"
+    )
+    assert.equal(busyAfterLook, false, "GitHub was not asked")
+    assert.equal(
+      frames.some(released),
+      false,
+      "A runner that read idle as it was handed a job was stopped"
     )
     // Idle, the machine is given up at once, not after the three minutes a
     // job is allowed to start in: nothing ages the slot here. The push that
