@@ -401,6 +401,11 @@ fi
 
 step "Starting the daemon"
 mkdir -p "$LOG_DIR" "$(dirname "$AGENT")"
+# In the background band, for a laptop lending what it does not use, unless
+# its owner chose standard for a Mac kept for building: hived config set
+# priority. A daemon too old to say is background.
+process_type=Background
+[ "$("$BIN_DIR/hived" config get priority 2>/dev/null || true)" = standard ] && process_type=Standard
 cat >"$work/agent.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -423,7 +428,7 @@ cat >"$work/agent.plist" <<PLIST
 	<key>ThrottleInterval</key>
 	<integer>30</integer>
 	<key>ProcessType</key>
-	<string>Background</string>
+	<string>$process_type</string>
 	<key>StandardOutPath</key>
 	<string>$LOG_DIR/hived.log</string>
 	<key>StandardErrorPath</key>

@@ -69,6 +69,12 @@ type Settings struct {
 	// AutoUpdate lets the daemon update itself when a release is out and
 	// it has no job, by running the installer. Off, it only says so.
 	AutoUpdate bool `json:"autoUpdate"`
+	// Priority is how a Mac runs the daemon, and so every job: PriorityBackground,
+	// in the band macOS keeps for work nobody waits on, on the efficiency
+	// cores with its disk throttled, which suits a laptop lending idle
+	// time; or PriorityStandard, on every core, which suits a Mac kept for
+	// building. Empty is PriorityBackground. Linux runs it standard either way.
+	Priority string `json:"priority,omitempty"`
 	// ReserveMemory is the memory HiveRunner leaves for everything else on
 	// the host, as "24G" or "40%". Empty means none is held back. Use
 	// ReserveBytes for what it comes to.
@@ -109,6 +115,16 @@ const (
 	IsolationLAN   = "lan-allow"
 	IsolationOff   = "off"
 )
+
+// What Priority may be.
+const (
+	PriorityBackground = "background"
+	PriorityStandard   = "standard"
+)
+
+// RunsInBackground reports whether a Mac runs the daemon, and its jobs, in
+// the background band.
+func (s Settings) RunsInBackground() bool { return s.Priority != PriorityStandard }
 
 // What DNS may be.
 const (
@@ -281,7 +297,7 @@ func isSize(vcpus int) bool {
 }
 
 // Keys are the settings `hived config set` accepts, in the order shown.
-var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "macos-isolation", "max-macos-vms", "spotlight-exclude", "auto-update", "data-dir", "cache-dir"}
+var Keys = []string{"max-jobs", "max-vcpus", "warm", "battery", "lid", "hours", "cache", "cache-size", "reserve-memory", "network-isolation", "allow-network", "dns", "ipv6-site", "macos-jobs", "macos-isolation", "max-macos-vms", "spotlight-exclude", "auto-update", "priority", "data-dir", "cache-dir"}
 
 // Set changes one setting from what was typed on a command line.
 func (s *Settings) Set(key, value string) error {
@@ -398,6 +414,15 @@ func (s *Settings) Set(key, value string) error {
 		default:
 			return errMacOSIsolation
 		}
+	case "priority":
+		switch value {
+		case PriorityBackground:
+			s.Priority = ""
+		case PriorityStandard:
+			s.Priority = PriorityStandard
+		default:
+			return errPriority
+		}
 	case "hours":
 		if value == "any" {
 			value = ""
@@ -414,6 +439,7 @@ func (s *Settings) Set(key, value string) error {
 
 var (
 	errMacOSIsolation = errors.New("macos-isolation takes user or vm")
+	errPriority       = errors.New("priority takes background or standard")
 	errMaxMacOSVMs    = fmt.Errorf("max-macos-vms takes 1 or %d: Apple's licence lets a Mac run %d macOS VMs at once", MostMacOSVMs, MostMacOSVMs)
 )
 

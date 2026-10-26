@@ -382,3 +382,19 @@ func TestSpotlightExcludeIsOnUnlessTheOwnerTurnsItOff(t *testing.T) {
 		t.Fatal("set sometimes was accepted")
 	}
 }
+
+func TestPriority(t *testing.T) {
+	s := Default()
+	if !s.RunsInBackground() {
+		t.Fatal("a laptop lending idle time is not the default")
+	}
+	if err := s.Set("priority", "Standard"); err != nil || s.RunsInBackground() || s.Priority != PriorityStandard {
+		t.Fatalf("standard: %v, %+v", err, s)
+	}
+	if err := s.Set("priority", "background"); err != nil || !s.RunsInBackground() || s.Priority != "" {
+		t.Fatalf("background: %v, %+v", err, s)
+	}
+	if err := s.Set("priority", "high"); err == nil {
+		t.Fatal("took high")
+	}
+}

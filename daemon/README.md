@@ -245,11 +245,22 @@ and `hived config set <name> <value>` changes one:
 | `macos-isolation`   | `user`, `vm`                | Run each as the `hiveworker` user, or in a macOS VM (experimental) |
 | `max-macos-vms`     | `1`, `2`                    | How many macOS VMs run at once                                     |
 | `spotlight-exclude` | `on`, `off`                 | Keep Spotlight out of what macOS jobs write (on by default)        |
+| `priority`          | `background`, `standard`    | On a Mac, how much of the CPU jobs get; see below                  |
 | `data-dir`          | a path, `default`           | Where the image and each job's disk are kept                       |
 | `cache-dir`         | a path, `default`           | Where the Actions cache is kept                                    |
 
 `hived pause` and `hived resume` stop and restart lending altogether. A job
 already running always finishes.
+
+On a Mac, `priority` is the launch agent's `ProcessType`, which every job and
+VM the daemon starts inherits. `background`, the default, keeps them on the
+efficiency cores with the disk throttled, so a laptop lending idle time
+stays quick for its owner. A Mac kept for building should use `standard`:
+there a build runs several times faster. The daemon writes the setting into
+its launch agent and has launchd start it again once no job is running. The
+installer writes the same. `hived status` and `hived doctor` say which is on,
+and the doctor suggests `standard` for a Mac that is plugged in with `lid
+on`, or a desktop.
 
 When the machine is not taking jobs, `hived status` says why and what to do
 about it: `lid closed`, then `open the lid or run hived config set lid on`.

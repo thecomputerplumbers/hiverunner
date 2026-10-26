@@ -57,6 +57,18 @@ Also:
 example `its runner did not connect to GitHub within three minutes`, the
 job is over, or the run was cancelled. A job released before it started
 also says `started=false`.
+### A build Mac can give jobs every core: `priority standard`
+
+On a Mac, the daemon runs in macOS's background band, and so does every job
+it runs. That keeps jobs on the efficiency cores with the disk throttled.
+It suits a laptop lending idle time, but made builds on a Mac kept for
+building many times slower (#120). `hived config set priority standard`
+runs the daemon, its jobs and its VMs at standard priority instead.
+`background` stays the default. The daemon takes up a change by starting
+again through launchd once it has no job. `hived status` and `hived doctor`
+say which is on, and the doctor suggests `standard` for a Mac that is
+plugged in with `lid on`, or a desktop. A Linux machine runs at standard
+priority either way.
 
 ### Browser tests find what a headless browser needs already installed
 

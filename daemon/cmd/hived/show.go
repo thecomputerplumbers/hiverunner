@@ -402,6 +402,14 @@ func status(args []string) error {
 	if wait := s.Jobs.Cooldown; wait != nil && !wait.Paused {
 		rows = append(rows, field("", screen.Honey(fmt.Sprintf("one job at a time until %s: the host killed a job", when(wait.Until, time.Now())))))
 	}
+	if runtime.GOOS == "darwin" {
+		background, _, known := serviceSpawn()
+		priority := priorityCheck(current, background, known, power)
+		rows = append(rows, field("Priority", priority.Found))
+		if priority.Fix != "" {
+			rows = append(rows, field("", screen.Dim(priority.Fix)))
+		}
+	}
 	rows = append(rows, networkRows(screen, s.Network)...)
 	if problem, fix := asleep(current, power); problem != "" {
 		for _, line := range wrap(problem, ui.Inner-12) {
@@ -594,6 +602,7 @@ func settingRows(screen ui.Screen, current settings.Settings) []string {
 		row("max-macos-vms", strconv.Itoa(current.MacOSVMs()), "how many macOS VMs run at once"),
 		row("spotlight-exclude", onOff(current.SpotlightExclude), "keep Spotlight out of macOS jobs"),
 		row("auto-update", onOff(current.AutoUpdate), "update to new releases when idle"),
+		row("priority", priorityName(current), "how much of the CPU jobs get"),
 		place("data-dir", current.DataDir, "where the image and job disks are kept"),
 		place("cache-dir", current.CacheDir, "where the Actions cache is kept"),
 		row("paused", yesNo(current.Paused), "hived pause, hived resume"),
@@ -705,6 +714,14 @@ hived config set <name> <value>  Change one
                                  on by default
   auto-update on or off          update to new releases when no job is running;
                                  off, hived status and a notification say so
+  priority   background or standard
+                                 how a Mac runs the daemon and every job:
+                                 background, the default, keeps them to the
+                                 efficiency cores with the disk throttled, for
+                                 a laptop lending idle time; standard lets them
+                                 use every core, for a Mac kept for building.
+                                 The daemon restarts to apply it once it has
+                                 no job
   data-dir   a path or default   where the Linux image and each job's disk are
                                  kept; what is there is moved
   cache-dir  a path or default   where the Actions cache is kept; moved too
@@ -726,6 +743,11 @@ func configure(args []string) error {
 			fmt.Println(indent(screen.Dim("Kept in " + path)))
 		}
 		fmt.Println(indent(screen.Dim("Change one with: hived config set max-vcpus 4")))
+		return nil
+	case len(args) == 2 && args[0] == "get" && args[1] == "priority":
+		// What the installer asks, so an update starts the daemon as its
+		// owner chose.
+		fmt.Println(priorityName(current))
 		return nil
 	case len(args) == 2 && args[0] == "get" && (args[1] == "data-dir" || args[1] == "cache-dir"):
 		// What the installer asks, so an update puts the image where its
@@ -791,6 +813,9 @@ func configure(args []string) error {
 			if problem := macosVMProblem(current); problem != "" {
 				fmt.Println("\nNo macOS job runs until that is put right: " + problem + "\nSee: hived macos image help")
 			}
+		}
+		if args[1] == "priority" {
+			fmt.Println(priorityApplies(daemonRunning(current)))
 		}
 		if args[1] == "spotlight-exclude" {
 			fmt.Println("It applies from the next macOS job. The runner and the caches move when no job is running.")
