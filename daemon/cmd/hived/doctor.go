@@ -105,6 +105,10 @@ func doctor(args []string) error {
 			checks = append(checks, host.Check{Name: "lid", Found: "jobs stop when the lid closes", Fix: "hived config set lid on"})
 		}
 	}
+	if runtime.GOOS == "darwin" {
+		background, _, known := serviceSpawn()
+		checks = append(checks, priorityCheck(current, background, known, power))
+	}
 	if facts, err := host.ReadFacts(); err == nil {
 		if problem, fix := overcommit(facts, current, host.AvailableMemory()); problem != "" {
 			checks = append(checks, host.Check{Name: "memory", Found: problem, Fix: fix})

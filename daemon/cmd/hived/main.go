@@ -528,6 +528,10 @@ func run(ctx context.Context) error {
 		Hold:       func(latest update.Latest) string { return holdForSetup(live.Get(), macOS(), latest) },
 	})
 
+	// The launch agent runs the daemon at the owner's priority. It starts
+	// again, idle, to take up a change: see keepPriority.
+	go keepPriority(ctx, log, live.Get, slot.Busy, &updating)
+
 	// A place that changed, or a disk that came back, is picked up by
 	// starting again once no job is running.
 	var moving, again atomic.Bool

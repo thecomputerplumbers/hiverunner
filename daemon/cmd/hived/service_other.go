@@ -87,3 +87,16 @@ func hasOOMPolicyContinue(unit string) bool {
 	}
 	return false
 }
+
+// A Linux machine's daemon runs at the priority systemd gives any user
+// service: there is no background band to leave.
+func setServicePriority(bool) error { return nil }
+
+func serviceSpawn() (background bool, pid int, ok bool) { return false, 0, false }
+
+func restartService() error { return nil }
+
+// priorityApplies is what hived config set priority says after saving.
+func priorityApplies(bool) string {
+	return "A Linux machine runs the daemon at standard priority, whatever this says."
+}
