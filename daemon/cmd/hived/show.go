@@ -93,6 +93,8 @@ type snapshot struct {
 		Latest    string `json:"latest,omitempty"`
 		Available bool   `json:"available"`
 		Automatic bool   `json:"automatic"`
+		// Held is why it does not install itself, or "": see update.Options.
+		Held string `json:"held,omitempty"`
 	} `json:"update"`
 	Settings settings.Settings `json:"settings"`
 }
@@ -177,6 +179,8 @@ func macosState(current settings.Settings) labelState {
 	}
 	if report.Problem != "" {
 		state.Detail = report.Problem
+	} else if state.Takes {
+		state.Detail = report.Advice
 	}
 	return state
 }
@@ -295,6 +299,9 @@ func gather() (snapshot, host.Facts, settings.Settings, host.Power, error) {
 		}
 		s.Update.Latest = remembered.Latest
 		s.Update.Available = update.Newer(version, remembered.Latest)
+		if s.Update.Available && s.Update.Automatic {
+			s.Update.Held = remembered.Held
+		}
 	}
 	return s, facts, current, power, nil
 }
@@ -410,9 +417,14 @@ func status(args []string) error {
 		if s.Update.Automatic {
 			how = "installs itself when idle, or now with: hived update"
 		}
-		rows = append(rows,
-			field("Update", screen.Honey(s.Update.Latest+" is available")),
-			field("", screen.Dim(how)))
+		rows = append(rows, field("Update", screen.Honey(s.Update.Latest+" is available")))
+		if s.Update.Held != "" {
+			for _, line := range wrap("it waits for you: "+s.Update.Held, ui.Inner-12) {
+				rows = append(rows, field("", screen.Honey(line)))
+			}
+		} else {
+			rows = append(rows, field("", screen.Dim(how)))
+		}
 	}
 	fmt.Print(indent(screen.Box(strings.ToUpper(thisMachine[:1])+thisMachine[1:], rows...)))
 	fmt.Println()

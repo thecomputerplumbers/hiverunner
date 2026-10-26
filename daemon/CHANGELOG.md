@@ -19,6 +19,38 @@ started, and the coordinator let the job go three minutes later.
 Now each process is stopped by its pid, never the clean's own. The daemon
 also gives up on a clean that will not end, so the slot is freed.
 
+### macOS jobs keep running across updates: run `hived macos setup` once more
+
+`hived macos setup` now puts the hived that `hiveworker` runs, and GitHub's
+runner, in `/Library/Application Support/Hive Runner`. That folder is
+root's, and the `bin` and `runner` folders inside it are the owner's. No job
+can change them, and the daemon keeps them current itself as it starts,
+with no sudo. An update, even one that brings a new runner, no longer turns
+a Mac's macOS jobs off until its owner runs setup again (#130). The sudo
+rule now names `…/Hive Runner/bin/hived`, outside the owner's home folder,
+so `chmod 700 ~` no longer stops macOS jobs (#131).
+
+A Mac set up by an older hived keeps taking macOS jobs as it did.
+`hived macos status`, `hived status` and `hived doctor` ask its owner to run
+`hived macos setup` once more, and to close their home folder only after
+that.
+
+Also:
+
+- When `macos-jobs` is on and the Mac cannot take macOS jobs, the log says
+  so as a warning, with the reason, each time that changes. The hive's
+  Machines page shows `macOS jobs off: needs its owner`, with the reason on
+  hover.
+- A release that a Mac must follow with `hived macos setup` says so in its
+  manifest. A Mac taking macOS jobs as `hiveworker` does not install such a
+  release by itself. It logs why, and `hived status` says the update waits
+  for its owner.
+- When `hiveworker` cannot open the hived the sudo rule names, for example
+  because the home folder is closed, `hived macos status` says that,
+  instead of saying the rule is missing.
+- `hived macos setup` again accepts Xcode's license and finishes its first
+  launch when those are needed. A bug had skipped that step.
+
 ### A released job says why
 
 `job released by the coordinator` now carries the coordinator's reason, for

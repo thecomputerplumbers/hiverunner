@@ -73,6 +73,9 @@ type Hello struct {
 	// MacOS is whether this Mac takes macOS jobs, run on the Mac itself as a
 	// separate user, because its owner opted in and it has Xcode.
 	MacOS bool `json:"macos,omitempty"`
+	// MacOSProblem is why this Mac does not take macOS jobs although its
+	// owner turned them on, for the hive's dashboard.
+	MacOSProblem string `json:"macosProblem,omitempty"`
 	// Holding is the jobs this machine is holding or running for this pool,
 	// if any. A daemon that reconnects mid-job says so, so the pool counts
 	// them again instead of offering cores that are already at work.

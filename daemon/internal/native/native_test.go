@@ -478,3 +478,30 @@ func alive(pid int) bool {
 	fields := strings.Fields(string(raw[bytes.LastIndexByte(raw, ')')+1:]))
 	return len(fields) > 0 && fields[0] != "Z" && fields[0] != "X"
 }
+
+// The runner a job clones may be root's, as setup once unpacked it, or the
+// owner's whose daemon started the child, as sudo says; never the child's
+// own user's, or a job could change what the next job runs.
+func TestRunnerOwners(t *testing.T) {
+	me := os.Getuid()
+	for env, want := range map[string][]uint32{
+		"":                       {0},
+		"not a number":           {0},
+		"0":                      {0},
+		strconv.Itoa(me):         {0},
+		strconv.Itoa(me + 12345): {0, uint32(me + 12345)},
+	} {
+		t.Setenv("SUDO_UID", env)
+		if got := runnerOwners(); !slices.Equal(got, want) {
+			t.Errorf("SUDO_UID=%q: %v, want %v", env, got, want)
+		}
+	}
+}
+
+// Auto-update waits for the owner on a release whose setup is newer than
+// this one's; a manifest that says nothing of setup waits for no one.
+func TestNeedsSetup(t *testing.T) {
+	if NeedsSetup(0) || NeedsSetup(SetupVersion) || !NeedsSetup(SetupVersion+1) {
+		t.Fatal("wrong")
+	}
+}

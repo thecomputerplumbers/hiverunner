@@ -58,12 +58,16 @@ func TestDaemonMessagesMatchFixtures(t *testing.T) {
 	mac := NewHello("0.4.0", Online)
 	mac.Arch = ArchARM64
 	mac.MacOS = true
+	unready := NewHello("0.4.37", Online)
+	unready.Arch = ArchARM64
+	unready.MacOSProblem = "hived cannot run jobs as hiveworker: the sudo rule in /etc/sudoers.d/hiveworker is missing or names another hived; run: hived macos setup"
 	sent := []any{
 		NewHello("0.1.0", Online),
 		NewHello("0.1.0", Busy, "a-1", "a-2"),
 		limited,
 		box,
 		mac,
+		unready,
 		NewPresence(Paused),
 		NewPresence(Draining),
 		NewJobAccepted("a-1"),

@@ -1,12 +1,15 @@
 package native
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -42,11 +45,11 @@ func runnerCommand(ctx context.Context, runner, tmp, jitConfig string) *exec.Cmd
 }
 
 // checkRunner says why dir is not a runner every job may clone, or nil. It
-// must be owner's alone, root on a Mac, and so must every directory from
-// top down to it: whoever can write any of them can change what the next
-// job runs. Nothing in it is setuid, setgid, or other than a directory, a
-// file or a link. Links are not followed.
-func checkRunner(top, dir string, owner uint32) error {
+// must be one of owners' alone, and so must every directory from top down
+// to it: whoever can write any of them can change what the next job runs.
+// Nothing in it is setuid, setgid, or other than a directory, a file or a
+// link. Links are not followed.
+func checkRunner(top, dir string, owners ...uint32) error {
 	top, dir = filepath.Clean(top), filepath.Clean(dir)
 	if rel, err := filepath.Rel(top, dir); err != nil || !filepath.IsLocal(rel) || rel == "." {
 		return fmt.Errorf("%s is not inside %s", dir, top)
@@ -59,7 +62,7 @@ func checkRunner(top, dir string, owner uint32) error {
 		if !info.IsDir() {
 			return fmt.Errorf("%s is not a directory", at)
 		}
-		if err := ownedBy(at, info, owner); err != nil {
+		if err := ownedBy(at, info, owners...); err != nil {
 			return err
 		}
 		if at == top || at == filepath.Dir(at) {
@@ -80,7 +83,7 @@ func checkRunner(top, dir string, owner uint32) error {
 		case !info.Mode().IsDir() && !info.Mode().IsRegular() && info.Mode().Type() != fs.ModeSymlink:
 			return fmt.Errorf("%s is not a file, a directory or a link", path)
 		}
-		return ownedBy(path, info, owner)
+		return ownedBy(path, info, owners...)
 	})
 	if err != nil {
 		return err
@@ -91,20 +94,33 @@ func checkRunner(top, dir string, owner uint32) error {
 	return nil
 }
 
-// ownedBy says why path is not owner's alone. A link's own mode is not
-// asked: nothing writes through it but its target's permissions.
-func ownedBy(path string, info fs.FileInfo, owner uint32) error {
+// ownedBy says why path is not one of owners' alone. A link's own mode is
+// not asked: nothing writes through it but its target's permissions.
+func ownedBy(path string, info fs.FileInfo, owners ...uint32) error {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return fmt.Errorf("%s: no owner", path)
 	}
-	if stat.Uid != owner {
-		return fmt.Errorf("%s belongs to uid %d, not %d", path, stat.Uid, owner)
+	if !slices.Contains(owners, stat.Uid) {
+		return fmt.Errorf("%s belongs to uid %d, not %v", path, stat.Uid, owners)
 	}
 	if info.Mode().Type() != fs.ModeSymlink && info.Mode().Perm()&0o022 != 0 {
 		return fmt.Errorf("%s may be written by others (%v)", path, info.Mode().Perm())
 	}
 	return nil
+}
+
+// runnerOwners is who may own the runner a job clones, and every folder
+// above it: root, and the owner whose daemon started this child, as sudo
+// tells it. Never the child's own user: a job could change what the next
+// one runs.
+func runnerOwners() []uint32 {
+	owners := []uint32{0}
+	uid, err := strconv.ParseUint(os.Getenv("SUDO_UID"), 10, 32)
+	if err == nil && uid != 0 && uid != uint64(os.Getuid()) {
+		owners = append(owners, uint32(uid))
+	}
+	return owners
 }
 
 // process is one the clean found still running.
@@ -147,4 +163,22 @@ func sweep(system processes, within, pause time.Duration) ([]process, error) {
 		}
 		time.Sleep(pause)
 	}
+}
+
+// sameFile reports whether the files at a and b hold the same bytes. One
+// that cannot be read is not the same.
+func sameFile(a, b string) (bool, error) {
+	first, err := os.ReadFile(a)
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Stat(b)
+	if err != nil || info.Size() != int64(len(first)) {
+		return false, err
+	}
+	second, err := os.ReadFile(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(first, second), nil
 }

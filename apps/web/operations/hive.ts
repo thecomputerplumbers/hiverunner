@@ -453,6 +453,7 @@ export async function listMachines(context: OperationContext) {
       memoryBytes: machine.memoryBytes,
       speedScore: machine.speedScore,
       macos: machine.macos,
+      macosProblem: machine.macosProblem,
       daemonVersion: machine.daemonVersion,
       outdated: behind(machine.daemonVersion, released),
       presence: presenceOf(machine, live),

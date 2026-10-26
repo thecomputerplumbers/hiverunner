@@ -286,9 +286,10 @@ everything in one:
 | `~hiveworker/hive.noindex/jobs`  | Each job's clone of the runner, and its `TMPDIR`; gone after |
 | `~hiveworker/hive.noindex/cache` | Caches kept for the next job                                 |
 
-GitHub's runner itself is root's, in
-`/Library/Application Support/Hive Runner/runner`, outside `/Users`, where
-`hived macos setup` installs it and no job can change it.
+GitHub's runner itself, and the hived that `hiveworker` runs, are outside
+`/Users`, in `/Library/Application Support/Hive Runner`: `runner` and `bin`,
+the owner's, in a folder of root's. No job can change them. The daemon keeps
+them current as it starts, with no sudo.
 
 The caches a job keeps get there two ways. `CP_HOME_DIR` (CocoaPods) and
 `npm_config_cache` are set for the runner, so a job's own `env:` still wins.
@@ -548,7 +549,8 @@ run should not share a Mac with a job that holds a signing certificate.
 `hiveworker`, like every user on a Mac, is in the `staff` group. A home
 folder `staff` or everyone can read or enter is open to every macOS job, for
 whatever in it is not closed in turn; `hived doctor` says so. Close it with
-`chmod 700 ~`.
+`chmod 700 ~`. On a Mac set up by an older hived, run `hived macos setup` once
+more first: until then `hiveworker` runs the hived in your home folder.
 
 ## Updating
 

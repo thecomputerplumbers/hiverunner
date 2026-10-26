@@ -73,6 +73,12 @@ export type DaemonMessage =
        */
       macos?: boolean
       /**
+       * Why this Mac takes no macOS jobs although its owner turned them on,
+       * such as setup it needs again, in words for the hive's dashboard.
+       * Absent when it takes them, or its owner has them off.
+       */
+      macosProblem?: string
+      /**
        * The jobs this machine is holding or running for this pool, if any.
        * A daemon that reconnects mid-job says so here, so the pool counts
        * them again instead of offering cores that are already at work.
@@ -233,6 +239,13 @@ export function parseDaemonMessage(raw: string): DaemonMessage | null {
         presence: value.presence,
         ...(value.arch === undefined ? {} : { arch: value.arch as Arch }),
         ...(value.macos ? { macos: true } : {}),
+        // Words for a person, never a reason to refuse the machine: one too
+        // long is cut short.
+        ...(typeof value.macosProblem === "string" &&
+        value.macosProblem &&
+        !value.macos
+          ? { macosProblem: value.macosProblem.slice(0, 500) }
+          : {}),
         ...(value.holding === undefined
           ? {}
           : { holding: value.holding as string[] }),

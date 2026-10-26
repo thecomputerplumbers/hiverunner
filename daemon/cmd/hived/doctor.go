@@ -143,7 +143,7 @@ func doctor(args []string) error {
 	}
 	// Every warning here is a note, so a note is drawn as what it is.
 	home, open := homeOpen(current)
-	if exposed, _ := checkRows(screen, append(host.Exposed(exposure), macOSJobs(current, runtime.GOOS, macOSInVM(current), home, open)...), false); len(exposed) > 0 {
+	if exposed, _ := checkRows(screen, append(host.Exposed(exposure), macOSJobs(current, runtime.GOOS, macOSInVM(current), native.Kept(), home, open)...), false); len(exposed) > 0 {
 		fmt.Print(indent(screen.Box("Security", exposed...)))
 	}
 	switch problems {
@@ -207,9 +207,11 @@ func macOSInVM(current settings.Settings) bool { return current.MacOSInVM() }
 // macOSJobs is the macos jobs check. A macOS job runs as the one native.User
 // with the one home, so what a job leaves there, such as a package it
 // installed, is still there for the next job, whichever hive sends it. In a
-// VM of its own, it leaves nothing for the next. home is the owner's home
-// folder, and open how native.User can see into it, as native.HomeOpen says.
-func macOSJobs(current settings.Settings, system string, inVM bool, home, open string) []host.Check {
+// VM of its own, it leaves nothing for the next. kept is whether native.User
+// runs the hived the daemon keeps outside the owner's home folder, as
+// native.Kept says. home is that folder, and open how native.User can see
+// into it, as native.HomeOpen says.
+func macOSJobs(current settings.Settings, system string, inVM, kept bool, home, open string) []host.Check {
 	switch {
 	case system != "darwin":
 		return nil
@@ -218,9 +220,15 @@ func macOSJobs(current settings.Settings, system string, inVM bool, home, open s
 	case current.MacOSJobs:
 		checks := []host.Check{{Name: "macos jobs", Found: "on: every macOS job runs as " + native.User + ", and finds what the jobs before it left in its home",
 			Note: true, Fix: "serve only hives whose macOS jobs may share a home, or hived config set macos-jobs off"}}
+		closeHome := native.CloseHome
+		if !kept {
+			checks = append(checks, host.Check{Name: "macos setup", Found: native.User + " runs the hived in your home folder, which an update can leave it unable to, and closing the folder would",
+				Note: true, Fix: "hived macos setup"})
+			closeHome = "hived macos setup, then " + native.CloseHome
+		}
 		if open != "" {
 			checks = append(checks, host.Check{Name: "home folder", Found: home + " is " + open + ", so macOS jobs can read what in it is not closed to them",
-				Note: true, Fix: native.CloseHome})
+				Note: true, Fix: closeHome})
 		}
 		return checks
 	}
