@@ -156,7 +156,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
     ) {
       if (state) {
         for (const slot of Object.values(state.slots))
-          await pool.release(slot.assignmentId)
+          await pool.release(
+            slot.assignmentId,
+            "the hive's GitHub App is not installed"
+          )
         if (state.session) await this.close(client, state)
         await this.ctx.storage.delete("state")
       }
@@ -164,7 +167,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
     }
     if (state && state.installationId !== installation.installationId) {
       for (const slot of Object.values(state.slots))
-        await pool.release(slot.assignmentId)
+        await pool.release(
+          slot.assignmentId,
+          "the hive's GitHub App was installed again"
+        )
       if (state.session) await this.close(client, state)
       state = undefined
     }
@@ -249,7 +255,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           status,
           phase: slot.phase,
         })
-        await pool.release(slot.assignmentId)
+        await pool.release(slot.assignmentId, offerEnded(status))
         slot.jitConfig = undefined
         // A lost JIT response can have created the runner, too. Look up the
         // unique persisted name so a retry cannot leave an offline runner.
@@ -271,7 +277,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           slot.phase === "offered" &&
           !state.claims[String(slot.requestId)]
         ) {
-          await pool.release(slot.assignmentId)
+          await pool.release(
+            slot.assignmentId,
+            "the hive cannot take more jobs now"
+          )
           delete state.slots[slot.assignmentId]
           await this.save(state)
           continue
@@ -288,7 +297,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
           )
           if (!acquired.includes(Number(slot.requestId)) && !retry) {
             console.info("Scale acquire lost", { label: settings.label })
-            await pool.release(slot.assignmentId)
+            await pool.release(
+              slot.assignmentId,
+              "GitHub gave the job to another runner"
+            )
             delete state.slots[slot.assignmentId]
             delete state.available[String(slot.requestId)]
             delete state.claims[String(slot.requestId)]
@@ -482,7 +494,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
                 receivedAt: Date.now(),
               })
               if (event.messageType === "JobCompleted") {
-                await pool.release(slot.assignmentId)
+                await pool.release(
+                  slot.assignmentId,
+                  "GitHub says the job is over"
+                )
                 delete state.slots[slot.assignmentId]
               }
               await this.save(state)
@@ -512,7 +527,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
                 receivedAt: Date.now(),
               })
               if (event.messageType === "JobCompleted") {
-                await pool.release(slot.assignmentId)
+                await pool.release(
+                  slot.assignmentId,
+                  "GitHub says the job is over"
+                )
                 delete state.slots[slot.assignmentId]
               }
               await this.save(state)
@@ -528,7 +546,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
                 result: event.result!,
               })
               await this.ctx.storage.delete(`unsettled:${key}`)
-              await pool.release(slot.assignmentId)
+              await pool.release(
+                slot.assignmentId,
+                "GitHub says the job is over"
+              )
               delete state.slots[slot.assignmentId]
               delete state.claims[String(slot.requestId)]
               delete state.available[String(key)]
@@ -581,7 +602,10 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
             await this.releaseIfIdle(client, pool, state, slot, "spare")
             continue
           }
-          await pool.release(slot.assignmentId)
+          await pool.release(
+            slot.assignmentId,
+            "GitHub has no job waiting for it: the run was cancelled, or another runner took it"
+          )
           if (slot.runnerId) await client.removeRunner(slot.runnerId)
           slot.jitConfig = undefined
           delete state.slots[slot.assignmentId]
@@ -657,7 +681,7 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
       why,
       present: Boolean(runner),
     })
-    await pool.release(slot.assignmentId)
+    await pool.release(slot.assignmentId, unstarted(why, Boolean(runner)))
     if (runner) await client.removeRunner(runner.id)
     delete state.slots[slot.assignmentId]
     if (String(slot.requestId).startsWith("demand:"))
@@ -682,6 +706,22 @@ export class ScaleListener extends DurableObject<CoordinatorEnv> {
     state.session = undefined
     state.cursor = 0
   }
+}
+
+/** Why an offer that went no further was backed out of, for the machine's log. */
+function offerEnded(status: string) {
+  if (status === "exited") return "the job had already ended"
+  if (status === "disconnected") return "the machine disconnected"
+  return "the machine did not accept the job in time"
+}
+
+/** Why a runner GitHub started no job on was let go, for the machine's log. */
+function unstarted(why: "spare" | "unstarted", present: boolean) {
+  if (why === "spare")
+    return "GitHub has no job waiting for it: the run was cancelled, or another runner took it"
+  return present
+    ? "GitHub started no job on its runner within three minutes"
+    : "its runner did not connect to GitHub within three minutes"
 }
 
 function githubDate(raw: string | undefined) {

@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -332,30 +333,35 @@ func TestCheckRunner(t *testing.T) {
 	})
 }
 
-// fakeProcesses is a process table: a kill takes every process but those
-// that come back, which come back with a new pid.
+// fakeProcesses is a process table: a kill takes the process killed, unless
+// it comes back, which it does with a new pid.
 type fakeProcesses struct {
 	running  []process
 	respawns map[string]bool
-	signals  []syscall.Signal
+	signals  []sent
 	err      error
 }
 
-func (f *fakeProcesses) SignalAll(sig syscall.Signal) error {
-	f.signals = append(f.signals, sig)
-	if len(f.running) == 0 {
-		return syscall.ESRCH
-	}
+type sent struct {
+	pid int
+	sig syscall.Signal
+}
+
+func (f *fakeProcesses) Signal(pid int, sig syscall.Signal) error {
+	f.signals = append(f.signals, sent{pid, sig})
 	if sig != syscall.SIGKILL {
 		return nil
 	}
-	var back []process
+	var still []process
 	for _, p := range f.running {
-		if f.respawns[p.Name] {
-			back = append(back, process{PID: p.PID + 1000, Name: p.Name})
+		switch {
+		case p.PID != pid:
+			still = append(still, p)
+		case f.respawns[p.Name]:
+			still = append(still, process{PID: p.PID + 1000, Name: p.Name})
 		}
 	}
-	f.running = back
+	f.running = still
 	return nil
 }
 
@@ -368,14 +374,16 @@ func TestSweep(t *testing.T) {
 		if err != nil || len(left) != 0 {
 			t.Fatalf("left %v, err %v", left, err)
 		}
-		if len(system.signals) != 2 || system.signals[0] != syscall.SIGSTOP || system.signals[1] != syscall.SIGKILL {
-			t.Fatalf("signals %v, want a stop then a kill", system.signals)
+		want := []sent{{10, syscall.SIGSTOP}, {11, syscall.SIGSTOP}, {10, syscall.SIGKILL}, {11, syscall.SIGKILL}}
+		if !slices.Equal(system.signals, want) {
+			t.Fatalf("signals %v, want both stopped, then both killed", system.signals)
 		}
 	})
 	t.Run("nothing running", func(t *testing.T) {
-		left, err := sweep(&fakeProcesses{}, time.Second, time.Millisecond)
-		if err != nil || len(left) != 0 {
-			t.Fatalf("left %v, err %v", left, err)
+		system := &fakeProcesses{}
+		left, err := sweep(system, time.Second, time.Millisecond)
+		if err != nil || len(left) != 0 || len(system.signals) != 0 {
+			t.Fatalf("left %v, err %v, signals %v", left, err, system.signals)
 		}
 	})
 	t.Run("something that comes back", func(t *testing.T) {
@@ -444,11 +452,9 @@ func TestSweepStopsWhatEscapedTheProcessGroup(t *testing.T) {
 // nothing it did not start.
 type scoped []int
 
-func (s scoped) SignalAll(sig syscall.Signal) error {
-	for _, pid := range s {
-		if alive(pid) {
-			_ = syscall.Kill(pid, sig)
-		}
+func (s scoped) Signal(pid int, sig syscall.Signal) error {
+	if slices.Contains(s, pid) {
+		_ = syscall.Kill(pid, sig)
 	}
 	return nil
 }
