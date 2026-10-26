@@ -345,7 +345,7 @@ func Serve(ctx context.Context, stdin io.Reader, stdout io.Writer) int {
 // runner hiveworker once unpacked for itself. The crontab goes first and
 // last, so cron does not start one again.
 func clean() int {
-	// As root, kill(-1) is every process on the Mac.
+	// As root, every process on the Mac is root's to kill.
 	if os.Getuid() == 0 {
 		fmt.Fprintln(os.Stderr, "hived macos-job: a clean does not run as root")
 		return 2
@@ -390,7 +390,17 @@ type darwinProcesses struct {
 	self int
 }
 
-func (darwinProcesses) SignalAll(sig syscall.Signal) error { return syscall.Kill(-1, sig) }
+// Signal never takes -1: see sweep. ESRCH is a process gone by then, and
+// EPERM one whose pid another user's process has taken since.
+func (darwinProcesses) Signal(pid int, sig syscall.Signal) error {
+	if pid <= 0 {
+		return fmt.Errorf("not a process: %d", pid)
+	}
+	if err := syscall.Kill(pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
+		return err
+	}
+	return nil
+}
 
 // Left is every process whose real, effective or saved user is this one's,
 // but this one and zombies, which are already dead.

@@ -154,7 +154,12 @@ export class Pool extends DurableObject<CoordinatorEnv> {
         if (reservation?.machineId === state.machineId && !reservation.exited) {
           const { machineId: _, exited: __, ...held } = reservation
           state.jobs[assignmentId] = held
-        } else this.send(socket, { type: "job.release", assignmentId })
+        } else
+          this.send(socket, {
+            type: "job.release",
+            assignmentId,
+            reason: "the coordinator no longer holds it for this machine",
+          })
       }
       // Said again on every connection, so lifting a limit clears it here.
       state.maxVcpus = message.maxVcpus
@@ -288,7 +293,10 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     if (!reservation) return "released" as const
     if (reservation.exited) return "exited" as const
     if (!reservation.started && (reservation.offerExpires ?? 0) < Date.now()) {
-      await this.release(assignmentId)
+      await this.release(
+        assignmentId,
+        "the machine did not accept the job in time"
+      )
       return "released" as const
     }
     if (!this.holder(assignmentId, reservation.machineId))
@@ -319,13 +327,18 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     return true
   }
 
-  async release(assignmentId: string) {
+  /** `reason` is for the machine's log: its owner reads why. */
+  async release(assignmentId: string, reason?: string) {
     await this.ctx.storage.delete(`assignment:${assignmentId}`)
     const socket = this.holder(assignmentId)
     if (!socket) return
     const state = this.attachment(socket)
     const held = state.jobs[assignmentId]!
-    this.send(socket, { type: "job.release", assignmentId })
+    this.send(socket, {
+      type: "job.release",
+      assignmentId,
+      ...(reason ? { reason } : {}),
+    })
     // A started job has a VM to destroy. Its cores are not free until the
     // daemon reports the job exited, which it does for a released job too.
     if (held.started) held.releasing = true

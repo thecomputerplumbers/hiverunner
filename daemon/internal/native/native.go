@@ -364,6 +364,10 @@ func (r *Runner) clean(when string) error {
 	cmd.Stdin = bytes.NewReader(ask)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
+	// Out of time, sudo is killed, and the child it leaves may hold stderr
+	// open: Run must not wait on that, or the job never ends and the Mac
+	// never takes another.
+	cmd.WaitDelay = 10 * time.Second
 	err = cmd.Run()
 	if err == nil {
 		return nil

@@ -30,6 +30,11 @@
     "runnerName": "hw-m-1-a-1"
   },
   { "type": "job.release", "assignmentId": "a-1" },
+  {
+    "type": "job.release",
+    "assignmentId": "a-3",
+    "reason": "its runner did not connect to GitHub within three minutes"
+  },
   { "type": "drain" },
   { "type": "error", "message": "unrecognized message" }
 ]

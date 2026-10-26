@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -116,30 +115,36 @@ type process struct {
 
 // processes is what a clean needs of the system.
 type processes interface {
-	// SignalAll sends sig to every process this one may signal, but itself:
-	// kill(-1, sig). For a user that is not root, that is every process of
-	// that user's.
-	SignalAll(sig syscall.Signal) error
+	// Signal sends sig to one process. A process that is gone by then, or
+	// whose pid another user's process has taken, is no error.
+	Signal(pid int, sig syscall.Signal) error
 	// Left is every process of this user's still alive, but this one.
 	Left() ([]process, error)
 }
 
 // sweep stops every process of this user's but this one, and says what is
-// still running once within has passed, if anything is. Stopping before
-// killing keeps a process that forks from outrunning the kill.
+// still running once within has passed, if anything is. Each is signalled
+// by its pid: kill(-1) on a Mac signals the caller as well, so a sweep that
+// used it stopped itself, and waited stopped for ever. Stopping all of them
+// before killing any keeps a process that forks from outrunning the kill;
+// one forked after the list was read is in the next.
 func sweep(system processes, within, pause time.Duration) ([]process, error) {
 	deadline := time.Now().Add(within)
 	for {
+		left, err := system.Left()
+		if err != nil || len(left) == 0 {
+			return left, err
+		}
+		if time.Now().After(deadline) {
+			return left, nil
+		}
 		for _, sig := range []syscall.Signal{syscall.SIGSTOP, syscall.SIGKILL} {
-			// ESRCH: there was nothing to signal.
-			if err := system.SignalAll(sig); err != nil && !errors.Is(err, syscall.ESRCH) {
-				return nil, err
+			for _, p := range left {
+				if err := system.Signal(p.PID, sig); err != nil {
+					return nil, err
+				}
 			}
 		}
 		time.Sleep(pause)
-		left, err := system.Left()
-		if err != nil || len(left) == 0 || time.Now().After(deadline) {
-			return left, err
-		}
 	}
 }

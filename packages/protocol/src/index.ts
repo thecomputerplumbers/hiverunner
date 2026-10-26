@@ -158,7 +158,12 @@ export type CoordinatorMessage =
       runnerName: string
     }
   /** Free the slot and destroy the VM: the job is not coming, or is over. */
-  | { type: "job.release"; assignmentId: string }
+  | {
+      type: "job.release"
+      assignmentId: string
+      /** Why, in words for the machine's log. Older coordinators leave it out. */
+      reason?: string
+    }
   | { type: "drain" }
   | { type: "error"; message: string }
 

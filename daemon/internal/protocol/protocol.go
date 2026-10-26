@@ -153,6 +153,8 @@ type JobStart struct {
 // JobRelease backs out of an offer: free the slot and destroy the VM.
 type JobRelease struct {
 	AssignmentID string `json:"assignmentId"`
+	// Reason is why, for the log. An older coordinator does not say.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Error is the coordinator rejecting a frame without closing the tunnel.

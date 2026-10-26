@@ -6,6 +6,26 @@ with `auto-update` on take them when idle.
 
 ## Unreleased
 
+### macOS jobs run again as the hiveworker user
+
+From 0.4.31, a Mac that runs `hive-macos` jobs as the `hiveworker` user ran
+none of them (#132). Before each job, the daemon stops every process
+`hiveworker` has. It did that with `kill(-1)`, which on a Mac signals the
+caller too, so it stopped or killed itself. When stopped, it sat in state T
+for good, and the job waited on it. The job's slot stayed taken, so the Mac
+took no other macOS job until hived was restarted. Its runner never
+started, and the coordinator let the job go three minutes later.
+
+Now each process is stopped by its pid, never the clean's own. The daemon
+also gives up on a clean that will not end, so the slot is freed.
+
+### A released job says why
+
+`job released by the coordinator` now carries the coordinator's reason, for
+example `its runner did not connect to GitHub within three minutes`, the
+job is over, or the run was cancelled. A job released before it started
+also says `started=false`.
+
 ### Browser tests find what a headless browser needs already installed
 
 Guest image 14 carries the system libraries, fonts and xvfb that Playwright

@@ -540,7 +540,8 @@ func (m *Manager) Start(ctx context.Context, pool string, start *protocol.JobSta
 // Release backs out of a job this pool placed. An accepted offer is dropped
 // at once. A running job is stopped, and its slot stays taken until its VM
 // is destroyed: cores still tearing one job down are not free for another.
-func (m *Manager) Release(pool, assignmentID string) {
+// The reason, the coordinator's word for why, goes in the log.
+func (m *Manager) Release(pool, assignmentID, reason string) {
 	id := key(pool, assignmentID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -548,7 +549,14 @@ func (m *Manager) Release(pool, assignmentID string) {
 	if held == nil {
 		return
 	}
-	m.log.Info("job released by the coordinator", "assignment", assignmentID)
+	said := []any{"assignment", assignmentID}
+	if reason != "" {
+		said = append(said, "reason", reason)
+	}
+	if held.phase != running {
+		said = append(said, "started", false)
+	}
+	m.log.Info("job released by the coordinator", said...)
 	held.cancel()
 	if held.phase == running {
 		held.released = true

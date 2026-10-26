@@ -99,11 +99,11 @@ func TestOneSlotAcrossPools(t *testing.T) {
 	if err := m.Start(context.Background(), "globex", start("a-1")); !errors.Is(err, ErrNotHeld) {
 		t.Fatalf("foreign start: %v", err)
 	}
-	m.Release("globex", "a-1")
+	m.Release("globex", "a-1", "")
 	if !m.Busy() {
 		t.Fatal("a foreign release freed the slot")
 	}
-	m.Release("acme", "a-1")
+	m.Release("acme", "a-1", "")
 	if m.Busy() {
 		t.Fatal("release did not free the slot")
 	}
@@ -157,7 +157,7 @@ func TestAReleasedJobHoldsTheSlotUntilItsVMIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-runner.started
-	m.Release("acme", "a-1")
+	m.Release("acme", "a-1", "")
 
 	// Teardown is under way. The machine is not free yet, for anyone.
 	if !m.Busy() {
@@ -170,7 +170,7 @@ func TestAReleasedJobHoldsTheSlotUntilItsVMIsGone(t *testing.T) {
 		t.Fatal("a reconnect during teardown would not name the job still on the machine")
 	}
 	// Releasing twice changes nothing.
-	m.Release("acme", "a-1")
+	m.Release("acme", "a-1", "")
 
 	close(runner.teardown)
 	<-runner.tornDown
@@ -241,7 +241,7 @@ func TestWaitReturnsOnlyAfterTeardown(t *testing.T) {
 func TestReleasingAnAcceptedOfferFreesTheSlotAtOnce(t *testing.T) {
 	m := New(newFake(), quiet)
 	m.Offer("acme", offer("a-1"))
-	m.Release("acme", "a-1")
+	m.Release("acme", "a-1", "")
 	if m.Busy() {
 		t.Fatal("the slot was not freed")
 	}
@@ -421,7 +421,7 @@ func TestTwoPoolsMayUseTheSameAssignmentID(t *testing.T) {
 	if reason := m.Offer("globex", offer("same")); reason != "" {
 		t.Fatalf("another pool's job with the same id: %q", reason)
 	}
-	m.Release("acme", "same")
+	m.Release("acme", "same", "")
 	if held := m.Holding("globex"); len(held) != 1 {
 		t.Fatal("releasing one pool's job dropped the other's")
 	}
@@ -624,7 +624,7 @@ func TestMacOSVMsAreHeldToTheLicence(t *testing.T) {
 	if reason := m.Offer("acme", offer("l-1")); reason != "" {
 		t.Fatalf("a Linux job beside two macOS VMs: %q", reason)
 	}
-	m.Release("acme", "m-1")
+	m.Release("acme", "m-1", "")
 	if reason := m.Offer("acme", macOSOffer("m-3")); reason != "" {
 		t.Fatalf("a macOS job once one has gone: %q", reason)
 	}
@@ -643,7 +643,7 @@ func TestAMacOSVMNeedsItsMemory(t *testing.T) {
 	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
 		t.Fatalf("a macOS job on the Mac itself: %q", reason)
 	}
-	m.Release("acme", "m-1")
+	m.Release("acme", "m-1", "")
 	m.Limit(limited(Limits{MaxJobs: 2, MacOS: true, Available: 12*gib + MemoryMargin - 1, GuestMemory: fourGiB, MacOSMemory: 8 * gib}))
 	if reason := m.Offer("acme", macOSOffer("m-1")); reason != "" {
 		t.Fatalf("a macOS VM with room: %q", reason)
@@ -753,7 +753,7 @@ func TestAMacPlansItsMemory(t *testing.T) {
 	if reason := m.Offer("acme", sized("l-2", 2)); reason != ReasonLowMemory {
 		t.Fatalf("another 4 GiB Linux job, past the plan: %q, want low memory", reason)
 	}
-	m.Release("acme", "l-1")
+	m.Release("acme", "l-1", "")
 	reserved := sixteen
 	reserved.Reserve = 4 * gib
 	m.Limit(limited(reserved))
@@ -786,7 +786,7 @@ func TestARunnerSeesItsJobWasReleased(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-runner.started
-	m.Release("acme", "a-1")
+	m.Release("acme", "a-1", "")
 	select {
 	case cause := <-runner.cause:
 		if !errors.Is(cause, ErrReleased) {
@@ -864,5 +864,18 @@ func TestTheReasonsForBeingFullSaySo(t *testing.T) {
 		if strings.Contains(reason, " is running as many ") {
 			t.Errorf("%q reads as the machine being full", reason)
 		}
+	}
+}
+
+// The owner reads why the coordinator backed out of a job, and whether it
+// had started, in the log (#132).
+func TestAReleaseSaysWhy(t *testing.T) {
+	var log strings.Builder
+	m := New(newSlow(), slog.New(slog.NewTextHandler(&log, nil)))
+	m.Offer("acme", offer("a-1"))
+	m.Release("acme", "a-1", "the machine did not accept the job in time")
+	said := log.String()
+	if !strings.Contains(said, `reason="the machine did not accept the job in time"`) || !strings.Contains(said, "started=false") {
+		t.Fatalf("logged %q", said)
 	}
 }

@@ -253,7 +253,7 @@ func session(ctx context.Context, options Options) (bool, error) {
 					}
 				}
 			case *protocol.JobRelease:
-				options.Jobs.Release(options.PoolID, message.AssignmentID)
+				options.Jobs.Release(options.PoolID, message.AssignmentID, message.Reason)
 				// The pool marks a machine busy while it holds a job. Say
 				// what it is now, even if that is what it was before: a job
 				// shorter than a presence tick never announced "busy", and
