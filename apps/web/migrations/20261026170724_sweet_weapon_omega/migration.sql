@@ -1,0 +1,1 @@
+ALTER TABLE `machine` ADD `macos_problem` text;

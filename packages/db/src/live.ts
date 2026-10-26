@@ -72,6 +72,8 @@ export type LiveMachine = {
   speedScore: number
   /** Whether it takes `hive-macos` jobs, run on the Mac itself. */
   macos: boolean
+  /** Why it takes none although its owner turned them on, or null. */
+  macosProblem: string | null
   /** What its daemon said it was running, at its last hello. */
   daemonVersion: string
   presence: string
@@ -300,6 +302,7 @@ export async function getLiveSnapshot(
       memoryBytes: row.memoryBytes,
       speedScore: row.speedScore,
       macos: row.macos,
+      macosProblem: row.macosProblem,
       daemonVersion: row.daemonVersion,
       presence: row.presence,
       lastSeenAt: row.lastSeenAt?.getTime() ?? null,

@@ -14,6 +14,11 @@ func inspect(string) Report {
 	return Report{Platform: "not a Mac", Problem: "macOS jobs run only on an Apple Silicon Mac"}
 }
 
+func keep(context.Context, string, func(string, ...any)) error { return errNotMac }
+
+// Kept is for Macs.
+func Kept() bool { return false }
+
 // Setup is for Macs.
 func Setup(context.Context, SetupOptions) error { return errNotMac }
 

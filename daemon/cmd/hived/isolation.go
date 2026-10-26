@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/jobs"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/macvm"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/native"
 	"github.com/thecomputerplumbers/hiverunner/daemon/internal/settings"
+	"github.com/thecomputerplumbers/hiverunner/daemon/internal/update"
 )
 
 // macosWay is one way of running a hive-macos job.
@@ -96,4 +99,63 @@ func newMacOSRunner(log *slog.Logger, live func() settings.Settings) *macosRunne
 		runner.vm = runner.machines
 	}
 	return runner
+}
+
+// keep has the hiveworker way keep what it runs up to date, with no sudo:
+// see native.Runner.Keep. A download that fails, offline say, is tried
+// again a quarter of an hour later, until it is done or the daemon stops.
+func (m *macosRunner) keep(ctx context.Context, log *slog.Logger) {
+	user, ok := m.user.(*native.Runner)
+	if !ok {
+		return
+	}
+	for {
+		err := user.Keep(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		log.Warn("could not bring what macOS jobs run up to date; trying again in 15 minutes", "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(15 * time.Minute):
+		}
+	}
+}
+
+// notice is what the log last said about whether this Mac takes the macOS
+// jobs its owner turned on, so that each change is said once.
+type notice struct {
+	mu    sync.Mutex
+	said  string
+	heard bool
+}
+
+// say logs reason, why macOS jobs are not taken, if it is not what was said
+// last; "" is that they are.
+func (n *notice) say(log *slog.Logger, reason string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.heard && n.said == reason {
+		return
+	}
+	first := !n.heard
+	n.heard, n.said = true, reason
+	switch {
+	case reason != "":
+		log.Warn("macos-jobs is on, but this Mac cannot take macOS jobs", "reason", reason)
+	case !first:
+		log.Info("this Mac takes macOS jobs again")
+	}
+}
+
+// holdForSetup is why an update to latest waits for the owner: a Mac that
+// takes macOS jobs as native.User now would take none after it until they
+// ran hived macos setup again, which needs their password (#130). "" when
+// it need not wait.
+func holdForSetup(current settings.Settings, takes bool, latest update.Latest) string {
+	if !takes || current.MacOSInVM() || !native.NeedsSetup(latest.MacOSSetup) {
+		return ""
+	}
+	return "hived " + latest.Version + " takes macOS jobs only once hived macos setup has run again; run: hived update, then hived macos setup"
 }

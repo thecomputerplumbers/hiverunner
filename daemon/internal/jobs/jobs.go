@@ -116,6 +116,9 @@ type Limits struct {
 	// MacOS is whether hive-macos jobs are taken: the owner opted in and the
 	// Mac is ready for them.
 	MacOS bool
+	// MacOSProblem is why not, when the owner turned macOS jobs on and the
+	// Mac cannot take them, or "".
+	MacOSProblem string
 	// MostMacOS is how many hive-macos jobs may run at once, within
 	// MaxJobs. Zero sets no limit of its own. A Mac that runs each one in a
 	// macOS VM is held to two: Apple's licence allows a Mac two macOS VMs.

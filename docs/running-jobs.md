@@ -182,13 +182,24 @@ agree before one runs:
 
 - The Mac's owner runs `hived macos setup`. With sudo, it creates the
   `hiveworker` user (hidden, no usable password, in the `_developer` group),
-  writes one rule to `/etc/sudoers.d/hiveworker` that lets the owner run
-  exactly `hived macos-job` as that user, downloads GitHub's macOS runner
-  (`native.RunnerVersion`, pinned with its checksum) and unpacks it as
-  root's in `/Library/Application Support/Hive Runner/runner`, and turns on
-  the `macos-jobs` setting. `hived macos status` says what is in place;
-  `hived macos remove` undoes it all. The daemon says `macos: true` in its
-  hello only while the setting is on and the Mac is ready.
+  makes `/Library/Application Support/Hive Runner` root's with `bin` and
+  `runner` in it the owner's, and writes one rule to
+  `/etc/sudoers.d/hiveworker` that lets the owner run exactly
+  `…/Hive Runner/bin/hived macos-job` as that user. Then, as the owner, it
+  copies hived into `bin`, downloads GitHub's macOS runner
+  (`native.RunnerVersion`, pinned with its checksum), unpacks it in
+  `runner`, and turns on the `macos-jobs` setting. No job can change either
+  folder. The daemon keeps both current itself as it starts (`native.Keep`),
+  with no sudo, so an update, a new runner included, leaves the Mac taking
+  macOS jobs. `hived macos status` says what is in place; `hived macos
+remove` undoes it all. The daemon says `macos: true` in its hello only
+  while the setting is on and the Mac is ready. While the setting is on and
+  the Mac is not ready, it says why as `macosProblem` instead, which the
+  hive's Machines page shows, and logs a warning each time that changes.
+- A release whose setup a Mac set up before must run again says so in
+  `latest.json` as `macosSetup` (`native.SetupVersion`). A Mac that takes
+  macOS jobs as `hiveworker` does not install it by itself: it logs why, and
+  `hived status` says it waits for its owner.
 - An owner of the hive turns on "Allow macOS jobs" in its settings
   (`pool_settings.macos_jobs`). Until then the coordinator advertises no
   capacity for the label, creates no scale set for it, and answers capacity
@@ -197,7 +208,11 @@ agree before one runs:
 `hiveworker` is in the `staff` group, as every user on a Mac is, so the
 owner's files are out of its reach only while the owner's home folder is
 closed to `staff` and to everyone. `hived macos setup`, `hived macos status`
-and `hived doctor` say when it is not; `chmod 700 ~` closes it.
+and `hived doctor` say when it is not; `chmod 700 ~` closes it. Nothing
+`hiveworker` runs is in that folder. On a Mac set up by an older hived, the sudo
+rule still names the hived in `~/.local/bin`, which a closed folder hides
+from `hiveworker`; those three commands say to run `hived macos setup`
+first.
 
 The label's kind is `macos` in `@workspace/pricing`, beside the two
 architectures, and `machineServes` there is the one place that decides which

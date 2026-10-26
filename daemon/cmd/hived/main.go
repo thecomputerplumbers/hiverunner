@@ -392,8 +392,23 @@ func run(ctx context.Context) error {
 			log.Warn("could not clear what a previous run's macOS VMs left behind", "error", err)
 		}
 	}
+	// Why the macOS jobs its owner turned on are not taken, said in the log
+	// once each time it changes: a Mac that stops taking them, as an update
+	// once made one do, does not do it in silence (#130).
+	var macosSaid notice
+	macOSProblem := func() string {
+		if macosJobs == nil || !live.Get().MacOSJobs {
+			return ""
+		}
+		reason := macosJobs.Unusable()
+		macosSaid.say(log, reason)
+		return reason
+	}
 	macOS := func() bool {
-		return macosJobs != nil && live.Get().MacOSJobs && macosJobs.Unusable() == ""
+		return macosJobs != nil && live.Get().MacOSJobs && macOSProblem() == ""
+	}
+	if macosJobs != nil {
+		go macosJobs.keep(ctx, log)
 	}
 	var native jobs.Runner
 	if macosJobs != nil {
@@ -469,7 +484,8 @@ func run(ctx context.Context) error {
 		// A macOS VM's own limits are set by its runner, once it is the
 		// one chosen for an offer: see jobs.Limiter. Its memory is set here
 		// too, so that a Linux offer counts the macOS VMs accepted.
-		limits := jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macOS(), Hold: hold,
+		problem := macOSProblem()
+		limits := jobs.Limits{MaxJobs: maxJobs, MaxVCPUs: current.MaxVCPUs, Cores: runtime.NumCPU(), MacOS: macosJobs != nil && current.MacOSJobs && problem == "", MacOSProblem: problem, Hold: hold,
 			Available: host.AvailableMemory(), Reserve: current.ReserveBytes(hostMemory()), GuestMemory: guestMemory, LeanestGuest: leanestGuest}
 		if current.MacOSInVM() {
 			limits.MacOSMemory = macvm.Memory(hostMemory())
@@ -509,6 +525,7 @@ func run(ctx context.Context) error {
 		Busy:       slot.Busy,
 		Image:      func() string { return installedImage },
 		Updating:   &updating,
+		Hold:       func(latest update.Latest) string { return holdForSetup(live.Get(), macOS(), latest) },
 	})
 
 	// A place that changed, or a disk that came back, is picked up by

@@ -130,6 +130,18 @@ export function MachineGrid({
                       </span>
                     </>
                   )}
+                  {!machine.macos && machine.macosProblem && (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <span
+                        className="text-destructive"
+                        title={machine.macosProblem}
+                      >
+                        macOS jobs off: needs its owner
+                      </span>
+                    </>
+                  )}
                   <br />
                   {machine.owner} ·{" "}
                   {machine.lastSeenAt

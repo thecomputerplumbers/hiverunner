@@ -491,6 +491,7 @@ export async function listMachines(db: AuthDb, organizationId: string) {
       memoryBytes: machine.memoryBytes,
       speedScore: machine.speedScore,
       macos: machine.macos,
+      macosProblem: machine.macosProblem,
       daemonVersion: machine.daemonVersion,
       presence: machinePool.presence,
       lastSeenAt: machinePool.lastSeenAt,

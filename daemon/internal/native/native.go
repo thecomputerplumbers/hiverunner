@@ -11,6 +11,12 @@
 // `hived macos-job` as hiveworker and nothing else. That child reads what to
 // do from stdin, so nothing it is given appears on a command line.
 //
+// The hived the rule names, and GitHub's runner, are kept in Base, outside
+// the owner's home folder, so the owner can close that folder to
+// hiveworker. Setup makes Base root's and the folders in it the owner's.
+// No job can change them, and the daemon keeps them current itself with
+// no sudo (see Keep), so an update leaves a Mac taking macOS jobs.
+//
 // Every job runs as the one user, so one runs at a time, and before and
 // after each the child stops every process hiveworker has: a job's process
 // that left its process group is not left running into the next job.
@@ -18,6 +24,7 @@ package native
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -55,12 +62,23 @@ const (
 	// RunnerFile is the runner's tarball, as GitHub names it.
 	RunnerFile = "actions-runner-osx-arm64-" + RunnerVersion + ".tar.gz"
 	runnerURL  = "https://github.com/actions/runner/releases/download/v" + RunnerVersion + "/" + RunnerFile
-	// Runners is where setup unpacks GitHub's runner, a directory per
-	// version. It is root's, and outside hiveworker's home, so no job can
-	// change what the next job runs: each job runs a clone of it.
-	Runners = "/Library/Application Support/Hive Runner/runner"
+	// Base is the folder setup makes, root's, for what hiveworker runs.
+	Base = "/Library/Application Support/Hive Runner"
+	// Runners is where GitHub's runner is unpacked, a directory per version.
+	// It is the owner's, outside hiveworker's home, so no job can change
+	// what the next job runs: each job runs a clone of it. A Mac set up
+	// before there was ChildDir has it root's, as setup unpacked it.
+	Runners = Base + "/runner"
+	// ChildDir holds the hived the sudo rule names, the owner's: Child.
+	ChildDir = Base + "/bin"
+	Child    = ChildDir + "/hived"
 	// SudoersPath is the one rule setup writes.
 	SudoersPath = "/etc/sudoers.d/hiveworker"
+	// SetupVersion counts the changes to what setup does that a Mac set up
+	// before needs setup again for: 2 put hived in ChildDir. The release
+	// manifest says the release's, and auto-update waits for the owner on
+	// a Mac a newer one would stop taking macOS jobs (see NeedsSetup).
+	SetupVersion = 2
 	// ExitRunnerDeprecated is the runner's exit code when GitHub refuses its
 	// version as too old, the same as in the guest.
 	ExitRunnerDeprecated = 7
@@ -73,8 +91,14 @@ const (
 func RunnerDir() string { return filepath.Join(Runners, RunnerVersion) }
 
 // CloseHome is how the owner closes their home folder to User, who, like
-// every user on a Mac, is in the staff group.
+// every user on a Mac, is in the staff group. Nothing User runs is in it,
+// once setup has put hived in ChildDir.
 const CloseHome = "chmod 700 ~"
+
+// NeedsSetup reports whether a release whose manifest says setup is at
+// version setup would stop this Mac taking macOS jobs until its owner ran
+// hived macos setup again. An older manifest says nothing: zero.
+func NeedsSetup(setup int) bool { return setup > SetupVersion }
 
 // HomeOpen is the owner's home folder and how User can see into it, or ""
 // for how when it cannot, or there is no User yet to ask about. A job can
@@ -183,7 +207,8 @@ type checkReply struct {
 // asked often; readiness is checked at most once a minute.
 type Runner struct {
 	Log *slog.Logger
-	// Executable is hived itself, as the sudo rule names it.
+	// Executable is hived itself: what Keep copies to Child, and what a
+	// sudo rule written before there was Child names instead.
 	Executable string
 	// command starts the child. Nil is `hived macos-job` through sudo.
 	command func(ctx context.Context) *exec.Cmd
@@ -198,6 +223,9 @@ type Runner struct {
 	// held declines jobs until then, after a clean failed.
 	held  time.Time
 	stale atomic.Bool
+	// via is the hived the sudo rule lets hiveworker run, as the last check
+	// found it; "" is Child.
+	via string
 }
 
 var _ jobs.Runner = (*Runner)(nil)
@@ -237,12 +265,26 @@ type Report struct {
 	UserExists bool
 	// Sudo is whether the rule works: the child answered through it.
 	Sudo bool
+	// Child is the hived that answered: Child, or for a rule written before
+	// there was Child, the daemon itself.
+	Child string
 	// Runner is the runner version the child has, or "".
 	Runner string
 	// Problem is the first thing wrong, in words the owner can act on, or
 	// "" when everything is ready.
 	Problem string
+	// Advice is what to do about a Mac that is ready but set up the way an
+	// older hived did it, or "".
+	Advice string
 }
+
+// Kept reports whether hiveworker runs the hived in ChildDir, which the
+// daemon keeps current, rather than one in the owner's home folder.
+func (r Report) Kept() bool { return r.Child == Child }
+
+// adviseSetupAgain is Advice for a Mac whose rule names the daemon in the
+// owner's home folder.
+const adviseSetupAgain = "run hived macos setup once more: it puts what " + User + " runs outside your home folder, so updates keep this Mac taking macOS jobs and the folder can be closed"
 
 // Ready reports whether macOS jobs can run now. It is cheap to call often.
 func (r *Runner) Ready() bool {
@@ -287,8 +329,37 @@ func (r *Runner) status(fresh bool) Report {
 	}
 	defer r.busy.Unlock()
 	r.report = inspect(r.Executable)
+	if r.report.Child != "" {
+		r.via = r.report.Child
+	}
 	r.checked = time.Now()
 	return r.report
+}
+
+// errNotKept is keep on a Mac whose owner was not given Base's folders,
+// by a setup from before there were any.
+var errNotKept = errors.New("setup has not made the folders in " + Base + " yours; run: hived macos setup")
+
+// Keep makes what hiveworker runs this daemon's own, as setup left it to
+// the daemon to do: a copy of hived at Child, and GitHub's runner in
+// Runners. It needs no sudo, so a Mac set up once takes macOS jobs across
+// updates, a runner of a new version included. The daemon calls it as it
+// starts. A Mac set up before there were those folders is left as it is,
+// and Status advises setup again.
+func (r *Runner) Keep(ctx context.Context) error {
+	say := func(format string, args ...any) {
+		if r.Log != nil {
+			r.Log.Info(fmt.Sprintf(format, args...))
+		}
+	}
+	err := keep(ctx, r.Executable, say)
+	r.mu.Lock()
+	r.checked = time.Time{}
+	r.mu.Unlock()
+	if errors.Is(err, errNotKept) {
+		return nil
+	}
+	return err
 }
 
 // Run implements jobs.Runner: the job runs as the hiveworker user, through
@@ -386,7 +457,10 @@ func (r *Runner) child(ctx context.Context) *exec.Cmd {
 	if r.command != nil {
 		return r.command(ctx)
 	}
-	return exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-u", User, r.Executable, "macos-job")
+	r.mu.Lock()
+	via := cmp.Or(r.via, Child)
+	r.mu.Unlock()
+	return exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-u", User, via, "macos-job")
 }
 
 // askChild runs `hived macos-job` as the hiveworker user with one request
@@ -409,8 +483,8 @@ func askChild(exe string, ask request) ([]byte, error) {
 }
 
 // DownloadRunner fetches GitHub's runner for this Mac into dir, checks it
-// against the pinned checksum, and returns its path. Setup unpacks it as
-// root; a macOS VM is handed the same tarball for each job.
+// against the pinned checksum, and returns its path. Keep unpacks it in
+// Runners; a macOS VM is handed the same tarball for each job.
 func DownloadRunner(ctx context.Context, dir string) (string, error) {
 	path := filepath.Join(dir, RunnerFile)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, runnerURL, nil)

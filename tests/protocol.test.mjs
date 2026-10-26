@@ -15,6 +15,33 @@ test("every daemon fixture parses to itself", () => {
     assert.deepEqual(parseDaemonMessage(JSON.stringify(message)), message)
 })
 
+test("a reason for no macOS jobs never refuses the machine", () => {
+  const hello = {
+    type: "hello",
+    protocol: 3,
+    daemonVersion: "0.4.37",
+    presence: "online",
+  }
+  assert.equal(
+    parseDaemonMessage(
+      JSON.stringify({ ...hello, macosProblem: "x".repeat(900) })
+    )?.macosProblem?.length,
+    500
+  )
+  // A Mac that takes them has none to say, and a number is not words.
+  for (const macosProblem of [7, ""])
+    assert.deepEqual(
+      parseDaemonMessage(JSON.stringify({ ...hello, macosProblem })),
+      hello
+    )
+  assert.deepEqual(
+    parseDaemonMessage(
+      JSON.stringify({ ...hello, macos: true, macosProblem: "stale" })
+    ),
+    { ...hello, macos: true }
+  )
+})
+
 test("frames that are not daemon messages are refused", () => {
   for (const raw of [
     "",

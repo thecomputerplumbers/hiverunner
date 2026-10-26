@@ -176,6 +176,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
         .set({
           daemonVersion: message.daemonVersion,
           macos: state.macos,
+          macosProblem: message.macosProblem ?? null,
           ...(message.arch ? { arch: message.arch } : {}),
         })
         .where(eq(machine.id, state.machineId))

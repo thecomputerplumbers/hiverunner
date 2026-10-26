@@ -50,6 +50,10 @@ type Latest struct {
 	Image   struct {
 		Version string `json:"version"`
 	} `json:"image"`
+	// MacOSSetup is the release's native.SetupVersion: a Mac set up for
+	// macOS jobs by an older setup takes none after updating to it until
+	// its owner runs hived macos setup again. Zero from an older manifest.
+	MacOSSetup int `json:"macosSetup,omitempty"`
 }
 
 // State is what is remembered between checks, in update.json beside the
@@ -58,8 +62,12 @@ type State struct {
 	CheckedAt time.Time `json:"checkedAt"`
 	ETag      string    `json:"etag,omitempty"`
 	// Latest is the newest version seen, whether or not it is newer than
-	// this daemon.
-	Latest string `json:"latest,omitempty"`
+	// this daemon, and MacOSSetup what its manifest said of setup.
+	Latest     string `json:"latest,omitempty"`
+	MacOSSetup int    `json:"macosSetup,omitempty"`
+	// Held is why Latest is not installed by itself, or "": it waits for
+	// the owner. See Options.Hold.
+	Held string `json:"held,omitempty"`
 	// Notified is the version the owner was last told about, so they are
 	// told about each one once.
 	Notified string `json:"notified,omitempty"`
@@ -148,6 +156,7 @@ func Check(ctx context.Context, state *State) (latest Latest, changed bool, err 
 	state.CheckedAt = time.Now()
 	if response.StatusCode == http.StatusNotModified {
 		latest.Version = state.Latest
+		latest.MacOSSetup = state.MacOSSetup
 		return latest, false, nil
 	}
 	if response.StatusCode != http.StatusOK {
@@ -162,6 +171,7 @@ func Check(ctx context.Context, state *State) (latest Latest, changed bool, err 
 	}
 	state.ETag = response.Header.Get("ETag")
 	state.Latest = latest.Version
+	state.MacOSSetup = latest.MacOSSetup
 	return latest, true, nil
 }
 
@@ -356,6 +366,11 @@ type Options struct {
 	// Updating is set while an update is pending or under way, so the
 	// daemon stops taking jobs; it is cleared if the update fails.
 	Updating *atomic.Bool
+	// Hold is why this release must wait for the owner rather than be
+	// installed by itself, or "": an update that would quietly stop the
+	// machine taking jobs it takes now is the owner's to make. Nil holds
+	// nothing.
+	Hold func(Latest) string
 	// For tests: how long to wait before the first check, and between them.
 	First, Every time.Duration
 	// For tests: in place of the installer, of asking whether this daemon
@@ -417,8 +432,8 @@ func tick(ctx context.Context, options Options) (retry time.Duration) {
 		have = options.Image()
 	}
 	if !Needed(options.Version, latest, have) {
-		// Current: whatever failed before is over.
-		state.Failed, state.Failures = time.Time{}, 0
+		// Current: whatever failed or waited before is over.
+		state.Failed, state.Failures, state.Held = time.Time{}, 0, ""
 		return 0
 	}
 	if Newer(options.Version, latest.Version) && state.Notified != latest.Version {
@@ -442,6 +457,16 @@ func tick(ctx context.Context, options Options) (retry time.Duration) {
 	}
 	if options.AutoUpdate == nil || !options.AutoUpdate() || !installed() {
 		return
+	}
+	held := ""
+	if options.Hold != nil && Newer(options.Version, latest.Version) {
+		held = options.Hold(latest)
+	}
+	if held != "" && state.Held != held {
+		options.Log.Warn("an update waits for you: "+held, "installed", options.Version, "available", latest.Version)
+	}
+	if state.Held = held; held != "" {
+		return 0
 	}
 	if !state.Failed.IsZero() && time.Since(state.Failed) < state.RetryAfter() {
 		return state.RetryAfter() - time.Since(state.Failed)

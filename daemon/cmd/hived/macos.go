@@ -144,15 +144,21 @@ func macos(ctx context.Context, args []string) error {
 		fmt.Println(field("xcode", orDash(report.Xcode)))
 		fmt.Println(field("user", yesNo(report.UserExists)))
 		fmt.Println(field("sudo rule", yesNo(report.Sudo)))
+		fmt.Println(field("hived", orDash(report.Child)))
 		fmt.Println(field("runner", orDash(report.Runner)))
-		if home, open := native.HomeOpen(); open != "" {
+		if home, open := native.HomeOpen(); open != "" && report.Kept() {
 			fmt.Println(field("home folder", home+" is "+open+"; close it with: "+native.CloseHome))
+		} else if open != "" {
+			fmt.Println(field("home folder", home+" is "+open+"; close it once hived macos setup has run again, with: "+native.CloseHome))
 		} else if report.UserExists {
 			fmt.Println(field("home folder", "closed to "+native.User))
 		}
 		fmt.Println(field("macos-jobs", onOff(current.MacOSJobs)))
 		if report.Problem != "" {
 			return errors.New(report.Problem)
+		}
+		if report.Advice != "" {
+			fmt.Println("Ready, but " + report.Advice + ".")
 		}
 		if !current.MacOSJobs {
 			fmt.Println("Ready, but turned off. Turn on with: hived config set macos-jobs on")

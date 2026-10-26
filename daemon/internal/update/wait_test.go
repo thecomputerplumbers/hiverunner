@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -169,5 +170,54 @@ func TestAFailedUpdateIsTriedAgainSoon(t *testing.T) {
 	tick(context.Background(), failing)
 	if state, _ := LoadState(); state.Failures != 0 || !state.Failed.IsZero() {
 		t.Fatalf("a current daemon still remembers failing: %+v", state)
+	}
+}
+
+// A release the owner must follow with a step of their own is said, and
+// waits for them, instead of quietly stopping the machine taking jobs it
+// takes now (#130). Once the hold is lifted, it goes ahead.
+func TestAnUpdateThatWouldStopJobsWaitsForTheOwner(t *testing.T) {
+	t.Setenv("HIVE_CONFIG", filepath.Join(t.TempDir(), "machine.json"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("ETag", `"one"`)
+		_, _ = w.Write([]byte(`{"version":"9.9.9","commit":"abc","macosSetup":3}`))
+	}))
+	defer server.Close()
+	t.Setenv("HIVE_RELEASES", server.URL)
+	if err := SaveState(State{Notified: "9.9.9"}); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	var updating atomic.Bool
+	var applied atomic.Int32
+	held := "it needs a step of yours"
+	options := Options{
+		Version:    "9.9.8",
+		Log:        slog.New(slog.NewTextHandler(&log, nil)),
+		AutoUpdate: func() bool { return true },
+		Updating:   &updating,
+		installed:  func() bool { return true },
+		apply:      func(context.Context) error { applied.Add(1); return nil },
+		Hold: func(latest Latest) string {
+			if latest.MacOSSetup != 3 {
+				t.Errorf("the hold was asked about setup %d", latest.MacOSSetup)
+			}
+			return held
+		},
+	}
+	for range 2 {
+		tick(context.Background(), options)
+	}
+	state, _ := LoadState()
+	if applied.Load() != 0 || updating.Load() || state.Held != held {
+		t.Fatalf("applied %d, updating %v, held %q", applied.Load(), updating.Load(), state.Held)
+	}
+	if strings.Count(log.String(), "an update waits for you") != 1 {
+		t.Fatalf("logged %q; want the wait said once", log.String())
+	}
+	held = ""
+	tick(context.Background(), options)
+	if state, _ := LoadState(); applied.Load() != 1 || state.Held != "" {
+		t.Fatalf("applied %d once the hold was lifted, held %q", applied.Load(), state.Held)
 	}
 }

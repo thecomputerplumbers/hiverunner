@@ -240,10 +240,15 @@ fi
 
 cp release/install.sh "$out/install.sh"
 cp release/install.ps1 "$out/install.ps1"
+# What a Mac set up for macOS jobs by an older setup needs setup again for.
+# A daemon that takes them waits for its owner on a release with a newer one.
+macos_setup=$(sed -n 's/^[[:space:]]*SetupVersion = \([0-9][0-9]*\)$/\1/p' internal/native/native.go)
+[ -n "$macos_setup" ] || { echo "No SetupVersion in internal/native/native.go" >&2; exit 1; }
 cat > "$out/latest.json" <<JSON
 {
   "version": "$version",
   "commit": "$(git rev-parse HEAD)",
+  "macosSetup": $macos_setup,
   "daemon": {
     "url": "$BASE/hived/$version/hived-darwin-arm64.zip",
     "sha256": "$daemon_sha",

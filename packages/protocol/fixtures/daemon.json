@@ -35,6 +35,14 @@
     "arch": "arm64",
     "macos": true
   },
+  {
+    "type": "hello",
+    "protocol": 3,
+    "daemonVersion": "0.4.37",
+    "presence": "online",
+    "arch": "arm64",
+    "macosProblem": "hived cannot run jobs as hiveworker: the sudo rule in /etc/sudoers.d/hiveworker is missing or names another hived; run: hived macos setup"
+  },
   { "type": "presence", "presence": "paused" },
   { "type": "presence", "presence": "draining" },
   { "type": "job.accepted", "assignmentId": "a-1" },

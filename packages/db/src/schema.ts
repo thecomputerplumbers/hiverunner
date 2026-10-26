@@ -134,6 +134,12 @@ export const machine = sqliteTable(
      */
     macos: integer("macos", { mode: "boolean" }).notNull().default(false),
     /**
+     * Why this Mac takes no macOS jobs although its owner turned them on,
+     * as the daemon says in each hello: setup it needs again, say. Null when
+     * it takes them, or they are off.
+     */
+    macosProblem: text("macos_problem"),
+    /**
      * Its owner said, in a browser, that it joins hives they newly become an
      * owner of. Never written from a machine token or by the daemon.
      */
