@@ -57,6 +57,7 @@ Also:
 example `its runner did not connect to GitHub within three minutes`, the
 job is over, or the run was cancelled. A job released before it started
 also says `started=false`.
+
 ### A build Mac can give jobs every core: `priority standard`
 
 On a Mac, the daemon runs in macOS's background band, and so does every job
