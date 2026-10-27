@@ -147,6 +147,18 @@ func Unattended() []Check {
 			checks = append(checks, Check{Name: "sleep", Found: "suspends when its lid closes", Fix: StayAwake})
 		}
 	}
+	// A machine that sleeps under a job loses it, and logind holds off
+	// sleep for a user service only if polkit is told to.
+	switch allowed, known := awakeAllowed(); {
+	case allowed:
+		checks = append(checks, Check{Name: "kept awake", Found: "hived keeps it from sleeping while it runs a job", OK: true})
+	case known:
+		fix := awakeFix(os.Getenv("USER"))
+		if fix == "" {
+			fix = "allow your user org.freedesktop.login1.inhibit-block-sleep in a polkit rule"
+		}
+		checks = append(checks, Check{Name: "kept awake", Found: "polkit refuses hived a lock against sleep, so it can sleep under a job", Fix: fix})
+	}
 	// hived is a user service: without lingering it starts when its user
 	// logs in, not at boot.
 	user := os.Getenv("USER")

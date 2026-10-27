@@ -54,7 +54,14 @@ it keeps the machine from sleeping when idle (`caffeinate -i -s` on a Mac, a
 once the last job's VM is gone: a machine asleep under a job freezes its VM,
 and GitHub gives the job up as lost. Nothing but `sudo pmset -a disablesleep
 1` keeps a MacBook awake with its lid closed, so closing it under a job still
-loses that job. One machine runs one job at a time across all its pools unless its
+loses that job. On Linux, logind grants the daemon's user service, which has
+no login session, a lock against sleep only if polkit allows it. The polkit
+rule `/etc/polkit-1/rules.d/49-hiverunner-$USER.rules` allows that one action
+(`org.freedesktop.login1.inhibit-block-sleep`) for the owner's user. The
+installer writes it, and so does the daemon when it starts, but only where
+sudo asks for no password. Otherwise each of them prints the command that
+writes it, and `hived doctor` reports it as `kept awake`. The rule needs
+polkit 0.106 or later. One machine runs one job at a time across all its pools unless its
 owner raises `max-jobs`, and always leaves two cores for its owner.
 
 The daemon keeps itself current. Once a day it reads the release manifest
