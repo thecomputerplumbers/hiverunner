@@ -543,6 +543,53 @@ kvm_acl() {
   say "  $(kvm_acl_cmd); systemctl --user restart hiveworker"
 }
 
+# hived is a user service, with no login session, and polkit lets such a
+# process hold off sleep only with an administrator's password. Without this
+# rule a machine set to sleep when idle falls asleep under a job and loses
+# it. The rule lets this user take logind's lock against sleep and nothing
+# else; holding off idle needs none. It is the rule hived itself writes, and
+# the command hived doctor prints (daemon/internal/host/awake_linux.go).
+keep_awake_rule() {
+  printf '%s\n' \
+    "// Hive Runner: lets hived, running as $1, keep this machine from" \
+    "// sleeping while it runs a job, and nothing else." \
+    "polkit.addRule(function(action, subject) {" \
+    "    if (action.id == \"org.freedesktop.login1.inhibit-block-sleep\" && subject.user == \"$1\") {" \
+    "        return polkit.Result.YES;" \
+    "    }" \
+    "});"
+}
+
+keep_awake_cmd() {
+  polkit_rule=/etc/polkit-1/rules.d/49-hiverunner-$1.rules
+  printf "printf '%%s\\\\n'"
+  keep_awake_rule "$1" | while IFS= read -r line; do printf " '%s'" "$line"; done
+  printf ' | sudo tee %s >/dev/null && sudo chmod 0644 %s' "$polkit_rule" "$polkit_rule"
+}
+
+# Asked as the service asks, in a unit of this user's systemd: a terminal's
+# login session is let hold off sleep with no rule. Written with sudo only if
+# sudo asks for no password, since this script never asks for one; printed
+# otherwise. hived checks again whenever it starts.
+keep_awake() {
+  command -v systemd-inhibit >/dev/null 2>&1 && [ -d /etc/polkit-1/rules.d ] || return 0
+  systemd-run --user --quiet --wait --pipe --collect systemd-inhibit --what=sleep --who=hived \
+    --why="checking it may keep this machine awake" --mode=block true </dev/null >/dev/null 2>&1 && return 0
+  user=$(id -un)
+  case "$user" in "" | [!a-z_]* | *[!a-z0-9_-]*) return 0 ;; esac
+  polkit_rule=/etc/polkit-1/rules.d/49-hiverunner-$user.rules
+  if keep_awake_rule "$user" | sudo -n tee "$polkit_rule" >/dev/null 2>&1 && sudo -n chmod 0644 "$polkit_rule" 2>/dev/null; then
+    say ""
+    say "Let hived keep this machine from sleeping while it runs a job: $polkit_rule"
+    return 0
+  fi
+  say ""
+  say "This machine can fall asleep under a job, and lose it: polkit lets hived's"
+  say "service hold off sleep only if you allow it. This allows your user that"
+  say "and nothing else:"
+  say "  $(keep_awake_cmd "$user")"
+}
+
 step "Checking this machine can run VMs"
 missing=""
 command -v "$qemu" >/dev/null 2>&1 || missing="$missing $qemu"
@@ -738,6 +785,7 @@ if [ -z "$enrolled" ]; then
   loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
   kvm_acl
   apparmor
+  keep_awake
   not_enrolled "this machine"
 fi
 # Nothing new, and the daemon is running: it is left alone. Restarting it
@@ -746,6 +794,7 @@ if [ -z "$changed" ] && systemctl --user is-active --quiet "$UNIT"; then
   say "hived $version is already running, and was left as it is."
   kvm_acl
   apparmor
+  keep_awake
   say ""
   say "Done. Nothing needed updating."
   tips "this machine" "~/.profile"
@@ -818,6 +867,7 @@ elif [ -n "$listed" ] && [ -z "$holds" ] && [ ! -e "$late" ]; then
 fi
 kvm_acl
 apparmor
+keep_awake
 
 say ""
 say "Done. This machine now runs jobs for your hive. Logs: journalctl --user -u hiveworker"

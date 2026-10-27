@@ -71,6 +71,32 @@ say which is on, and the doctor suggests `standard` for a Mac that is
 plugged in with `lid on`, or a desktop. A Linux machine runs at standard
 priority either way.
 
+### A machine no longer falls asleep under a job
+
+A Mac set to sleep when idle went to sleep a few minutes into a job, with
+nobody at the keyboard, which is when it is lent. Its VMs froze, GitHub gave
+every job on it up as "The self-hosted runner lost communication with the
+server" about ten minutes later, and the VMs finished their jobs for nobody
+when it woke. Now, from the first job's start until the last job's VM is
+gone, hived holds `caffeinate -i -s` (against idle sleep, and against any
+sleep on AC power), which ends with hived itself. A MacBook whose lid is
+closed still sleeps unless its owner has run `sudo pmset -a disablesleep 1`,
+as `hived doctor` says.
+
+On Linux it holds a `systemd-inhibit` lock against sleep and idle where
+systemd runs, but logind grants a user service, which has no login session,
+a lock against sleep only if polkit allows it. A rule in
+`/etc/polkit-1/rules.d/49-hiverunner-$USER.rules` allows the owner's user
+that and nothing else. The installer writes it if sudo needs no password,
+and otherwise prints the command that writes it. A machine that updates
+itself and never runs the installer again is checked when hived starts:
+hived writes the rule the same way if sudo needs no password, and otherwise
+logs a warning with the command. `hived doctor` shows the same check. The
+rule needs polkit 0.106 or later, which reads rules written in JavaScript;
+Ubuntu 22.04 and Debian 11 ship 0.105, and on those hived still warns. hived
+says it is keeping the machine awake only once logind has granted the lock.
+A refusal is logged once with logind's own reason, not again for every job.
+
 ### Browser tests find what a headless browser needs already installed
 
 Guest image 14 carries the system libraries, fonts and xvfb that Playwright

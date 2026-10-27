@@ -217,6 +217,25 @@ esac`
     for (const name of ["qemu-system-aarch64", "qemu-system-x86_64"])
       script(join(bin, name), "exit 0")
     script(join(bin, "virtiofsd"), 'echo "virtiofsd 1.13.2"')
+    // logind, asked as the service asks, refuses a lock against sleep until
+    // the file "awake-allowed" is there; sudo asks for a password until
+    // "sudo-free" is, and then writes the rule to "polkit-rule" instead.
+    script(join(bin, "systemd-inhibit"), "exit 0")
+    script(
+      join(bin, "systemd-run"),
+      `echo "systemd-run $*" >> "${asked}"
+[ -e "${join(root, "awake-allowed")}" ]`
+    )
+    script(
+      join(bin, "sudo"),
+      `echo "sudo $*" >> "${asked}"
+[ -e "${join(root, "sudo-free")}" ] && [ "$1" = -n ] || exit 1
+case "$2" in
+  tee) cat > "${join(root, "polkit-rule")}" ;;
+  chmod) ;;
+  *) exit 1 ;;
+esac`
+    )
   }
   // Record where curl writes, so a test can see the image was not staged
   // in /tmp. PATH is this directory first, so command -v curl is us.
@@ -568,5 +587,52 @@ test(
       !existsSync(join(dataHome, "staging")),
       "the staging directory was left behind"
     )
+  }
+)
+
+test(
+  "the installer lets hived hold off sleep, using sudo only if it asks for no password",
+  {
+    skip:
+      unusable() ||
+      (mac && "caffeinate needs no rule") ||
+      (!existsSync("/etc/polkit-1/rules.d") && "this machine has no polkit"),
+  },
+  async (t) => {
+    const { root, service, install } = await setUp(t)
+    const sudo = () =>
+      service.lines().filter((line) => line.startsWith("sudo "))
+
+    // sudo would ask for a password: the command is printed instead.
+    const printed = await install()
+    assert.match(
+      printed,
+      /\| sudo tee \/etc\/polkit-1\/rules\.d\/49-hiverunner-[a-z0-9_-]+\.rules >\/dev\/null && sudo chmod 0644 /
+    )
+    assert.ok(sudo().length > 0, "sudo was not tried")
+    for (const line of sudo())
+      assert.ok(
+        line.startsWith("sudo -n "),
+        `sudo may ask for a password: ${line}`
+      )
+
+    // sudo asks for none: the rule is written.
+    writeFileSync(join(root, "sudo-free"), "")
+    const written = await install()
+    assert.match(
+      written,
+      /Let hived keep this machine from sleeping while it runs a job/
+    )
+    assert.match(
+      readFileSync(join(root, "polkit-rule"), "utf8"),
+      /action\.id == "org\.freedesktop\.login1\.inhibit-block-sleep" && subject\.user == "[a-z0-9_-]+"/
+    )
+
+    // Already allowed: nothing is said, and sudo is not asked again.
+    writeFileSync(join(root, "awake-allowed"), "")
+    const asked = sudo().length
+    const quiet = await install()
+    assert.equal(sudo().length, asked, "sudo was asked with the lock allowed")
+    assert.doesNotMatch(quiet, /polkit|sleeping while it runs/)
   }
 )

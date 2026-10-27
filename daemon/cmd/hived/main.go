@@ -514,6 +514,11 @@ func run(ctx context.Context) error {
 	}
 	slot.Native(native)
 	slot.Limit(limits)
+	// Whether logind will let it hold off sleep is found out now, and put
+	// right if it can be, rather than by the first job.
+	awake := host.NewAwake(log)
+	go awake.Prepare()
+	slot.KeepAwake(awake)
 
 	// Once a day, whether a release is out. If the owner allows it, the
 	// daemon updates itself when it has no job, which ends this process.
