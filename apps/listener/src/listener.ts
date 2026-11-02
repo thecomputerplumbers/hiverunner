@@ -69,12 +69,40 @@ export class ScaleListener {
       if (error instanceof LeaseLost) throw error
       // Status only: requests, JIT configs and tokens never reach logs.
       console.error("Scale listener retry", {
+        listener: this.name,
         status: error instanceof ScaleSetError ? error.status : 0,
         stage: this.stage,
         kind: error instanceof Error ? error.name : "unknown",
+        github: error instanceof ScaleSetError ? error.kind : undefined,
       })
+      await this.forgetDeadSession(error)
       await this.storage.setAlarm(Date.now() + 5000)
     }
+  }
+
+  /**
+   * GitHub answers 400 to everything about a session that has ended, and
+   * retrying it can never succeed: the listener stayed deaf, every five
+   * seconds, for as long as it ran. A new session is asked for instead. The
+   * slots and claims stay, so a job in flight is still settled, and any
+   * message read twice is acknowledged twice with no second effect.
+   */
+  private async forgetDeadSession(error: unknown) {
+    if (!(error instanceof ScaleSetError)) return
+    const state = await this.storage.get<State>("state")
+    if (!state) return
+    if (error.status === 404 && this.stage === "session") {
+      // The scale set itself is gone at GitHub. Its id is no use now; the
+      // next tick finds or makes one of the same name.
+      state.scaleSetId = 0
+      await this.save(state)
+      return
+    }
+    if (error.status !== 400 || !state.session) return
+    if (!["capacity", "acquire", "poll"].includes(this.stage)) return
+    state.session = undefined
+    state.cursor = 0
+    await this.save(state)
   }
 
   private async tick() {
@@ -146,16 +174,17 @@ export class ScaleListener {
       }
       return
     }
-    if (!state) {
+    if (!state || !state.scaleSetId) {
       this.stage = "scale-set"
       const set = await client.ensureScaleSet(settings.label)
       state = {
-        installationId: installation.installationId,
-        scaleSetId: set.id,
         cursor: 0,
         available: {},
         slots: {},
         claims: {},
+        ...state,
+        installationId: installation.installationId,
+        scaleSetId: set.id,
       }
       await coordinator.saveScaleSet({
         organizationId: settings.organizationId,
