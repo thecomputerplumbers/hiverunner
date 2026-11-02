@@ -57,6 +57,10 @@ let runnerName,
   pollFailure = false,
   // GitHub's answer for a session that has ended.
   sessionDead = false,
+  // GitHub no longer has the scale set the listener remembers.
+  scaleSetGone = false,
+  goneId = 6,
+  scaleSetLookups = 0,
   sessionsOpened = 0,
   failedPolls = 0,
   successfulPolls = 0,
@@ -101,9 +105,16 @@ const fake = createServer(async (req, res) => {
     return json({ value: [{ id: 1 }] })
   if (url.pathname.endsWith("runnerscalesets")) {
     scaleSetNames.add(url.searchParams.get("name"))
-    return json({ value: [{ id: 6, name: label, runnerGroupId: 1 }] })
+    scaleSetLookups++
+    return json({
+      value: [{ id: scaleSetGone ? 7 : 6, name: label, runnerGroupId: 1 }],
+    })
   }
   if (url.pathname.endsWith("sessions")) {
+    if (scaleSetGone && url.pathname.includes(`/${goneId}/`)) {
+      res.statusCode = 404
+      return json({ typeKey: "RunnerScaleSetNotFoundException" })
+    }
     sessionsOpened++
     sessionDead = false
     return json({
@@ -580,6 +591,20 @@ try {
       false,
       "Replacing a session must not release a machine"
     )
+    // So is a scale set GitHub no longer has, by name, and the job stays too.
+    const looked = scaleSetLookups
+    const reopened = sessionsOpened
+    scaleSetGone = true
+    sessionDead = true
+    await eventually(
+      () => scaleSetLookups > looked && sessionsOpened > reopened,
+      "A missing scale set was found again"
+    )
+    assert.equal(
+      frames.some((frame) => frame.type === "job.release"),
+      false,
+      "Replacing a scale set must not release a machine"
+    )
   }
   const event = {
     runnerRequestId: direct ? 0 : 100,
@@ -669,7 +694,7 @@ try {
   )
   assert.equal(
     (await sql("SELECT scale_set_id FROM runner_scale_set"))[0].scale_set_id,
-    6
+    scaleSetGone ? 7 : 6
   )
   if (scenario === "offer") {
     runnerBusy = false
