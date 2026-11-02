@@ -10,6 +10,7 @@ import {
   readFileSync,
 } from "node:fs"
 import { createHash, randomBytes } from "node:crypto"
+import { createServer as createHttpServer } from "node:http"
 import { createServer } from "node:net"
 import { once } from "node:events"
 import { request as httpRequest } from "node:http"
@@ -20,6 +21,15 @@ import { parse } from "jsonc-parser"
 import { actionsToken, oidcPublicJwk } from "./oidc-fixture.mjs"
 
 const storage = mkdtempSync("/tmp/hiveworker-coordinator.")
+// The listener service, with nothing queued; its own smoke test drives it.
+const fakeListener = createHttpServer((request, response) => {
+  request.resume()
+  response.setHeader("Content-Type", "application/json")
+  response.end(JSON.stringify({ waiting: 0 }))
+})
+fakeListener.listen(0, "127.0.0.1")
+await once(fakeListener, "listening")
+fakeListener.unref()
 const reservation = createServer()
 reservation.listen(0, "127.0.0.1")
 await once(reservation, "listening")
@@ -127,6 +137,8 @@ try {
   local.vars = {
     ...local.vars,
     FIXTURE_OIDC_PUBLIC_KEY: JSON.stringify(oidcPublicJwk),
+    LISTENER_URL: `http://127.0.0.1:${fakeListener.address().port}`,
+    LISTENER_API_TOKEN: "fixture-listener-token",
   }
   writeFileSync(config, JSON.stringify(local))
   worker = spawn(
