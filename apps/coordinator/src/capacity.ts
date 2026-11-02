@@ -5,6 +5,7 @@ import { macosJobsAllowed } from "@workspace/db/settings"
 import { createGitHubApp } from "@workspace/github"
 import { runnerSize } from "@workspace/pricing"
 import { githubTestAPI } from "./config"
+import { listenerWaiting } from "./listener-service"
 import { verifyActionsIdentity } from "./oidc"
 
 /** Read-only pool routing; this does not reserve a machine or dispatch a job. */
@@ -75,9 +76,7 @@ export async function capacityResponse(
     // free while they wait, it took a workflow's jobs behind them: three
     // pushes at once queued nine 4-core jobs behind one free Mac.
     const waiting = free
-      ? await env.LISTENER.getByName(
-          `${identity.organizationId}:${size.label}`
-        ).waiting()
+      ? await listenerWaiting(env, `${identity.organizationId}:${size.label}`)
       : 0
     return respond({ available: free > waiting, label: size.label })
   } catch {

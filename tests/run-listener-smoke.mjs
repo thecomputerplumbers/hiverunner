@@ -190,6 +190,9 @@ async function freePort() {
 }
 const port = await freePort()
 const origin = `http://localhost:${port}`
+const listenerPort = await freePort()
+const listenerOrigin = `http://127.0.0.1:${listenerPort}`
+const listenerToken = "fixture-listener-token"
 function wrangler(args, options = {}) {
   const result = spawnSync(
     "pnpm",
@@ -234,6 +237,7 @@ async function eventually(check, message) {
   throw new Error(message)
 }
 let worker,
+  listener,
   socket,
   passed = false
 try {
@@ -281,6 +285,8 @@ try {
         SWEEP_SECONDS: "1",
         LOCAL_DEVELOPMENT: "1",
         GITHUB_API_URL: api,
+        LISTENER_URL: listenerOrigin,
+        LISTENER_API_TOKEN: listenerToken,
         GITHUB_APP_ID: "1",
         GITHUB_APP_PRIVATE_KEY: rsa.privateKey.export({
           type: "pkcs8",
@@ -321,6 +327,52 @@ try {
       return false
     }
   }, "Worker startup")
+  const built = spawnSync("pnpm", ["--filter", "listener", "build"], {
+    stdio: ["ignore", log, log],
+  })
+  assert.equal(built.status, 0, "Listener build")
+  listener = spawn(process.execPath, ["apps/listener/dist/main.mjs"], {
+    stdio: ["ignore", log, log],
+    env: {
+      ...process.env,
+      LISTENER_STORE: "memory",
+      LISTENER_API_TOKEN: listenerToken,
+      COORDINATOR_URL: origin,
+      GITHUB_API_URL: api,
+      PORT: String(listenerPort),
+    },
+  })
+  await eventually(async () => {
+    if (listener.exitCode !== null) throw new Error("Listener exited")
+    try {
+      return (await fetch(`${listenerOrigin}/health`)).ok
+    } catch {
+      return false
+    }
+  }, "Listener startup")
+  const refused = await fetch(`${origin}/v1/listener/installation`, {
+    method: "POST",
+    body: JSON.stringify({ organizationId: "gh-501" }),
+  })
+  assert.equal(refused.status, 401, "The coordinator's API requires its token")
+  assert.equal(
+    (await fetch(`${listenerOrigin}/v1/waiting?name=x`)).status,
+    401,
+    "The listener requires the token too"
+  )
+  // A listener from before the move hands everything over, once, on its alarm.
+  assert.equal(
+    (await fetch(`${origin}/__test/retired-listener`, { method: "POST" }))
+      .status,
+    204
+  )
+  await eventually(async () => {
+    const read = await fetch(
+      `${listenerOrigin}/__test/read?name=gh-retired:hive&key=state`,
+      { headers: { Authorization: `Bearer ${listenerToken}` } }
+    )
+    return (await read.json()).value?.cursor === 7
+  }, "Retired listener handed over")
   const frames = []
   async function connect(assignmentId) {
     const ws = new WebSocket(`ws://localhost:${port}/v1/tunnel?pool=gh-501`, {
@@ -474,10 +526,14 @@ try {
   if (scenario === "offer") {
     runnerBusy = true
     pollFailure = true
-    const aged = await fetch(`${origin}/__test/age-unstarted`, {
-      method: "POST",
-    })
-    assert.equal(aged.status, 204)
+    const aged = await fetch(
+      `${listenerOrigin}/__test/age-unstarted?name=gh-501:hive`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${listenerToken}` },
+      }
+    )
+    assert.equal(aged.status, 200)
     await eventually(() => failedPolls >= 1, "GitHub poll outage")
     await delay(6500)
     assert.equal(
@@ -603,9 +659,13 @@ try {
     send({ type: "job.accepted", assignmentId: idle.assignmentId })
     await next("job.start", idle.assignmentId)
     assert.equal(
-      (await fetch(`${origin}/__test/age-unstarted`, { method: "POST" }))
-        .status,
-      204
+      (
+        await fetch(`${listenerOrigin}/__test/age-unstarted?name=gh-501:hive`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${listenerToken}` },
+        })
+      ).status,
+      200
     )
     await next("job.release", idle.assignmentId)
     await eventually(
@@ -657,6 +717,7 @@ try {
   passed = true
 } finally {
   socket?.close()
+  listener?.kill("SIGTERM")
   if (worker?.pid) {
     try {
       process.kill(-worker.pid, "SIGTERM")

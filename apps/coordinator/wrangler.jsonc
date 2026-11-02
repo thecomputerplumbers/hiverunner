@@ -40,6 +40,8 @@
   "vars": {
     // How often a pool re-checks its connected machines against D1.
     "SWEEP_SECONDS": "60",
+    // apps/listener, in our cluster behind Cloudflare Tunnel tcp-k8s.
+    "LISTENER_URL": "https://listener.hiverunner.dev",
   },
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "upload_source_maps": true,

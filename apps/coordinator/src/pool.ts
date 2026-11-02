@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
+import { activateListeners, listenerConfigured } from "./listener-service"
 import { and, eq, inArray, ne } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { recordJobExit } from "@workspace/db/jobs"
@@ -433,17 +434,19 @@ export class Pool extends DurableObject<CoordinatorEnv> {
   }
 
   private async wakeListeners(state: Attachment) {
-    if (
-      !this.env.GITHUB_APP_ID ||
-      !this.env.GITHUB_APP_PRIVATE_KEY ||
-      !this.env.RECEIPT_SIGNING_KEY
+    if (!listenerConfigured(this.env)) return
+    const labels = ALL_RUNNER_SIZES.filter((size) => fits(state, size)).map(
+      (size) => size.label
     )
-      return
-    for (const size of ALL_RUNNER_SIZES) {
-      if (!fits(state, size)) continue
-      await this.env.LISTENER.getByName(
-        `${state.organizationId}:${size.label}`
-      ).activate(state.organizationId, size.label)
+    if (!labels.length) return
+    // The next sweep asks again, so an outage here costs a minute, not a
+    // machine that is never listened for.
+    try {
+      await activateListeners(this.env, state.organizationId, labels)
+    } catch (error) {
+      console.error("Listener wake failed", {
+        kind: error instanceof Error ? error.name : "unknown",
+      })
     }
   }
 

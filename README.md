@@ -45,7 +45,8 @@ pnpm cf:typegen      # Regenerate Cloudflare binding and runtime types
 | Path                                | What it holds                                                       |
 | ----------------------------------- | ------------------------------------------------------------------- |
 | `apps/web`                          | Marketing site, dashboard, sign-in, GitHub App endpoints (vinext)   |
-| `apps/coordinator`                  | Machine tunnels, scale-set listeners, dispatch and job metering     |
+| `apps/coordinator`                  | Machine tunnels, dispatch and job metering                          |
+| `apps/listener`                     | Scale-set listeners, as a Node service outside Cloudflare           |
 | `daemon`                            | macOS daemon and isolated Linux VM runner                           |
 | `route`                             | The GitHub Action that sends a job to the hive or falls back (MIT)  |
 | `packages/db`                       | Hive Runner's D1 tables and the operations on them                  |

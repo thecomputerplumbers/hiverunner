@@ -2,7 +2,7 @@
   "name": "coordinator",
   "version": "0.0.1",
   "license": "AGPL-3.0-only",
-  "description": "Holds machine tunnels and scale set sessions. Never in a job's data path.",
+  "description": "Holds machine tunnels. Never in a job's data path.",
   "type": "module",
   "private": true,
   "scripts": {
