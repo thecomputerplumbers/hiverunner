@@ -37,9 +37,12 @@ export type ScaleMessage = {
 
 export class ScaleSetError extends Error {
   readonly status: number
-  constructor(status: number) {
+  /** GitHub's name for the error, the only part of a response kept. */
+  readonly kind?: string
+  constructor(status: number, kind?: string) {
     super(`GitHub Actions service responded ${status}`)
     this.status = status
+    this.kind = kind
     this.name = "ScaleSetError"
   }
 }
@@ -100,8 +103,14 @@ export function createScaleSetClient(config: Config) {
       body: body === undefined ? undefined : JSON.stringify(body),
     })
     if (!response.ok) {
-      await response.body?.cancel()
-      throw new ScaleSetError(response.status)
+      const body = (await response.json().catch(() => null)) as {
+        typeKey?: unknown
+      } | null
+      const kind = body?.typeKey
+      throw new ScaleSetError(
+        response.status,
+        typeof kind === "string" && /^\w{1,80}$/.test(kind) ? kind : undefined
+      )
     }
     if (response.status === 202 || response.status === 204) return null
     return response.json() as Promise<T>

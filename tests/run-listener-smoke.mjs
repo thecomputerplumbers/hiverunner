@@ -55,6 +55,9 @@ const scaleSetNames = new Set()
 let runnerName,
   acquireFailure = false,
   pollFailure = false,
+  // GitHub's answer for a session that has ended.
+  sessionDead = false,
+  sessionsOpened = 0,
   failedPolls = 0,
   successfulPolls = 0,
   runnerPresent = false,
@@ -100,13 +103,16 @@ const fake = createServer(async (req, res) => {
     scaleSetNames.add(url.searchParams.get("name"))
     return json({ value: [{ id: 6, name: label, runnerGroupId: 1 }] })
   }
-  if (url.pathname.endsWith("sessions"))
+  if (url.pathname.endsWith("sessions")) {
+    sessionsOpened++
+    sessionDead = false
     return json({
       sessionId: "session",
       messageQueueUrl: `${api}/queue`,
       messageQueueAccessToken: "session",
       statistics: { totalAssignedJobs: direct ? 1 : 0, totalRunningJobs: 0 },
     })
+  }
   if (url.pathname.endsWith("sessions/session")) {
     res.statusCode = 204
     return res.end()
@@ -142,6 +148,10 @@ const fake = createServer(async (req, res) => {
     return res.end()
   }
   if (url.pathname === "/queue") {
+    if (sessionDead) {
+      res.statusCode = 400
+      return json({ typeKey: "TaskAgentSessionExpiredException" })
+    }
     if (pollFailure) {
       failedPolls++
       res.statusCode = 503
@@ -557,6 +567,18 @@ try {
       frames.some((frame) => frame.type === "job.release"),
       false,
       "A busy runner survives recovery even if its start event has not arrived"
+    )
+    // A session GitHub has ended is replaced, and the machine keeps its job.
+    const opened = sessionsOpened
+    sessionDead = true
+    await eventually(
+      () => sessionsOpened > opened,
+      "A dead session was replaced"
+    )
+    assert.equal(
+      frames.some((frame) => frame.type === "job.release"),
+      false,
+      "Replacing a session must not release a machine"
     )
   }
   const event = {
