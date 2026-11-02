@@ -78,18 +78,6 @@ for (const [kind, open] of Object.entries(stores)) {
     await store.close()
   })
 
-  test(`${kind}: a handover wins over a tick already running`, async () => {
-    const store = await open()
-    const name = unique()
-    await store.activate(name, settings)
-    assert.equal(await due(store, "a", name), true)
-    await store.adopt(name, { settings, state: { cursor: 9 } })
-    await assert.rejects(store.storage(name, "a").delete("state"), LeaseLost)
-    assert.equal(await due(store, "b", name), true)
-    assert.deepEqual(await store.read(name, "state"), { cursor: 9 })
-    await store.close()
-  })
-
   test(`${kind}: shutting down hands a listener straight over`, async () => {
     const store = await open()
     const name = unique()

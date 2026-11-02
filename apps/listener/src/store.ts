@@ -37,8 +37,6 @@ export type ListenerStore = {
   release(pod: string, running: string[]): Promise<void>
   /** Wakes a listener, creating it if need be, without moving a due alarm. */
   activate(name: string, settings: ListenerSettings): Promise<void>
-  /** Takes everything a retired Durable Object held; it wins over any tick. */
-  adopt(name: string, data: Record<string, unknown>): Promise<void>
   read<T>(name: string, key: string): Promise<T | undefined>
   storage(name: string, pod: string): ListenerStorage
   close(): Promise<void>
@@ -130,16 +128,6 @@ export async function postgresStore(url: string): Promise<ListenerStore> {
         stored?.label !== settings.label
       )
         throw identityError()
-    },
-    async adopt(name, data) {
-      await db.query(
-        `INSERT INTO hive_listener (name, data, alarm_at)
-              VALUES ($1, $2::jsonb, now())
-         ON CONFLICT (name) DO UPDATE
-                 SET data = EXCLUDED.data, alarm_at = now(), owner = NULL,
-                     lease_until = NULL, ticking = false`,
-        [name, JSON.stringify(data)]
-      )
     },
     async read<T>(name: string, key: string) {
       const { rows } = await db.query<{ value: T | null }>(
@@ -259,15 +247,6 @@ export function memoryStore(): ListenerStore {
       )
         throw identityError()
       row.alarmAt ??= Date.now() + 1000
-    },
-    async adopt(name, data) {
-      rows.set(name, {
-        data: structuredClone(data),
-        alarmAt: Date.now(),
-        owner: null,
-        leaseUntil: 0,
-        ticking: false,
-      })
     },
     async read<T>(name: string, key: string) {
       return rows.get(name)?.data[key] as T | undefined

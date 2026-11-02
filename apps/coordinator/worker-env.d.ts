@@ -5,12 +5,11 @@ interface __BaseEnv_CoordinatorEnv {
 	DB: D1Database;
 	SWEEP_SECONDS: "60";
 	POOL: DurableObjectNamespace<import("./src/index").Pool>;
-	LISTENER: DurableObjectNamespace<import("./src/index").ScaleListener>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "Pool" | "ScaleListener";
+		durableNamespaces: "Pool";
 	}
 	interface Env extends __BaseEnv_CoordinatorEnv {}
 }

@@ -1,26 +1,11 @@
 // Local integration-test entry only. Never used by deployment configuration.
 // Query D1 through the live binding instead of starting competing SQLite
 // processes.
-import coordinator, {
-  Pool,
-  ScaleListener as Retired,
-} from "../apps/coordinator/src/index.ts"
+import coordinator, { Pool } from "../apps/coordinator/src/index.ts"
 import { capacityResponse } from "../apps/coordinator/src/capacity.ts"
 import { verifyActionsIdentity } from "../apps/coordinator/src/oidc.ts"
 
 export { Pool }
-export class ScaleListener extends Retired {
-  // What a listener held before it moved out: an alarm, and its state.
-  async seedForHandover() {
-    await this.ctx.storage.put("settings", {
-      organizationId: "gh-retired",
-      label: "hive",
-      vcpus: 2,
-    })
-    await this.ctx.storage.put("state", { cursor: 7, slots: {} })
-    await this.ctx.storage.setAlarm(Date.now() + 50)
-  }
-}
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname
@@ -75,11 +60,6 @@ export default {
       if (typeof sql !== "string" || !allowed.test(sql))
         return new Response("Unsupported fixture query", { status: 400 })
       return Response.json((await env.DB.prepare(sql).all()).results)
-    }
-    if (path === "/__test/retired-listener" && request.method === "POST") {
-      const stub = env.LISTENER.getByName("gh-retired:hive")
-      await stub.seedForHandover()
-      return new Response(null, { status: 204 })
     }
     return coordinator.fetch(request, env)
   },

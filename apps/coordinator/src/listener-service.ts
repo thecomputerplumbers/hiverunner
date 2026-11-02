@@ -43,16 +43,3 @@ export async function listenerWaiting(env: CoordinatorEnv, name: string) {
   )
   return ((await response.json()) as { waiting: number }).waiting
 }
-
-export async function adoptListener(
-  env: CoordinatorEnv,
-  name: string,
-  data: Record<string, unknown>
-) {
-  await checked(
-    send(env, "/v1/adopt", {
-      method: "POST",
-      body: JSON.stringify({ name, data }),
-    })
-  )
-}

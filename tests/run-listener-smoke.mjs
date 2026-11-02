@@ -293,14 +293,10 @@ try {
         },
       ],
       durable_objects: {
-        bindings: [
-          { name: "POOL", class_name: "Pool" },
-          { name: "LISTENER", class_name: "ScaleListener" },
-        ],
+        bindings: [{ name: "POOL", class_name: "Pool" }],
       },
       exports: {
         Pool: { type: "durable-object", storage: "sqlite" },
-        ScaleListener: { type: "durable-object", storage: "sqlite" },
       },
       vars: {
         SWEEP_SECONDS: "1",
@@ -381,19 +377,6 @@ try {
     401,
     "The listener requires the token too"
   )
-  // A listener from before the move hands everything over, once, on its alarm.
-  assert.equal(
-    (await fetch(`${origin}/__test/retired-listener`, { method: "POST" }))
-      .status,
-    204
-  )
-  await eventually(async () => {
-    const read = await fetch(
-      `${listenerOrigin}/__test/read?name=gh-retired:hive&key=state`,
-      { headers: { Authorization: `Bearer ${listenerToken}` } }
-    )
-    return (await read.json()).value?.cursor === 7
-  }, "Retired listener handed over")
   const frames = []
   async function connect(assignmentId) {
     const ws = new WebSocket(`ws://localhost:${port}/v1/tunnel?pool=gh-501`, {
