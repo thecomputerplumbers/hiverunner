@@ -28,14 +28,12 @@
     },
   ],
   "durable_objects": {
-    "bindings": [
-      { "name": "POOL", "class_name": "Pool" },
-      { "name": "LISTENER", "class_name": "ScaleListener" },
-    ],
+    "bindings": [{ "name": "POOL", "class_name": "Pool" }],
   },
   "exports": {
     "Pool": { "type": "durable-object", "storage": "sqlite" },
-    "ScaleListener": { "type": "durable-object", "storage": "sqlite" },
+    // Listeners run in apps/listener now. This destroys what the objects held.
+    "ScaleListener": { "type": "durable-object", "state": "deleted" },
   },
   "vars": {
     // How often a pool re-checks its connected machines against D1.

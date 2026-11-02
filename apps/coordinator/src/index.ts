@@ -7,7 +7,6 @@ import { capacityResponse } from "./capacity"
 import { listenerApiResponse } from "./listener-api"
 
 export { Pool } from "./pool"
-export { ScaleListener } from "./listener"
 
 /**
  * The coordinator's front door. It authenticates a machine token for the

@@ -147,26 +147,9 @@ const server = createServer(async (request, response) => {
       const name = url.searchParams.get("name") ?? ""
       return respond(200, { waiting: waiting(await store.read(name, "state")) })
     }
-    if (request.method === "POST" && url.pathname === "/v1/adopt") {
-      const { name, data } = (await body(request)) as {
-        name: string
-        data: Record<string, unknown>
-      }
-      await store.adopt(name, data)
-      return respond(200, {})
-    }
     if (local && url.pathname === "/__test/age-unstarted") {
       ageing.add(url.searchParams.get("name") ?? "")
       return respond(200, {})
-    }
-    if (local && url.pathname === "/__test/read") {
-      return respond(200, {
-        value:
-          (await store.read(
-            url.searchParams.get("name") ?? "",
-            url.searchParams.get("key") ?? ""
-          )) ?? null,
-      })
     }
     respond(404, { error: "Not found" })
   } catch (error) {
