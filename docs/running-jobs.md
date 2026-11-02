@@ -15,14 +15,34 @@ time, not GitHub's runner startup time.
 
 The installed GitHub App needs organization self-hosted runners write access.
 The web Worker owns installation, membership and machine enrollment. The
-coordinator uses the same D1 database and has two SQLite Durable Object classes:
-`Pool` and `ScaleListener`. Apply web migrations before deploying either Worker.
+coordinator uses the same D1 database and holds a `Pool` Durable Object per
+organization. Scale set listeners run apart from it, in `apps/listener`: a long
+poll keeps a Durable Object awake and billed for all the time it waits, and
+costs a process nothing. Apply web migrations before deploying either Worker.
 
 Set these **coordinator** secrets, separately from the web Worker's secrets:
 
 - `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`: the existing App identity.
 - `RECEIPT_SIGNING_KEY`: base64 PKCS#8 Ed25519 private key, generated once and
   kept in your secret manager. Preserve old public keys when rotating it.
+- `LISTENER_API_TOKEN`: shared with the listener service, which authenticates
+  each to the other. `LISTENER_URL`, in `wrangler.jsonc`, says where it is.
+
+The listener service needs `LISTENER_API_TOKEN`, `COORDINATOR_URL` and a Postgres
+`DATABASE_URL`; it creates its one table. It holds neither the GitHub App's key
+nor the signing key: the coordinator issues it installation tokens and records
+and signs jobs for it. Run as many replicas as you like. Each listener is held
+by one at a time on a lease, and every write is fenced on that lease, so another
+replica takes over from the last save within 90 seconds of one dying, at once
+when it shuts down cleanly. While none is running, new jobs wait at GitHub, jobs
+already running carry on, and `/v1/capacity` answers 503, so a workflow routed
+with `route/` falls back. Ours runs from the `cluster` repository
+(`services/hive-listener`), built with:
+
+```sh
+pnpm --filter listener build
+docker buildx build --platform linux/amd64 -f apps/listener/Dockerfile .
+```
 
 Never configure `GITHUB_API_URL` in production; it exists only for local fake
 services and requires `LOCAL_DEVELOPMENT=1` with a loopback HTTP origin. Invalid
@@ -30,8 +50,7 @@ overrides fail before the coordinator sends credentials. The coordinator creates
 supported label when eligible machines connect. It listens while machines are
 available, so a queued job does not depend on webhook timing. The web Worker
 continues to change D1 only; pool sweeps notice revocation and uninstall.
-Listeners poll continuously while eligible machines are online. This incurs
-Durable Object runtime cost; webhook-driven idle wakeup is a later optimization.
+Listeners poll continuously while eligible machines are online.
 
 ## Machine setup
 

@@ -75,6 +75,8 @@ A machine belongs to a person and may serve several organizations; `machine_pool
 
 Frames from a daemon are untrusted input. They go through `parseDaemonMessage` and nothing else. A change to `packages/protocol` must keep `fixtures/*.json` decodable by both the TypeScript and Go tests.
 
+Scale set listeners are `apps/listener`, a Node service in our own cluster, because a long poll in a Durable Object is billed for all the time it waits. It reaches D1, the pools and installation tokens only through `/v1/listener/*`; the private keys and signing stay in the coordinator. Listener state is in Postgres on a fenced lease, so run any number of replicas. The `ScaleListener` Durable Object that remains only hands its old state over, and can be deleted once none has an alarm.
+
 The web app does not call the coordinator. It changes rows in D1 (revoking a machine, an uninstall) and each pool notices on its sweep.
 
 A label names a kind of machine: `arm64`, `x64`, or `macos`. The first two are

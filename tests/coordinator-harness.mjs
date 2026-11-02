@@ -1,35 +1,24 @@
 // Local integration-test entry only. Never used by deployment configuration.
 // Query D1 through the live binding instead of starting competing SQLite
-// processes, and age a pending slot without sleeping for three minutes.
+// processes.
 import coordinator, {
   Pool,
-  ScaleListener as Listener,
+  ScaleListener as Retired,
 } from "../apps/coordinator/src/index.ts"
 import { capacityResponse } from "../apps/coordinator/src/capacity.ts"
 import { verifyActionsIdentity } from "../apps/coordinator/src/oidc.ts"
 
 export { Pool }
-export class ScaleListener extends Listener {
-  async ageUnstartedOnNextAlarm() {
-    await this.ctx.storage.put("test:age-unstarted", true)
+export class ScaleListener extends Retired {
+  // What a listener held before it moved out: an alarm, and its state.
+  async seedForHandover() {
+    await this.ctx.storage.put("settings", {
+      organizationId: "gh-retired",
+      label: "hive",
+      vcpus: 2,
+    })
+    await this.ctx.storage.put("state", { cursor: 7, slots: {} })
     await this.ctx.storage.setAlarm(Date.now() + 50)
-  }
-  async alarm() {
-    if (await this.ctx.storage.get("test:age-unstarted")) {
-      const state = await this.ctx.storage.get("state")
-      let aged = false
-      for (const slot of Object.values(state?.slots ?? {})) {
-        if (slot.phase === "running" && !slot.githubStarted) {
-          slot.createdAt = Date.now() - 180001
-          aged = true
-        }
-      }
-      if (aged) {
-        await this.ctx.storage.put("state", state)
-        await this.ctx.storage.delete("test:age-unstarted")
-      }
-    }
-    return super.alarm()
   }
 }
 export default {
@@ -87,8 +76,9 @@ export default {
         return new Response("Unsupported fixture query", { status: 400 })
       return Response.json((await env.DB.prepare(sql).all()).results)
     }
-    if (path === "/__test/age-unstarted" && request.method === "POST") {
-      await env.LISTENER.getByName("gh-501:hive").ageUnstartedOnNextAlarm()
+    if (path === "/__test/retired-listener" && request.method === "POST") {
+      const stub = env.LISTENER.getByName("gh-retired:hive")
+      await stub.seedForHandover()
       return new Response(null, { status: 204 })
     }
     return coordinator.fetch(request, env)

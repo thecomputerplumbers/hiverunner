@@ -4,6 +4,7 @@ import { createReceiptSigner } from "@workspace/db/receipts"
 import { PROTOCOL_VERSION } from "@workspace/protocol"
 import { githubTestAPI } from "./config"
 import { capacityResponse } from "./capacity"
+import { listenerApiResponse } from "./listener-api"
 
 export { Pool } from "./pool"
 export { ScaleListener } from "./listener"
@@ -57,6 +58,12 @@ export default {
       )
     }
     if (url.pathname === "/v1/capacity") return capacityResponse(request, env)
+    if (url.pathname.startsWith("/v1/listener/"))
+      return listenerApiResponse(
+        request,
+        env,
+        url.pathname.slice("/v1/listener/".length)
+      )
     if (url.pathname !== "/v1/tunnel")
       return new Response("Not found", { status: 404 })
     if (request.headers.get("upgrade") !== "websocket")
