@@ -31,7 +31,7 @@
     "@workspace/ui-data": "workspace:*",
     "@workspace/ui-forms": "workspace:*",
     "@workspace/ui-shell": "workspace:*",
-    "better-auth": "^1.7.6",
+    "better-auth": "^1.7.16",
     "drizzle-orm": "1.0.0-rc.5-5935859",
     "lucide-react": "catalog:",
     "next": "16.3.5",
