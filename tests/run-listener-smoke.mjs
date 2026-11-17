@@ -299,7 +299,6 @@ try {
         Pool: { type: "durable-object", storage: "sqlite" },
       },
       vars: {
-        SWEEP_SECONDS: "1",
         LOCAL_DEVELOPMENT: "1",
         GITHUB_API_URL: api,
         LISTENER_URL: listenerOrigin,

@@ -6,6 +6,8 @@ import { githubTestAPI } from "./config"
 import { capacityResponse } from "./capacity"
 import { listenerApiResponse } from "./listener-api"
 
+import { dispatchPoolChanges } from "./pool-changes"
+
 export { Pool } from "./pool"
 
 /**
@@ -18,6 +20,9 @@ export { Pool } from "./pool"
  * should not disconnect every machine.
  */
 export default {
+  async scheduled(_controller: ScheduledController, env: CoordinatorEnv) {
+    await dispatchPoolChanges(env)
+  },
   async fetch(request: Request, env: CoordinatorEnv) {
     try {
       githubTestAPI(env)

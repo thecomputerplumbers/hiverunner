@@ -160,8 +160,7 @@ try {
   const coordinator = start("coordinator", [
     "--port",
     String(coordinatorPort),
-    "--var",
-    "SWEEP_SECONDS:1",
+    "--test-scheduled",
     "--local-upstream",
     `localhost:${coordinatorPort}`,
   ])
@@ -323,6 +322,14 @@ try {
     machineId: machine.id,
     organizationId: "gh-502",
   })
+  assert.equal(
+    (
+      await fetch(
+        `http://localhost:${coordinatorPort}/__scheduled?cron=*+*+*+*+*`
+      )
+    ).status,
+    200
+  )
   await eventually(
     () => /no longer serving a hive/.test(run.output),
     () => `the daemon did not notice\n${run.output}`
@@ -454,6 +461,14 @@ try {
     "the machine did not reconnect"
   )
   await browser("/api/machines/revoke", { machineId: machine.id })
+  assert.equal(
+    (
+      await fetch(
+        `http://localhost:${coordinatorPort}/__scheduled?cron=*+*+*+*+*`
+      )
+    ).status,
+    200
+  )
   const [retiredCode] = await once(run, "exit")
   assert.equal(retiredCode, 1, run.output)
   assert.match(run.output, /no longer enrolled/)

@@ -49,7 +49,14 @@ services and requires `LOCAL_DEVELOPMENT=1` with a loopback HTTP origin. Invalid
 overrides fail before the coordinator sends credentials. The coordinator creates/reuses a scale set per organization and
 supported label when eligible machines connect. It listens while machines are
 available, so a queued job does not depend on webhook timing. The web Worker
-continues to change D1 only; pool sweeps notice revocation and uninstall.
+continues to change D1 only. Database triggers queue revocation, uninstall, and
+pool eligibility changes atomically with the write. One coordinator cron checks
+that queue each minute and wakes only affected pools. A delivered revision is
+removed only if no newer change replaced it; failed deliveries stay queued.
+Healthy pools have no recurring alarm. Listener activation happens on machine
+connection/capacity changes, with one-minute retry alarms on failure and a
+five-second request timeout. Apply web migrations before the coordinator deploy
+(the release script already does this).
 Listeners poll continuously while eligible machines are online.
 
 ## Machine setup

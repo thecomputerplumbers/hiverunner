@@ -77,7 +77,7 @@ Frames from a daemon are untrusted input. They go through `parseDaemonMessage` a
 
 Scale set listeners are `apps/listener`, a Node service in our own cluster, because a long poll in a Durable Object is billed for all the time it waits. It reaches D1, the pools and installation tokens only through `/v1/listener/*`; the private keys and signing stay in the coordinator. Listener state is in Postgres on a fenced lease, so run any number of replicas.
 
-The web app does not call the coordinator. It changes rows in D1 (revoking a machine, an uninstall) and each pool notices on its sweep.
+The web app does not call the coordinator. D1 triggers atomically queue access changes (revoking a machine, an uninstall) in `pool_change`. One coordinator cron dispatches those changes every minute to affected pools, acknowledging only the delivered revision. Idle pools have no recurring alarm; alarms retry failed listener activations. Apply web D1 migrations before deploying the coordinator.
 
 A label names a kind of machine: `arm64`, `x64`, or `macos`. The first two are
 Linux VMs on a machine of that architecture; `macos` is a job run on an Apple
