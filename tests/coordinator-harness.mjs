@@ -1,11 +1,22 @@
 // Local integration-test entry only. Never used by deployment configuration.
 // Query D1 through the live binding instead of starting competing SQLite
 // processes.
-import coordinator, { Pool } from "../apps/coordinator/src/index.ts"
+import coordinator, {
+  Pool as CoordinatorPool,
+} from "../apps/coordinator/src/index.ts"
+import { dispatchPoolChanges } from "../apps/coordinator/src/pool-changes.ts"
 import { capacityResponse } from "../apps/coordinator/src/capacity.ts"
 import { verifyActionsIdentity } from "../apps/coordinator/src/oidc.ts"
 
-export { Pool }
+export class Pool extends CoordinatorPool {
+  retryAt() {
+    return this.ctx.storage.getAlarm()
+  }
+  async retryNow() {
+    await this.ctx.storage.deleteAlarm()
+    await this.alarm()
+  }
+}
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname
@@ -28,6 +39,18 @@ export default {
         (token, audience) =>
           verifyActionsIdentity(token, audience, async () => key)
       )
+    }
+    if (path === "/__test/dispatch" && request.method === "POST") {
+      await dispatchPoolChanges(env)
+      return new Response(null, { status: 204 })
+    }
+    if (path === "/__test/retry" && request.method === "POST") {
+      await env.POOL.getByName("gh-501").retryNow()
+      return new Response(null, { status: 204 })
+    }
+    if (path === "/__test/alarm") {
+      const pool = env.POOL.getByName("gh-501")
+      return Response.json(await pool.retryAt())
     }
     if (path === "/__test/offer" && request.method === "POST") {
       const {

@@ -92,6 +92,12 @@ export class Pool extends DurableObject<CoordinatorEnv> {
 
   /** The Worker has already authenticated the machine token. */
   async fetch(request: Request) {
+    // Serialize admission with reconciliation: a request authenticated by the
+    // front door before a revocation must not connect after it was delivered.
+    return this.ctx.blockConcurrencyWhile(() => this.openTunnel(request))
+  }
+
+  private async openTunnel(request: Request) {
     const machineId = request.headers.get("x-hive-machine")
     const organizationId = request.headers.get("x-hive-pool")
     const cores = Number(request.headers.get("x-hive-cores"))
@@ -102,6 +108,26 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       request.headers.get("upgrade") !== "websocket"
     )
       return new Response("Expected a tunnel", { status: 400 })
+
+    const [authorized] = await this.db
+      .select({ id: machine.id })
+      .from(machinePool)
+      .innerJoin(machine, eq(machine.id, machinePool.machineId))
+      .innerJoin(
+        githubInstallation,
+        eq(githubInstallation.organizationId, machinePool.organizationId)
+      )
+      .where(
+        and(
+          eq(machinePool.machineId, machineId),
+          eq(machinePool.organizationId, organizationId),
+          eq(machinePool.status, "active"),
+          eq(machine.status, "active"),
+          eq(githubInstallation.status, "active")
+        )
+      )
+      .limit(1)
+    if (!authorized) return new Response("Unauthorized", { status: 401 })
 
     // One connection per machine. A daemon that reconnects after a network
     // change wins over the half-dead socket it left behind.
@@ -127,7 +153,6 @@ export class Pool extends DurableObject<CoordinatorEnv> {
       machineId,
       protocol: PROTOCOL_VERSION,
     })
-    await this.scheduleSweep()
     return new Response(null, { status: 101, webSocket: client })
   }
 
@@ -433,31 +458,48 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     return free
   }
 
-  private async wakeListeners(state: Attachment) {
+  private async wakeListeners(states: Attachment[]) {
     if (!listenerConfigured(this.env)) return
-    const labels = ALL_RUNNER_SIZES.filter((size) => fits(state, size)).map(
-      (size) => size.label
+    const online = states.filter(
+      (state) => state.greeted && state.presence === "online"
     )
+    const labels = ALL_RUNNER_SIZES.filter((size) =>
+      online.some((state) => fits(state, size))
+    ).map((size) => size.label)
     if (!labels.length) return
-    // The next sweep asks again, so an outage here costs a minute, not a
-    // machine that is never listened for.
+    // One activation per pool, with the union of labels. Only failures need
+    // an alarm; healthy, idle tunnels do not wake on a timer.
     try {
-      await activateListeners(this.env, state.organizationId, labels)
+      await activateListeners(this.env, online[0]!.organizationId, labels)
     } catch (error) {
+      await this.scheduleListenerRetry()
       console.error("Listener wake failed", {
         kind: error instanceof Error ? error.name : "unknown",
       })
     }
   }
 
-  /**
-   * Revocation is a row changing in D1, written by the web app. Rather than
-   * have every writer remember to tell the pool, the pool asks: while anyone
-   * is connected, it re-checks them against D1 on a timer.
-   */
+  /** A failed listener activation (or a final alarm from the old sweeper). */
   async alarm() {
+    try {
+      await this.reconcile()
+    } catch (error) {
+      await this.scheduleListenerRetry()
+      throw error
+    }
+  }
+
+  /** Called only when D1 records an access change for this pool. */
+  async reconcile() {
+    const states = await this.ctx.blockConcurrencyWhile(() =>
+      this.reconcileAccess()
+    )
+    await this.wakeListeners(states)
+  }
+
+  private async reconcileAccess() {
     const sockets = this.ctx.getWebSockets()
-    if (!sockets.length) return
+    if (!sockets.length) return []
     const organizationId = this.attachment(sockets[0]!).organizationId
     const ids = sockets.map((socket) => this.attachment(socket).machineId)
     const active = new Set<string>()
@@ -489,27 +531,18 @@ export class Pool extends DurableObject<CoordinatorEnv> {
         )
           active.add(row.id)
     }
-    const now = new Date()
-    const seen: string[] = []
     for (const socket of sockets) {
       const state = this.attachment(socket)
-      if (active.has(state.machineId)) {
-        seen.push(state.machineId)
-        if (state.presence === "online") await this.wakeListeners(state)
-      } else
+      if (!active.has(state.machineId))
         socket.close(CLOSE.REVOKED, "This machine no longer serves this pool")
     }
-    for (let i = 0; i < seen.length; i += 50)
-      await this.db
-        .update(machinePool)
-        .set({ lastSeenAt: now })
-        .where(
-          and(
-            eq(machinePool.organizationId, organizationId),
-            inArray(machinePool.machineId, seen.slice(i, i + 50))
-          )
-        )
-    await this.scheduleSweep()
+    return sockets
+      .filter(
+        (socket) =>
+          socket.readyState === WebSocket.OPEN &&
+          active.has(this.attachment(socket).machineId)
+      )
+      .map((socket) => this.attachment(socket))
   }
 
   /**
@@ -535,7 +568,7 @@ export class Pool extends DurableObject<CoordinatorEnv> {
         lastSeenAt: new Date(),
       })
       .where(this.row(state))
-    if (presence === "online") await this.wakeListeners(state)
+    if (presence === "online") await this.wakeListeners([state])
   }
 
   private reserve(assignmentId: string, state: Attachment, held: Held) {
@@ -576,10 +609,9 @@ export class Pool extends DurableObject<CoordinatorEnv> {
     )
   }
 
-  private async scheduleSweep() {
+  private async scheduleListenerRetry() {
     if ((await this.ctx.storage.getAlarm()) !== null) return
-    const seconds = Math.max(Number(this.env.SWEEP_SECONDS) || 60, 1)
-    await this.ctx.storage.setAlarm(Date.now() + seconds * 1000)
+    await this.ctx.storage.setAlarm(Date.now() + 60000)
   }
 
   private attachment(socket: WebSocket) {

@@ -35,9 +35,9 @@
     // Listeners run in apps/listener now. This destroys what the objects held.
     "ScaleListener": { "type": "durable-object", "state": "deleted" },
   },
+  // Only changed pools are woken; no per-pool recurring sweep.
+  "triggers": { "crons": ["* * * * *"] },
   "vars": {
-    // How often a pool re-checks its connected machines against D1.
-    "SWEEP_SECONDS": "60",
     // apps/listener, in our cluster behind Cloudflare Tunnel tcp-k8s.
     "LISTENER_URL": "https://listener.hiverunner.dev",
   },

@@ -22,7 +22,11 @@ import { actionsToken, oidcPublicJwk } from "./oidc-fixture.mjs"
 
 const storage = mkdtempSync("/tmp/hiveworker-coordinator.")
 // The listener service, with nothing queued; its own smoke test drives it.
+let listenerUnavailable = false
+let activations = 0
 const fakeListener = createHttpServer((request, response) => {
+  if (request.url === "/v1/activate") activations++
+  response.statusCode = listenerUnavailable ? 503 : 200
   request.resume()
   response.setHeader("Content-Type", "application/json")
   response.end(JSON.stringify({ waiting: 0 }))
@@ -43,6 +47,13 @@ function wrangler(app, args, options = {}) {
     stdio: ["ignore", log, log],
     ...options,
   })
+}
+/** Deliver queued access changes without waiting for the minute cron. */
+async function dispatch() {
+  assert.equal(
+    (await fetch(`${origin}/__test/dispatch`, { method: "POST" })).status,
+    204
+  )
 }
 /** Runs SQL against the same local D1 the Worker is using. */
 async function sql(command) {
@@ -153,8 +164,6 @@ try {
       config,
       "--port",
       String(port),
-      "--var",
-      "SWEEP_SECONDS:1",
       "--local-upstream",
       `localhost:${port}`,
       "--persist-to",
@@ -393,7 +402,7 @@ try {
   assert.equal(
     await available(),
     false,
-    "retired machine is refused before the sweep"
+    "retired machine is refused before notification delivery"
   )
   await sql("update machine set status='active' where id='a'")
   assert.equal(
@@ -408,7 +417,34 @@ try {
   assert.equal(await available(), false, "paused machine is unavailable")
   a.send("ping")
   assert.equal(await a.next(), "pong")
-  console.log("Tunnel authentication, hello and presence passed.")
+  await dispatch()
+  assert.equal(
+    await (await fetch(`${origin}/__test/alarm`)).json(),
+    null,
+    "healthy idle pool has no recurring alarm"
+  )
+  listenerUnavailable = true
+  a.send({ type: "presence", presence: "online" })
+  await eventually(
+    async () => (await (await fetch(`${origin}/__test/alarm`)).json()) !== null,
+    "listener outage creates a durable retry"
+  )
+  listenerUnavailable = false
+  const retried = await fetch(`${origin}/__test/retry`, { method: "POST" })
+  assert.equal(retried.status, 204)
+  assert.equal(
+    await (await fetch(`${origin}/__test/alarm`)).json(),
+    null,
+    "successful retry goes back to sleep"
+  )
+  a.send({ type: "presence", presence: "paused" })
+  await eventually(
+    async () => (await presence("a")) === "paused",
+    "restore paused fixture state"
+  )
+  console.log(
+    "Tunnel authentication, presence, idle sleep and activation retry passed."
+  )
 
   // A reconnect replaces the old socket without flapping to offline.
   const a2 = await connect(tokens.a)
@@ -432,7 +468,7 @@ try {
   b.send({ ...hello(), protocol: 1 })
   assert.equal(await b.closedWith(), 4002)
 
-  // Revocation is a row in D1; the pool notices on its own.
+  // Revocation is committed with a notification; dispatch closes only affected tunnels.
   const b2 = await connect(tokens.b)
   await b2.next()
   b2.send(hello())
@@ -440,7 +476,19 @@ try {
     async () => (await presence("b")) === "online",
     "b is online"
   )
+  const beforeRetry = activations
+  assert.equal(
+    (await fetch(`${origin}/__test/retry`, { method: "POST" })).status,
+    204
+  )
+  assert.equal(
+    activations - beforeRetry,
+    1,
+    "two online machines share one listener activation"
+  )
+  assert.equal(await (await fetch(`${origin}/__test/alarm`)).json(), null)
   await sql("update machine_pool set status='revoked' where machine_id='b'")
+  await dispatch()
   assert.equal(await b2.closedWith(), 4001)
   await eventually(
     async () => (await presence("b")) === "offline",
@@ -468,6 +516,7 @@ try {
   await sql(
     "update machine_pool set status='revoked' where machine_id='a' and organization_id='gh-502'"
   )
+  await dispatch()
   assert.equal(await g.closedWith(), 4001)
   await delay(1500)
   assert.equal(await presence("a"), "online")
@@ -553,6 +602,7 @@ try {
     403,
     "removed installation is immediately refused"
   )
+  await dispatch()
   assert.equal(await a2.closedWith(), 4001)
   await eventually(
     async () => (await presence("a")) === "offline",

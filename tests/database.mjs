@@ -25,5 +25,5 @@ export function database(t) {
       run: async () => sqlite.prepare(query).run(...args),
     }
   }
-  return { db: createAuthDb({ prepare }), sqlite }
+  return { db: createAuthDb({ prepare }), sqlite, binding: { prepare } }
 }

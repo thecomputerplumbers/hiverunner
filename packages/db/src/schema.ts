@@ -437,3 +437,10 @@ export const billingNotice = sqliteTable(
   },
   (table) => [index("billing_notice_org_idx").on(table.organizationId)]
 )
+
+/** Coalesced access changes, written by D1 triggers and acknowledged after delivery. */
+export const poolChange = sqliteTable("pool_change", {
+  // No foreign key: deleting an organization must still close its tunnels.
+  organizationId: text("organization_id").primaryKey(),
+  revision: text("revision").notNull(),
+})

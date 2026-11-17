@@ -8,6 +8,7 @@ function send(env: CoordinatorEnv, path: string, init?: RequestInit) {
     throw new Error("Listener service is not configured")
   return fetch(new URL(path, env.LISTENER_URL), {
     ...init,
+    signal: AbortSignal.timeout(5000),
     headers: {
       Authorization: `Bearer ${env.LISTENER_API_TOKEN}`,
       "Content-Type": "application/json",
@@ -17,7 +18,10 @@ function send(env: CoordinatorEnv, path: string, init?: RequestInit) {
 
 async function checked(response: Promise<Response>) {
   const result = await response
-  if (!result.ok) throw new Error(`Listener responded ${result.status}`)
+  if (!result.ok) {
+    await result.body?.cancel()
+    throw new Error(`Listener responded ${result.status}`)
+  }
   return result
 }
 
@@ -29,12 +33,13 @@ export async function activateListeners(
   organizationId: string,
   labels: string[]
 ) {
-  await checked(
+  const response = await checked(
     send(env, "/v1/activate", {
       method: "POST",
       body: JSON.stringify({ organizationId, labels }),
     })
   )
+  await response.body?.cancel()
 }
 
 export async function listenerWaiting(env: CoordinatorEnv, name: string) {
